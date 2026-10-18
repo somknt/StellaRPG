@@ -1,0 +1,254 @@
+// ゲームメインクラス
+
+class Game {
+    constructor(canvas) {
+        this.canvas = canvas;
+        this.ctx = canvas.getContext('2d');
+        this.running = false;
+        this.paused = false;
+        
+        // システム
+        this.input = new InputManager();
+        this.ui = new UIManager();
+        
+        // ゲームオブジェクト
+        this.player = null;
+        this.map = null;
+        this.camera = null;
+        this.magicSystem = new MagicSystem();
+        this.enemySpawner = new EnemySpawner();
+        
+        // FPS計測
+        this.fps = 60;
+        this.frameCount = 0;
+        this.fpsTimer = 0;
+        
+        // タイム
+        this.lastTime = performance.now();
+        this.deltaTime = 0;
+    }
+    
+    async init() {
+        console.log('ゲーム初期化中...');
+        
+        // データ読み込み
+        await this.loadGameData();
+        
+        // マップ生成
+        this.map = new Map(100, 100, 32);
+        
+        // プレイヤー生成
+        this.player = new Player(640, 360);
+        this.player.unlockStarPower(3); // テスト用：段階3解放
+        
+        // カメラ
+        this.camera = new Camera(0, 0, this.canvas.width, this.canvas.height);
+        this.camera.follow(this.player);
+        
+        console.log('初期化完了！');
+        this.running = true;
+    }
+    
+    async loadGameData() {
+        try {
+            // プレイヤーステータステーブル
+            const statsResponse = await fetch('data/player_stats_table.json');
+            const statsData = await statsResponse.json();
+            window.gameData = window.gameData || {};
+            window.gameData.playerStatsTable = statsData.levels;
+            
+            this.ui.updateLoadingProgress(0.33, 'プレイヤーデータ読み込み中...');
+            
+            // 魔法陣データ
+            const magicResponse = await fetch('data/magic_circles.json');
+            const magicData = await magicResponse.json();
+            window.gameData.magicCircles = magicData.magicCircles;
+            
+            this.ui.updateLoadingProgress(0.66, '魔法陣データ読み込み中...');
+            
+            // 敵データ
+            const enemyResponse = await fetch('data/enemies.json');
+            const enemyData = await enemyResponse.json();
+            window.gameData.enemies = enemyData.enemies.filter(e => e.spawnEnabled);
+            
+            this.ui.updateLoadingProgress(1.0, '読み込み完了！');
+            
+            console.log('データ読み込み完了');
+        } catch (error) {
+            console.error('データ読み込みエラー:', error);
+            // ダミーデータで続行
+            window.gameData = {
+                playerStatsTable: [{level: 1, hp: 100, attack: 15, defense: 5, maxSP: 50, requiredExp: 10}],
+                magicCircles: [{
+                    id: 'magic_001',
+                    name: '光弾陣',
+                    category: '攻撃',
+                    power: 20,
+                    spCost: 8,
+                    cooldown: 1.0,
+                    element: '光',
+                    requiredStage: 3
+                }],
+                enemies: [{
+                    id: 'enemy_001',
+                    name: '角ウサギ',
+                    hp: 30,
+                    attack: 8,
+                    defense: 2,
+                    speed: 80,
+                    dropExp: 5,
+                    detectionRange: 200,
+                    attackRange: 40,
+                    attackCooldown: 1.5
+                }]
+            };
+        }
+    }
+    
+    update(deltaTime) {
+        if (this.paused) return;
+        
+        // 入力更新
+        this.input.update();
+        
+        // プレイヤー更新
+        this.player.update(deltaTime, this.input);
+        
+        // 魔法発動
+        if (this.input.isMagicPressed()) {
+            const magicResult = this.player.castMagic('magic_001');
+            if (magicResult) {
+                this.magicSystem.castMagic(magicResult.magic, magicResult.position, magicResult.direction);
+            }
+        }
+        
+        // プレイヤー攻撃
+        if (this.input.isAttackPressed()) {
+            const attackData = this.player.performAttack();
+            if (attackData) {
+                const hits = this.enemySpawner.checkPlayerAttack(attackData);
+                for (const hit of hits) {
+                    if (!hit.enemy.isAlive()) {
+                        const drops = hit.enemy.getDrops();
+                        this.player.gainExp(drops.exp);
+                    }
+                }
+            }
+        }
+        
+        // 魔法システム更新
+        this.magicSystem.update(deltaTime);
+        
+        // 魔法と敵の衝突
+        const magicHits = this.magicSystem.checkCollisions(this.enemySpawner.enemies);
+        for (const hit of magicHits) {
+            // 星力段階4なら威力1.2倍
+            const damage = this.player.starPowerStage >= 4 
+                ? Math.floor(hit.damage * 1.2) 
+                : hit.damage;
+            
+            hit.enemy.takeDamage(damage);
+            if (!hit.enemy.isAlive()) {
+                const drops = hit.enemy.getDrops();
+                this.player.gainExp(drops.exp);
+            }
+        }
+        
+        // 敵更新
+        this.enemySpawner.update(deltaTime, this.player, window.gameData.enemies);
+        
+        // 敵の攻撃
+        this.enemySpawner.checkEnemyAttacks(this.player);
+        
+        // カメラ更新
+        this.camera.update(deltaTime);
+        
+        // UI更新
+        this.ui.updatePlayerStats(this.player);
+        this.ui.updateDebugInfo(this.fps, this.player, this.enemySpawner.enemies.length);
+        
+        // ゲームオーバー
+        if (this.player.isDead()) {
+            this.gameOver();
+        }
+    }
+    
+    draw() {
+        // 画面クリア
+        this.ctx.fillStyle = '#000000';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // マップ描画
+        this.map.draw(this.ctx, this.camera.position);
+        
+        // 敵描画
+        this.enemySpawner.draw(this.ctx, this.camera.position);
+        
+        // プレイヤー描画
+        this.player.draw(this.ctx, this.camera.position);
+        
+        // 魔法エフェクト描画
+        this.magicSystem.draw(this.ctx, this.camera.position);
+    }
+    
+    gameLoop(currentTime) {
+        if (!this.running) return;
+        
+        // デルタタイム計算
+        this.deltaTime = (currentTime - this.lastTime) / 1000;
+        this.lastTime = currentTime;
+        
+        // FPS計測
+        this.frameCount++;
+        this.fpsTimer += this.deltaTime;
+        if (this.fpsTimer >= 1.0) {
+            this.fps = this.frameCount;
+            this.frameCount = 0;
+            this.fpsTimer = 0;
+        }
+        
+        // 更新
+        this.update(Math.min(this.deltaTime, 0.1)); // 最大0.1秒に制限
+        
+        // 描画
+        this.draw();
+        
+        // 次のフレーム
+        requestAnimationFrame((time) => this.gameLoop(time));
+    }
+    
+    start() {
+        console.log('ゲーム開始！');
+        this.running = true;
+        this.lastTime = performance.now();
+        this.gameLoop(this.lastTime);
+    }
+    
+    stop() {
+        this.running = false;
+    }
+    
+    pause() {
+        this.paused = !this.paused;
+    }
+    
+    gameOver() {
+        console.log('ゲームオーバー');
+        this.paused = true;
+        this.ui.showMessage('ゲームオーバー');
+        
+        // 3秒後にリスタート
+        setTimeout(() => {
+            this.restart();
+        }, 3000);
+    }
+    
+    restart() {
+        console.log('リスタート');
+        this.player = new Player(640, 360);
+        this.player.unlockStarPower(3);
+        this.enemySpawner.clear();
+        this.magicSystem.clear();
+        this.paused = false;
+    }
+}

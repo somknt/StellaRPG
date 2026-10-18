@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>星の子 (Hoshi no Ko) - 2D RPG</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="gameCanvas" width="1280" height="720"></canvas>
+        
+        <!-- UI Overlay -->
+        <div id="ui-overlay">
+            <!-- HP Bar -->
+            <div class="stat-bar" id="hp-bar-container">
+                <div class="stat-label">HP</div>
+                <div class="stat-bar-bg">
+                    <div class="stat-bar-fill hp-fill" id="hp-bar"></div>
+                </div>
+                <div class="stat-text" id="hp-text">100/100</div>
+            </div>
+            
+            <!-- SP Bar -->
+            <div class="stat-bar" id="sp-bar-container">
+                <div class="stat-label">SP</div>
+                <div class="stat-bar-bg">
+                    <div class="stat-bar-fill sp-fill" id="sp-bar"></div>
+                </div>
+                <div class="stat-text" id="sp-text">50/50</div>
+            </div>
+            
+            <!-- Level & XP -->
+            <div class="stat-info" id="level-info">
+                <span>Lv.<span id="player-level">1</span></span>
+                <span class="xp-text">XP: <span id="player-xp">0</span>/<span id="player-xp-next">100</span></span>
+            </div>
+            
+            <!-- Debug Info -->
+            <div id="debug-info">
+                <div>FPS: <span id="fps">60</span></div>
+                <div>座標: (<span id="player-x">0</span>, <span id="player-y">0</span>)</div>
+                <div>敵数: <span id="enemy-count">0</span></div>
+            </div>
+            
+            <!-- Controls Help -->
+            <div id="controls-help">
+                <h3>操作方法</h3>
+                <p><strong>WASD</strong>: 移動</p>
+                <p><strong>Shift</strong>: ダッシュ</p>
+                <p><strong>Space</strong>: 攻撃</p>
+                <p><strong>Q</strong>: 魔法（光弾陣）</p>
+                <p><strong>E</strong>: 相互作用</p>
+                <p><strong>F1</strong>: ヘルプ表示/非表示</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Loading Screen -->
+    <div id="loading-screen">
+        <div class="loading-content">
+            <h1>星の子 (Hoshi no Ko)</h1>
+            <div class="loading-bar">
+                <div class="loading-bar-fill" id="loading-bar-fill"></div>
+            </div>
+            <p id="loading-text">読み込み中...</p>
+        </div>
+    </div>
+    
+    <!-- Scripts -->
+    <script src="js/utils.js"></script>
+    <script src="js/input.js"></script>
+    <script src="js/player.js"></script>
+    <script src="js/enemy.js"></script>
+    <script src="js/magic.js"></script>
+    <script src="js/map.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
