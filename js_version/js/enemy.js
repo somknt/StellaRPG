@@ -31,6 +31,8 @@ class Enemy {
         this.animationFrame = 0;
         this.animationTimer = 0;
         this.animationSpeed = 0.2;
+        this.direction = 'down'; // down, up, left, right
+        this.isJumping = false;
         
         // ドロップ
         this.dropExp = enemyData.dropExp;
@@ -45,6 +47,9 @@ class Enemy {
         // AI更新
         this.updateAI(deltaTime);
         
+        // 向きを更新
+        this.updateDirection();
+        
         // 移動
         this.position = this.position.add(this.velocity.mult(deltaTime));
         
@@ -58,8 +63,31 @@ class Enemy {
             this.animationTimer += deltaTime;
             if (this.animationTimer >= this.animationSpeed) {
                 this.animationTimer = 0;
-                this.animationFrame = (this.animationFrame + 1) % 2;
+                this.animationFrame = (this.animationFrame + 1) % 3; // 3コマアニメーション
             }
+        } else {
+            this.animationFrame = 0; // 停止時は最初のフレーム
+        }
+        
+        // ジャンプ判定（攻撃時）
+        this.isJumping = (this.state === 'attack' && this.attackTimer > this.attackCooldown * 0.7);
+    }
+    
+    updateDirection() {
+        if (this.velocity.length() < 0.1) return;
+        
+        const angle = Math.atan2(this.velocity.y, this.velocity.x);
+        const degree = angle * 180 / Math.PI;
+        
+        // 角度から向きを決定
+        if (degree >= -45 && degree < 45) {
+            this.direction = 'right';
+        } else if (degree >= 45 && degree < 135) {
+            this.direction = 'down';
+        } else if (degree >= -135 && degree < -45) {
+            this.direction = 'up';
+        } else {
+            this.direction = 'left';
         }
     }
     
@@ -157,22 +185,36 @@ class Enemy {
         
         ctx.save();
         
-        // 敵の種類ごとに色を変える
-        ctx.fillStyle = this.getEnemyColor();
+        // 敵の画像を取得
+        const enemyImage = this.getEnemyImage();
         
-        // 簡易描画（後で画像に差し替え）
-        if (this.data.name === '角ウサギ') {
-            // ウサギ
-            ctx.fillRect(screenPos.x - this.size/2, screenPos.y - this.size/2, this.size, this.size * 0.7);
-            // 耳
-            ctx.fillRect(screenPos.x - this.size/3, screenPos.y - this.size, this.size/6, this.size/2);
-            ctx.fillRect(screenPos.x + this.size/6, screenPos.y - this.size, this.size/6, this.size/2);
-        } else if (this.data.name === '草原狼') {
-            // 狼
-            ctx.fillRect(screenPos.x - this.size/2, screenPos.y - this.size/2, this.size, this.size * 0.6);
+        if (enemyImage) {
+            // 画像がある場合は画像を描画
+            const imageSize = this.size * 1.5; // 画像は少し大きめに
+            ctx.drawImage(
+                enemyImage,
+                Math.floor(screenPos.x - imageSize/2),
+                Math.floor(screenPos.y - imageSize/2),
+                imageSize,
+                imageSize
+            );
         } else {
-            // デフォルト
-            ctx.fillRect(screenPos.x - this.size/2, screenPos.y - this.size/2, this.size, this.size);
+            // 画像がない場合は仮の描画（フォールバック）
+            ctx.fillStyle = this.getEnemyColor();
+            
+            if (this.data.name === '角ウサギ') {
+                // ウサギ
+                ctx.fillRect(screenPos.x - this.size/2, screenPos.y - this.size/2, this.size, this.size * 0.7);
+                // 耳
+                ctx.fillRect(screenPos.x - this.size/3, screenPos.y - this.size, this.size/6, this.size/2);
+                ctx.fillRect(screenPos.x + this.size/6, screenPos.y - this.size, this.size/6, this.size/2);
+            } else if (this.data.name === '草原狼') {
+                // 狼
+                ctx.fillRect(screenPos.x - this.size/2, screenPos.y - this.size/2, this.size, this.size * 0.6);
+            } else {
+                // デフォルト
+                ctx.fillRect(screenPos.x - this.size/2, screenPos.y - this.size/2, this.size, this.size);
+            }
         }
         
         // HPバー
@@ -187,6 +229,27 @@ class Enemy {
         ctx.fillRect(screenPos.x - barWidth/2, screenPos.y - this.size/2 - 10, barWidth * hpPercent, barHeight);
         
         ctx.restore();
+    }
+    
+    getEnemyImage() {
+        if (!window.assetManager) return null;
+        
+        // 敵の種類に応じた画像キーを取得
+        if (this.data.name === '角ウサギ') {
+            // ジャンプ中はジャンプ画像
+            if (this.isJumping) {
+                return window.assetManager.get(`horn_rabbit_${this.direction}_jump`);
+            }
+            // 移動アニメーション（1〜3フレーム）
+            const frame = this.animationFrame + 1;
+            return window.assetManager.get(`horn_rabbit_${this.direction}_${frame}`);
+        } else if (this.data.name === '星光スライム') {
+            return window.assetManager.get('starlight_slime');
+        } else if (this.data.name === '草原狼') {
+            return window.assetManager.get('wolf_1');
+        }
+        
+        return null;
     }
     
     getEnemyColor() {

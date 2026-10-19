@@ -40,7 +40,25 @@ class AssetManager {
             'player_female_right_2': 'assets/characters/female/right_2.png',
             'player_female_right_3': 'assets/characters/female/right_3.png',
             
-            // 敵 - 個別ファイル
+            // 敵 - 角ウサギ（向き別、各3コマ+ジャンプ）
+            'horn_rabbit_down_1': 'assets/enemies/down_1.png',
+            'horn_rabbit_down_2': 'assets/enemies/down_2.png',
+            'horn_rabbit_down_3': 'assets/enemies/down_3.png',
+            'horn_rabbit_down_jump': 'assets/enemies/down_jump.png',
+            'horn_rabbit_up_1': 'assets/enemies/up_1.png',
+            'horn_rabbit_up_2': 'assets/enemies/up_2.png',
+            'horn_rabbit_up_3': 'assets/enemies/up_3.png',
+            'horn_rabbit_up_jump': 'assets/enemies/up_jump.png',
+            'horn_rabbit_left_1': 'assets/enemies/left_1.png',
+            'horn_rabbit_left_2': 'assets/enemies/left_2.png',
+            'horn_rabbit_left_3': 'assets/enemies/left_3.png',
+            'horn_rabbit_left_jump': 'assets/enemies/left_jump.png',
+            'horn_rabbit_right_1': 'assets/enemies/right_1.png',
+            'horn_rabbit_right_2': 'assets/enemies/right_2.png',
+            'horn_rabbit_right_3': 'assets/enemies/right_3.png',
+            'horn_rabbit_right_jump': 'assets/enemies/right_jump.png',
+            
+            // 敵 - その他
             'horn_rabbit_1': 'assets/enemies/horn_rabbit_1.png',
             'horn_rabbit_2': 'assets/enemies/horn_rabbit_2.png',
             'wolf_1': 'assets/enemies/wolf_1.png',
