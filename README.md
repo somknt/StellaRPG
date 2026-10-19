@@ -1,95 +1,107 @@
-# 星の子 (Hoshi no Ko)
+# 星の子 (Hoshi no Ko) - 2D RPG
 
-2D RPG - JavaScript/HTML5版
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/somknt/StellaRPG)
 
-## 🚀 ゲームを起動
+## 概要
 
+「星の子」は、JavaScriptで実装された2D RPGゲームです。プレイヤーは星の力を持つ子供として、敵と戦いながら世界を冒険します。
+
+## 特徴
+
+- ✨ キャラクター選択システム（男性/女性）
+- 🎮 スムーズな移動とダッシュ機能
+- ⚔️ リアルタイム戦闘システム
+- 🔮 魔法システム（光弾陣など）
+- 📊 プレイヤーステータス管理
+- 🎨 アニメーション対応のキャラクタースプライト
+
+## 技術スタック
+
+- Pure JavaScript (ES6+)
+- HTML5 Canvas
+- CSS3
+
+## ローカルでの実行
+
+1. リポジトリをクローン:
+```bash
+git clone https://github.com/somknt/StellaRPG.git
+cd StellaRPG
 ```
-js_version/ゲーム起動.bat
+
+2. ローカルサーバーを起動:
+```bash
+# Pythonを使用する場合
+python -m http.server 8000
+
+# Node.jsのhttp-serverを使用する場合
+npx http-server -p 8000
 ```
 
-または
-
+3. ブラウザで開く:
 ```
-js_version/index.html
+http://localhost:8000/js_version/
 ```
 
-をブラウザで開く
+## Vercelへのデプロイ
 
----
+### 方法1: GitHubと連携
 
-## 🎮 操作方法
+1. [Vercel](https://vercel.com)にアクセス
+2. GitHubアカウントでログイン
+3. このリポジトリをインポート
+4. デプロイボタンをクリック
+
+### 方法2: Vercel CLIを使用
+
+```bash
+npm i -g vercel
+cd StellaRPG
+vercel
+```
+
+## 操作方法
 
 - **WASD**: 移動
 - **Shift**: ダッシュ
 - **Space**: 攻撃
 - **Q**: 魔法（光弾陣）
+- **E**: 相互作用
 - **F1**: ヘルプ表示/非表示
 
----
-
-## 📁 フォルダ構成
+## プロジェクト構成
 
 ```
-新作ゲーム/
-├── js_version/         ← ゲーム本体（JavaScript版）
-│   ├── index.html
-│   ├── ゲーム起動.bat
-│   ├── js/
-│   ├── css/
-│   └── data/
-│
-├── data/               ← ゲームデータ（JSON）
-│   ├── player_stats_table.json
-│   ├── magic_circles.json
-│   └── enemies.json
-│
-├── docs/               ← 設計資料
-│
-└── Gemini_*.txt        ← アセット生成用プロンプト
+StellaRPG/
+├── js_version/          # メインゲームファイル
+│   ├── index.html       # エントリーポイント
+│   ├── css/             # スタイルシート
+│   ├── js/              # ゲームロジック
+│   ├── assets/          # 画像・音声ファイル
+│   └── data/            # ゲームデータ
+├── data/                # 敵データ等
+├── docs/                # ドキュメント
+├── vercel.json          # Vercel設定
+└── README.md            # このファイル
 ```
 
----
+## 開発状況
 
-## ✨ 実装済み機能
+詳細な開発状況については、`docs/`フォルダ内のドキュメントを参照してください：
 
-- プレイヤー（移動、攻撃、ステータス）
-- 星力システム（SP、段階、魔法陣）
-- 敵AI（自動スポーン、追跡、攻撃）
-- 戦闘システム（ダメージ計算、経験値、レベルアップ）
-- UI（HP/SPバー、レベル表示）
+- [敵システム実装状況](docs/ENEMIES_IMPLEMENTATION_STATUS.md)
+- [プレイヤー実装レポート](docs/PLAYER_IMPLEMENTATION_REPORT.md)
+- [戦闘システム](docs/COMBAT_SYSTEM.md)
+- [星力システム](docs/STAR_POWER_SYSTEM.md)
 
----
+## ライセンス
 
-## 🛠️ デバッグコマンド
+このプロジェクトは個人開発プロジェクトです。
 
-ブラウザのコンソール（F12）で実行:
+## 貢献
 
-```javascript
-addExp(100)        // 経験値追加
-healPlayer()       // HP/SP全回復
-unlockStarPower(4) // 星力段階4解放
-learnAllMagic()    // 全魔法習得
-```
+現在は個人プロジェクトとして開発中です。
 
----
+## 作者
 
-## 📝 ドキュメント
-
-- `GAME_DESIGN.md` - ゲームデザイン
-- `TECHNICAL_SPEC.md` - 技術仕様
-- `STORY_FLOW_EARLY_MID.md` - ストーリー
-- `docs/` - 詳細設計資料
-
----
-
-## 🎨 アセット生成
-
-Geminiでアセットを生成:
-
-- `Gemini_全プロンプト集.txt` - すべてのアセット
-- `Gemini_建物環境アセット.txt` - 建物・環境
-
----
-
-作成日: 2026年10月18日
+[@somknt](https://github.com/somknt)
