@@ -49,11 +49,32 @@ class Game {
         console.log('ゲーム開始:', gender);
         this.selectedGender = gender;
         
-        // マップ生成
-        this.map = new Map(100, 100, 32);
+        // ティウム村マップを初期化
+        const villageMapData = typeof initializeTiumVillageMap === 'function' 
+            ? initializeTiumVillageMap() 
+            : null;
         
-        // プレイヤー生成（性別付き）
-        this.player = new Player(640, 360, gender);
+        // マップ生成（ティウム村 or デフォルト）
+        if (villageMapData) {
+            this.map = new Map(
+                villageMapData.width, 
+                villageMapData.height, 
+                villageMapData.tileSize,
+                villageMapData
+            );
+            console.log('ティウム村マップを読み込みました');
+            
+            // プレイヤーをスポーン地点に配置
+            const spawnX = villageMapData.spawnPoint.x * villageMapData.tileSize;
+            const spawnY = villageMapData.spawnPoint.y * villageMapData.tileSize;
+            this.player = new Player(spawnX, spawnY, gender);
+        } else {
+            // デフォルトマップ
+            this.map = new Map(100, 100, 32);
+            this.player = new Player(640, 360, gender);
+            console.log('デフォルトマップを読み込みました');
+        }
+        
         this.player.unlockStarPower(3); // テスト用：段階3解放
         
         // カメラ
