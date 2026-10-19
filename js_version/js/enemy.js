@@ -34,6 +34,15 @@ class Enemy {
         this.direction = 'down'; // down, up, left, right
         this.isJumping = false;
         
+        // ジャンプ突進（角ウサギ専用）
+        this.isCharging = false;
+        this.chargeDirection = new Vector2(0, 0);
+        this.chargeDuration = 0;
+        this.chargeMaxDuration = 0.5; // 0.5秒間突進
+        this.chargeSpeed = 300; // 突進速度
+        this.chargePreparationTime = 0.3; // 突進準備時間
+        this.chargeTimer = 0;
+        
         // ドロップ
         this.dropExp = enemyData.dropExp;
         this.dropItems = enemyData.dropItems || [];
@@ -44,8 +53,13 @@ class Enemy {
         
         this.target = player;
         
-        // AI更新
-        this.updateAI(deltaTime);
+        // 角ウサギのジャンプ突進処理
+        if (this.data.name === '角ウサギ') {
+            this.updateHornRabbitBehavior(deltaTime);
+        } else {
+            // その他の敵は通常のAI
+            this.updateAI(deltaTime);
+        }
         
         // 向きを更新
         this.updateDirection();
@@ -69,8 +83,68 @@ class Enemy {
             this.animationFrame = 0; // 停止時は最初のフレーム
         }
         
-        // ジャンプ判定（攻撃時）
-        this.isJumping = (this.state === 'attack' && this.attackTimer > this.attackCooldown * 0.7);
+        // ジャンプ判定
+        this.isJumping = this.isCharging;
+    }
+    
+    // 角ウサギ専用の行動AI
+    updateHornRabbitBehavior(deltaTime) {
+        const distanceToPlayer = this.position.distance(this.target.position);
+        
+        // 突進中の処理
+        if (this.isCharging) {
+            this.chargeDuration += deltaTime;
+            
+            if (this.chargeDuration >= this.chargeMaxDuration) {
+                // 突進終了
+                this.isCharging = false;
+                this.chargeDuration = 0;
+                this.velocity = new Vector2(0, 0);
+                this.attackTimer = this.attackCooldown;
+            } else {
+                // 一直線に突進
+                this.velocity = this.chargeDirection.mult(this.chargeSpeed);
+            }
+            return;
+        }
+        
+        // 突進準備中の処理
+        if (this.chargeTimer > 0) {
+            this.chargeTimer -= deltaTime;
+            this.velocity = new Vector2(0, 0); // 準備中は静止
+            
+            if (this.chargeTimer <= 0) {
+                // 突進開始！
+                this.isCharging = true;
+                this.chargeDuration = 0;
+            }
+            return;
+        }
+        
+        // 通常の行動判定
+        if (distanceToPlayer <= this.detectionRange) {
+            if (distanceToPlayer <= this.attackRange * 3 && this.attackTimer <= 0) {
+                // 攻撃範囲内 → ジャンプ突進準備
+                this.state = 'attack';
+                this.chargeTimer = this.chargePreparationTime;
+                // プレイヤーへの方向を記録
+                this.chargeDirection = this.target.position.sub(this.position).normalize();
+            } else if (distanceToPlayer > this.attackRange * 3) {
+                // 中距離 → 追跡
+                this.state = 'chase';
+                const direction = this.target.position.sub(this.position).normalize();
+                this.velocity = direction.mult(this.speed * 0.8); // 少しゆっくり近づく
+            } else {
+                // 攻撃クールダウン中 → 少し後退
+                this.state = 'retreat';
+                const direction = this.target.position.sub(this.position).normalize();
+                this.velocity = direction.mult(-this.speed * 0.5);
+            }
+        } else {
+            // 遠距離 → 待機
+            this.state = 'idle';
+            this.behaviorIdle(deltaTime);
+        }
     }
     
     updateDirection() {
@@ -150,6 +224,16 @@ class Enemy {
     
     performAttack() {
         this.attackTimer = this.attackCooldown;
+        
+        // 角ウサギの場合、突進中にダメージを与える
+        if (this.data.name === '角ウサギ' && this.isCharging) {
+            return {
+                damage: this.attack,
+                position: this.position.clone(),
+                isChargeAttack: true
+            };
+        }
+        
         return {
             damage: this.attack,
             position: this.position.clone()
@@ -333,9 +417,21 @@ class EnemySpawner {
         for (const enemy of this.enemies) {
             if (!enemy.isAlive()) continue;
             
-            if (enemy.state === 'attack' && enemy.attackTimer <= 0) {
+            // 角ウサギの突進攻撃
+            if (enemy.data.name === '角ウサギ' && enemy.isCharging) {
+                const distance = enemy.position.distance(player.position);
+                if (distance <= enemy.size * 1.5) {
+                    const attackData = enemy.performAttack();
+                    player.takeDamage(attackData.damage);
+                }
+            }
+            // 通常の攻撃
+            else if (enemy.state === 'attack' && enemy.attackTimer <= 0) {
                 const attackData = enemy.performAttack();
-                player.takeDamage(attackData.damage);
+                const distance = enemy.position.distance(player.position);
+                if (distance <= enemy.attackRange) {
+                    player.takeDamage(attackData.damage);
+                }
             }
         }
     }
