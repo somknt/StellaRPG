@@ -1,10 +1,11 @@
 // プレイヤークラス
 
 class Player {
-    constructor(x, y) {
+    constructor(x, y, gender = 'male') {
         this.position = new Vector2(x, y);
         this.velocity = new Vector2(0, 0);
-        this.size = 32;
+        this.size = 64; // 32から64に拡大（2倍）
+        this.gender = gender; // 'male' or 'female'
         
         // ステータス
         this.level = 1;
@@ -127,6 +128,11 @@ class Player {
         this.isAttacking = true;
         this.attackTimer = this.attackCooldown;
         
+        // 攻撃効果音
+        if (window.soundManager) {
+            window.soundManager.playSFX('attack');
+        }
+        
         // 攻撃判定は game.js で処理
         return {
             position: this.getAttackPosition(),
@@ -209,11 +215,21 @@ class Player {
         this.currentHP = Math.max(0, this.currentHP - actualDamage);
         this.invincibleTime = this.maxInvincibleTime;
         
+        // ダメージ効果音
+        if (window.soundManager) {
+            window.soundManager.playSFX('damage');
+        }
+        
         return actualDamage;
     }
     
     heal(amount) {
         this.currentHP = Math.min(this.maxHP, this.currentHP + amount);
+        
+        // 回復効果音
+        if (window.soundManager) {
+            window.soundManager.playSFX('heal');
+        }
     }
     
     restoreSP(amount) {
@@ -246,6 +262,11 @@ class Player {
             this.expToNext = levelData.requiredExp;
         }
         
+        // レベルアップ効果音
+        if (window.soundManager) {
+            window.soundManager.playSFX('levelup');
+        }
+        
         console.log(`レベルアップ！Lv.${this.level}`);
     }
     
@@ -271,25 +292,43 @@ class Player {
             return;
         }
         
-        // 簡易描画（後で画像に差し替え）
         ctx.save();
         
-        // 体
-        ctx.fillStyle = this.clothesColor;
-        ctx.fillRect(screenPos.x - this.size/2, screenPos.y - this.size/2, this.size, this.size);
+        // 性別に応じた個別ファイルを取得
+        const imgKey = this.getPlayerImageKey();
+        const playerImg = window.assetManager ? window.assetManager.get(imgKey) : null;
         
-        // 頭
-        ctx.fillStyle = this.hairColor;
-        ctx.beginPath();
-        ctx.arc(screenPos.x, screenPos.y - this.size/3, this.size/3, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // 目（星の民の特徴）
-        ctx.fillStyle = this.eyeColor;
-        ctx.beginPath();
-        ctx.arc(screenPos.x - 5, screenPos.y - this.size/3, 3, 0, Math.PI * 2);
-        ctx.arc(screenPos.x + 5, screenPos.y - this.size/3, 3, 0, Math.PI * 2);
-        ctx.fill();
+        if (playerImg) {
+            // 個別ファイルなのでそのまま描画
+            ctx.drawImage(
+                playerImg,
+                screenPos.x - this.size/2, screenPos.y - this.size/2,
+                this.size, this.size
+            );
+        } else {
+            // 画像がない場合は色で描画（従来の方法）
+            ctx.fillStyle = this.clothesColor;
+            ctx.fillRect(screenPos.x - this.size/2, screenPos.y - this.size/2, this.size, this.size);
+            
+            // 頭
+            ctx.fillStyle = this.hairColor;
+            ctx.beginPath();
+            ctx.arc(screenPos.x, screenPos.y - this.size/3, this.size/3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 目（星の民の特徴）
+            ctx.fillStyle = this.eyeColor;
+            ctx.beginPath();
+            ctx.arc(screenPos.x - 5, screenPos.y - this.size/3, 3, 0, Math.PI * 2);
+            ctx.arc(screenPos.x + 5, screenPos.y - this.size/3, 3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 性別マーク（仮）
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(this.gender === 'male' ? '♂' : '♀', screenPos.x, screenPos.y + this.size/2 + 15);
+        }
         
         // 攻撃エフェクト
         if (this.isAttacking) {
@@ -302,6 +341,25 @@ class Player {
         }
         
         ctx.restore();
+    }
+    
+    // 向きとアニメーションフレームから画像キーを取得
+    getPlayerImageKey() {
+        const gender = this.gender;
+        const direction = this.direction;
+        const frame = this.animationFrame + 1; // 1, 2, 3
+        
+        return `player_${gender}_${direction}_${frame}`;
+    }
+    
+    getDirectionRow() {
+        switch (this.direction) {
+            case 'down': return 0;
+            case 'up': return 1;
+            case 'left': return 2;
+            case 'right': return 3;
+            default: return 0;
+        }
     }
     
     getHPPercent() {

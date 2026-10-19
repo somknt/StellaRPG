@@ -6,13 +6,16 @@ class Game {
         this.ctx = canvas.getContext('2d');
         this.running = false;
         this.paused = false;
+        this.gameState = 'character_select'; // 'character_select', 'playing', 'game_over'
         
         // システム
         this.input = new InputManager();
         this.ui = new UIManager();
+        this.characterSelect = new CharacterSelectScreen();
         
         // ゲームオブジェクト
         this.player = null;
+        this.selectedGender = null;
         this.map = null;
         this.camera = null;
         this.magicSystem = new MagicSystem();
@@ -34,19 +37,30 @@ class Game {
         // データ読み込み
         await this.loadGameData();
         
+        // 画像読み込み
+        await this.loadAssets();
+        
+        console.log('初期化完了！');
+        this.running = true;
+        this.gameState = 'character_select';
+    }
+    
+    startGame(gender) {
+        console.log('ゲーム開始:', gender);
+        this.selectedGender = gender;
+        
         // マップ生成
         this.map = new Map(100, 100, 32);
         
-        // プレイヤー生成
-        this.player = new Player(640, 360);
+        // プレイヤー生成（性別付き）
+        this.player = new Player(640, 360, gender);
         this.player.unlockStarPower(3); // テスト用：段階3解放
         
         // カメラ
         this.camera = new Camera(0, 0, this.canvas.width, this.canvas.height);
         this.camera.follow(this.player);
         
-        console.log('初期化完了！');
-        this.running = true;
+        this.gameState = 'playing';
     }
     
     async loadGameData() {
@@ -105,8 +119,38 @@ class Game {
         }
     }
     
+    // 画像読み込み
+    async loadAssets() {
+        if (!window.assetManager) return;
+        
+        return new Promise((resolve) => {
+            window.assetManager.loadAll(
+                (loaded, total) => {
+                    const progress = loaded / total;
+                    this.ui.updateLoadingProgress(progress, `画像読み込み中... ${loaded}/${total}`);
+                },
+                () => {
+                    console.log('画像読み込み完了');
+                    resolve();
+                }
+            );
+        });
+    }
+    
     update(deltaTime) {
         if (this.paused) return;
+        
+        // キャラクター選択中
+        if (this.gameState === 'character_select') {
+            this.characterSelect.update(this.input);
+            if (this.characterSelect.isComplete) {
+                this.startGame(this.characterSelect.getSelectedGender());
+            }
+            return;
+        }
+        
+        // ゲームプレイ中
+        if (this.gameState !== 'playing') return;
         
         // 入力更新
         this.input.update();
@@ -177,6 +221,15 @@ class Game {
         // 画面クリア
         this.ctx.fillStyle = '#000000';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // キャラクター選択画面
+        if (this.gameState === 'character_select') {
+            this.characterSelect.draw(this.ctx);
+            return;
+        }
+        
+        // ゲームプレイ画面
+        if (this.gameState !== 'playing') return;
         
         // マップ描画
         this.map.draw(this.ctx, this.camera.position);
