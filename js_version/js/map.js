@@ -127,31 +127,25 @@ class Map {
             for (let x = Math.max(0, startTileX); x < Math.min(this.width, endTileX); x++) {
                 const tile = this.tiles[y][x];
                 // 座標を整数に丸める（サブピクセルレンダリングを防ぐ）
-                const screenX = Math.floor(x * this.tileSize - camera.x);
-                const screenY = Math.floor(y * this.tileSize - camera.y);
+                const screenX = Math.round(x * this.tileSize - camera.x);
+                const screenY = Math.round(y * this.tileSize - camera.y);
                 
                 // タイル画像を取得
                 const tileImage = this.getTileImage(tile.type);
                 
                 if (tileImage) {
-                    // 画像がある場合は画像を描画（1ピクセル大きく描画して隙間を埋める）
+                    // 画像がある場合は画像を描画（2ピクセル大きく描画して完全に隙間を埋める）
                     ctx.drawImage(
                         tileImage, 
-                        screenX, 
-                        screenY, 
-                        this.tileSize + 1, 
-                        this.tileSize + 1
+                        screenX - 0.5, 
+                        screenY - 0.5, 
+                        this.tileSize + 2, 
+                        this.tileSize + 2
                     );
                 } else {
                     // 画像がない場合は色で描画（フォールバック）
                     ctx.fillStyle = tile.color;
                     ctx.fillRect(screenX, screenY, this.tileSize + 1, this.tileSize + 1);
-                }
-                
-                // グリッド線（デバッグ用）
-                if (window.showGrid) {
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-                    ctx.strokeRect(screenX, screenY, this.tileSize, this.tileSize);
                 }
             }
         }
@@ -252,6 +246,10 @@ class Camera {
             // スムーズに追従
             const diff = targetPos.sub(this.position);
             this.position = this.position.add(diff.mult(this.followSpeed * deltaTime));
+            
+            // タイルの隙間を防ぐため、カメラ座標を整数に丸める
+            this.position.x = Math.round(this.position.x);
+            this.position.y = Math.round(this.position.y);
         }
     }
     
