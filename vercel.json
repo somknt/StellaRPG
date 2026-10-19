@@ -1,12 +1,4 @@
 {
-  "version": 2,
-  "public": true,
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/js_version/$1"
-    }
-  ],
   "headers": [
     {
       "source": "/(.*)",
