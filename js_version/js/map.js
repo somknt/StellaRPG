@@ -114,38 +114,50 @@ class Map {
     }
     
     draw(ctx, camera) {
-        const startTileX = Math.floor(camera.x / this.tileSize);
-        const startTileY = Math.floor(camera.y / this.tileSize);
-        const endTileX = Math.ceil((camera.x + ctx.canvas.width) / this.tileSize);
-        const endTileY = Math.ceil((camera.y + ctx.canvas.height) / this.tileSize);
+        // カメラ座標を整数に丸めて安定化
+        const cameraX = Math.round(camera.x);
+        const cameraY = Math.round(camera.y);
         
-        // アンチエイリアスを無効化してピクセルパーフェクトに
+        const startTileX = Math.floor(cameraX / this.tileSize);
+        const startTileY = Math.floor(cameraY / this.tileSize);
+        const endTileX = Math.ceil((cameraX + ctx.canvas.width) / this.tileSize);
+        const endTileY = Math.ceil((cameraY + ctx.canvas.height) / this.tileSize);
+        
+        // 画像のスムージングを完全に無効化
         ctx.imageSmoothingEnabled = false;
+        ctx.webkitImageSmoothingEnabled = false;
+        ctx.mozImageSmoothingEnabled = false;
+        ctx.msImageSmoothingEnabled = false;
         
         // 地面レイヤーを描画
         for (let y = Math.max(0, startTileY); y < Math.min(this.height, endTileY); y++) {
             for (let x = Math.max(0, startTileX); x < Math.min(this.width, endTileX); x++) {
                 const tile = this.tiles[y][x];
-                // 座標を整数に丸める（サブピクセルレンダリングを防ぐ）
-                const screenX = Math.round(x * this.tileSize - camera.x);
-                const screenY = Math.round(y * this.tileSize - camera.y);
+                
+                // ピクセルパーフェクトな座標計算
+                const worldX = x * this.tileSize;
+                const worldY = y * this.tileSize;
+                const screenX = worldX - cameraX;
+                const screenY = worldY - cameraY;
                 
                 // タイル画像を取得
                 const tileImage = this.getTileImage(tile.type);
                 
                 if (tileImage) {
-                    // 画像がある場合は画像を描画（2ピクセル大きく描画して完全に隙間を埋める）
+                    // 画像を少し大きめに描画して隙間を完全に埋める
+                    const overlap = 1;
                     ctx.drawImage(
-                        tileImage, 
-                        screenX - 0.5, 
-                        screenY - 0.5, 
-                        this.tileSize + 2, 
-                        this.tileSize + 2
+                        tileImage,
+                        0, 0, tileImage.width, tileImage.height,  // ソース全体
+                        Math.floor(screenX), 
+                        Math.floor(screenY), 
+                        this.tileSize + overlap, 
+                        this.tileSize + overlap
                     );
                 } else {
                     // 画像がない場合は色で描画（フォールバック）
                     ctx.fillStyle = tile.color;
-                    ctx.fillRect(screenX, screenY, this.tileSize + 1, this.tileSize + 1);
+                    ctx.fillRect(Math.floor(screenX), Math.floor(screenY), this.tileSize + 1, this.tileSize + 1);
                 }
             }
         }
