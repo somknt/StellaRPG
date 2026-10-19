@@ -119,23 +119,33 @@ class Map {
         const endTileX = Math.ceil((camera.x + ctx.canvas.width) / this.tileSize);
         const endTileY = Math.ceil((camera.y + ctx.canvas.height) / this.tileSize);
         
+        // アンチエイリアスを無効化してピクセルパーフェクトに
+        ctx.imageSmoothingEnabled = false;
+        
         // 地面レイヤーを描画
         for (let y = Math.max(0, startTileY); y < Math.min(this.height, endTileY); y++) {
             for (let x = Math.max(0, startTileX); x < Math.min(this.width, endTileX); x++) {
                 const tile = this.tiles[y][x];
-                const screenX = x * this.tileSize - camera.x;
-                const screenY = y * this.tileSize - camera.y;
+                // 座標を整数に丸める（サブピクセルレンダリングを防ぐ）
+                const screenX = Math.floor(x * this.tileSize - camera.x);
+                const screenY = Math.floor(y * this.tileSize - camera.y);
                 
                 // タイル画像を取得
                 const tileImage = this.getTileImage(tile.type);
                 
                 if (tileImage) {
-                    // 画像がある場合は画像を描画
-                    ctx.drawImage(tileImage, screenX, screenY, this.tileSize, this.tileSize);
+                    // 画像がある場合は画像を描画（1ピクセル大きく描画して隙間を埋める）
+                    ctx.drawImage(
+                        tileImage, 
+                        screenX, 
+                        screenY, 
+                        this.tileSize + 1, 
+                        this.tileSize + 1
+                    );
                 } else {
                     // 画像がない場合は色で描画（フォールバック）
                     ctx.fillStyle = tile.color;
-                    ctx.fillRect(screenX, screenY, this.tileSize, this.tileSize);
+                    ctx.fillRect(screenX, screenY, this.tileSize + 1, this.tileSize + 1);
                 }
                 
                 // グリッド線（デバッグ用）
