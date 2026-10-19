@@ -144,23 +144,8 @@ function generateGroundLayer(width, height) {
     for (let y = 0; y < height; y++) {
         ground[y] = [];
         for (let x = 0; x < width; x++) {
-            // 基本は草原
+            // 全部草原タイルで統一
             let tileType = TileType.GRASS;
-            
-            // 中央広場周辺は石畳
-            if (x >= 17 && x <= 23 && y >= 13 && y <= 17) {
-                tileType = TileType.STONE;
-            }
-            
-            // 村の道（土の道）
-            // 南北の道
-            if (x >= 19 && x <= 21 && y >= 18) {
-                tileType = TileType.DIRT;
-            }
-            // 東西の道
-            if (y >= 14 && y <= 16 && (x <= 16 || x >= 24)) {
-                tileType = TileType.DIRT;
-            }
             
             ground[y][x] = tileType;
         }

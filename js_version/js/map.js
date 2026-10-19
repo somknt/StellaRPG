@@ -126,8 +126,17 @@ class Map {
                 const screenX = x * this.tileSize - camera.x;
                 const screenY = y * this.tileSize - camera.y;
                 
-                ctx.fillStyle = tile.color;
-                ctx.fillRect(screenX, screenY, this.tileSize, this.tileSize);
+                // タイル画像を取得
+                const tileImage = this.getTileImage(tile.type);
+                
+                if (tileImage) {
+                    // 画像がある場合は画像を描画
+                    ctx.drawImage(tileImage, screenX, screenY, this.tileSize, this.tileSize);
+                } else {
+                    // 画像がない場合は色で描画（フォールバック）
+                    ctx.fillStyle = tile.color;
+                    ctx.fillRect(screenX, screenY, this.tileSize, this.tileSize);
+                }
                 
                 // グリッド線（デバッグ用）
                 if (window.showGrid) {
@@ -139,6 +148,23 @@ class Map {
         
         // オブジェクトレイヤーを描画
         this.drawObjects(ctx, camera, startTileX, startTileY, endTileX, endTileY);
+    }
+    
+    // タイル画像を取得
+    getTileImage(tileType) {
+        if (!window.assetManager) return null;
+        
+        // タイプに応じた画像キーを取得
+        const imageMap = {
+            'grass': 'grass',
+            'dirt': 'road',
+            'stone': 'road',
+            'water': 'water',
+            'farmland': 'grass', // 畑も草原画像を使用（仮）
+        };
+        
+        const imageKey = imageMap[tileType] || 'grass';
+        return window.assetManager.get(imageKey);
     }
     
     // オブジェクトを描画
