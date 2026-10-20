@@ -354,6 +354,21 @@ class EnemySpawner {
         this.spawnInterval = 5.0;
         this.maxEnemies = 10;
         this.spawnRadius = 400;
+        this.difficulty = 'normal'; // 'easy', 'normal', 'hard'
+        this.difficultyMultipliers = {
+            easy: { hp: 0.7, attack: 0.7, spawn: 1.5 },
+            normal: { hp: 1.0, attack: 1.0, spawn: 1.0 },
+            hard: { hp: 1.5, attack: 1.3, spawn: 0.7 }
+        };
+    }
+    
+    setDifficulty(difficulty) {
+        this.difficulty = difficulty;
+        console.log('難易度設定:', difficulty);
+        
+        // 難易度に応じてスポーン間隔を調整
+        const multiplier = this.difficultyMultipliers[difficulty];
+        this.spawnInterval = 5.0 * multiplier.spawn;
     }
     
     update(deltaTime, player, enemyDataList) {
@@ -383,9 +398,20 @@ class EnemySpawner {
         );
         
         // ランダムな敵を選択
-        const enemyData = enemyDataList[Math.floor(Math.random() * enemyDataList.length)];
-        const enemy = new Enemy(enemyData, spawnPos);
+        const baseEnemyData = enemyDataList[Math.floor(Math.random() * enemyDataList.length)];
+        
+        // 難易度に応じてステータスを調整
+        const multiplier = this.difficultyMultipliers[this.difficulty];
+        const adjustedEnemyData = {
+            ...baseEnemyData,
+            hp: Math.floor(baseEnemyData.hp * multiplier.hp),
+            attack: Math.floor(baseEnemyData.attack * multiplier.attack)
+        };
+        
+        const enemy = new Enemy(adjustedEnemyData, spawnPos);
         this.enemies.push(enemy);
+        
+        console.log(`敵出現: ${adjustedEnemyData.name} (HP: ${adjustedEnemyData.hp}, 攻撃: ${adjustedEnemyData.attack})`);
     }
     
     draw(ctx, camera) {

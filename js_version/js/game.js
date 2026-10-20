@@ -8,6 +8,9 @@ class Game {
         this.paused = false;
         this.gameState = 'title'; // 'title', 'character_select', 'playing', 'game_over'
         
+        // バトル設定
+        this.battleDifficulty = 'normal'; // 'easy', 'normal', 'hard'
+        
         // システム
         this.input = new InputManager();
         this.ui = new UIManager();
@@ -47,7 +50,7 @@ class Game {
     }
     
     startGame(gender) {
-        console.log('ゲーム開始:', gender);
+        console.log('ゲーム開始:', gender, '難易度:', this.battleDifficulty);
         this.selectedGender = gender;
         
         // ティウム村マップを初期化
@@ -77,6 +80,9 @@ class Game {
         }
         
         this.player.unlockStarPower(3); // テスト用：段階3解放
+        
+        // 難易度に応じて敵のスポーナーを設定
+        this.enemySpawner.setDifficulty(this.battleDifficulty);
         
         // カメラ
         this.camera = new Camera(0, 0, this.canvas.width, this.canvas.height);

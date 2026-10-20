@@ -210,7 +210,11 @@ class TitleScreen {
     
     startBattle(difficulty) {
         console.log('バトル開始:', difficulty);
-        // バトルモード開始（後で実装）
+        // キャラクター選択画面に遷移
+        if (window.game) {
+            window.game.battleDifficulty = difficulty; // 難易度を保存
+            window.game.gameState = 'character_select';
+        }
     }
     
     getCurrentMenu() {
