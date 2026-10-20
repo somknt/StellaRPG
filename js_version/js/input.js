@@ -17,8 +17,11 @@ class InputManager {
     }
     
     init() {
+        console.log('=== InputManager 初期化開始 ===');
+        
         // キーボードイベント
         window.addEventListener('keydown', (e) => {
+            console.log('🔑 キー押下イベント:', e.code);
             this.keys[e.code] = true;
         });
         
@@ -27,8 +30,16 @@ class InputManager {
         });
         
         // マウスイベント
-        window.addEventListener('mousemove', (e) => {
-            const canvas = document.getElementById('gameCanvas');
+        const canvas = document.getElementById('gameCanvas');
+        if (!canvas) {
+            console.error('❌ Canvas要素が見つかりません！');
+            return;
+        }
+        
+        console.log('✅ Canvas要素を取得:', canvas);
+        
+        // キャンバスにマウスムーブ
+        canvas.addEventListener('mousemove', (e) => {
             const rect = canvas.getBoundingClientRect();
             this.mousePos.x = (e.clientX - rect.left) * (canvas.width / rect.width);
             this.mousePos.y = (e.clientY - rect.top) * (canvas.height / rect.height);
@@ -38,21 +49,40 @@ class InputManager {
             this.mouseY = this.mousePos.y;
         });
         
-        window.addEventListener('mousedown', (e) => {
+        // キャンバスにマウスダウン
+        canvas.addEventListener('mousedown', (e) => {
+            console.log('🖱️ マウスダウンイベント:', e.button);
             this.mouseButtons[e.button] = true;
         });
         
-        window.addEventListener('mouseup', (e) => {
+        // キャンバスにマウスアップ
+        canvas.addEventListener('mouseup', (e) => {
             this.mouseButtons[e.button] = false;
         });
+        
+        // キャンバスにクリック（追加の保険）
+        canvas.addEventListener('click', (e) => {
+            console.log('🖱️ クリックイベント発火！');
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+            const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+            console.log(`クリック座標: (${x.toFixed(0)}, ${y.toFixed(0)})`);
+        });
+        
+        console.log('=== InputManager 初期化完了 ===');
     }
     
     update() {
+        // console.log('InputManager.update() 呼び出し'); // 毎フレーム出るので通常はコメントアウト
         this.keysPrev = { ...this.keys };
         this.mouseButtonsPrev = { ...this.mouseButtons };
         
         // マウスクリック判定（左クリック）
-        this.isMouseClicked = this.mouseButtons[0] === true && this.mouseButtonsPrev[0] !== true;
+        const wasClicked = this.mouseButtons[0] === true && this.mouseButtonsPrev[0] !== true;
+        if (wasClicked) {
+            console.log('🖱️ isMouseClicked = true');
+        }
+        this.isMouseClicked = wasClicked;
     }
     
     // キーが押されているか

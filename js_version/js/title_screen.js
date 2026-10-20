@@ -53,8 +53,12 @@ class TitleScreen {
     }
     
     update(deltaTime, input) {
-        // デバッグ: updateが呼ばれているか確認
-        // console.log('TitleScreen.update() 呼び出し');
+        // デバッグ: updateが呼ばれているか確認（最初の5秒だけ）
+        if (!this._startTime) this._startTime = performance.now();
+        const elapsed = (performance.now() - this._startTime) / 1000;
+        if (elapsed < 2) {
+            console.log('TitleScreen.update() 呼び出し中... (', elapsed.toFixed(1), '秒)');
+        }
         
         // ロゴのフェードイン
         if (this.logoAlpha < 1) {
