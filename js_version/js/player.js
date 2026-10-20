@@ -22,7 +22,41 @@ class Player {
         
         // 移動
         this.baseSpeed = 150;
-        this.sprintMultiplier = 1.5;
+        this.sprintMultiplier = 1.7;   // ダッシュ時の速度倍率
+        this.isDashing = false;
+        
+        // スタミナ
+        this.maxStamina = 100;
+        this.currentStamina = 100;
+        this.dashStaminaCost = 15;     // ダッシュ中の消費（毎秒）→ ゆっくり減る
+        this.dodgeStaminaCost = 25;    // 回避1回の消費 → パッと減る
+        this.staminaRegenRate = 30;    // 回復量（毎秒）
+        this.staminaRegenDelay = 0.8;  // 使ってから回復が始まるまでの秒数
+        this.timeSinceStaminaUse = 0;
+        this.isExhausted = false;      // 0になったら一定量回復するまでダッシュ不可
+        this.exhaustRecoverAt = 25;
+        
+        // 回避
+        this.isDodging = false;
+        this.dodgeDuration = 0.18;     // 一気に進む時間
+        this.dodgeDistance = 128;      // 進む距離（32pxタイル × 4マス）
+        this.dodgeTimer = 0;
+        this.dodgeDirection = new Vector2(0, 1);
+        this.dodgeCooldown = 0.35;
+        this.dodgeCooldownTimer = 0;
+        this.dodgedAttack = false;     // 回避中に攻撃を避けたか（ジャスト回避判定）
+        this.afterImages = [];         // 残像
+        
+        // 装備（初期装備はナイフ）
+        this.weapon = {
+            name: 'ナイフ',
+            power: 5,          // 攻撃力に加算
+            range: 70,         // 攻撃が届く距離
+            arc: Math.PI * 0.6, // 斬撃の扇の角度（約108度）
+            cooldown: 0.35,    // 連続攻撃の間隔
+            assistRange: 110,  // この距離内の敵には自動で向き直る
+            knockback: 40
+        };
         
         // 星力システム
         this.starPowerStage = 0; // 0:未解放, 1:感知, 2:操作, 3:展開, 4:熟練
@@ -31,10 +65,13 @@ class Player {
         this.timeSinceLastSpUse = 0;
         
         // 戦闘
-        this.attackCooldown = 0.5;
+        this.attackCooldown = this.weapon.cooldown;
         this.attackTimer = 0;
-        this.attackRange = 50;
+        this.attackRange = this.weapon.range;
         this.isAttacking = false;
+        this.attackAnimDuration = 0.15; // 斬撃モーションの長さ
+        this.attackAnimTimer = 0;
+        this.aimVector = new Vector2(0, 1); // 攻撃する向き
         
         // 魔法
         this.learnedMagic = ['magic_001']; // 光弾陣は最初から習得（テスト用）
@@ -58,11 +95,23 @@ class Player {
     }
     
     update(deltaTime, input) {
-        // 移動処理
-        this.updateMovement(deltaTime, input);
+        // 回避の開始（移動より先に判定）
+        if (input.isDodgePressed()) {
+            this.tryDodge(input);
+        }
         
-        // 攻撃処理
-        this.updateAttack(deltaTime, input);
+        // 移動処理（回避中は回避の移動を優先）
+        if (this.isDodging) {
+            this.updateDodge(deltaTime);
+        } else {
+            this.updateMovement(deltaTime, input);
+        }
+        
+        // 攻撃タイマー（攻撃の開始は game.js から startAttack を呼ぶ）
+        this.updateAttack(deltaTime);
+        
+        // スタミナ
+        this.updateStamina(deltaTime);
         
         // 魔法クールダウン更新
         this.updateMagicCooldowns(deltaTime);
@@ -74,11 +123,19 @@ class Player {
         if (this.invincibleTime > 0) {
             this.invincibleTime -= deltaTime;
         }
+        if (this.dodgeCooldownTimer > 0) {
+            this.dodgeCooldownTimer -= deltaTime;
+        }
         
-        // アニメーション
+        // 残像を薄くしていく
+        for (const img of this.afterImages) img.life -= deltaTime;
+        this.afterImages = this.afterImages.filter(img => img.life > 0);
+        
+        // アニメーション（ダッシュ中は足を速く動かす）
         if (this.isMoving) {
+            const speed = this.isDashing ? this.animationSpeed * 0.55 : this.animationSpeed;
             this.animationTimer += deltaTime;
-            if (this.animationTimer >= this.animationSpeed) {
+            if (this.animationTimer >= speed) {
                 this.animationTimer = 0;
                 this.animationFrame = (this.animationFrame + 1) % 3;
             }
@@ -91,17 +148,22 @@ class Player {
         const moveVector = input.getMovementVector();
         this.isMoving = moveVector.length() > 0;
         
+        // ダッシュ：長押し中・移動中・スタミナがある時だけ
+        this.isDashing = this.isMoving && input.isSprintPressed() &&
+                         !this.isExhausted && this.currentStamina > 0;
+        
         if (this.isMoving) {
-            // 方向を更新
-            if (moveVector.x < 0) this.direction = 'left';
-            else if (moveVector.x > 0) this.direction = 'right';
-            else if (moveVector.y < 0) this.direction = 'up';
-            else if (moveVector.y > 0) this.direction = 'down';
+            // 方向を更新（攻撃モーション中は向きを固定）
+            if (this.attackAnimTimer <= 0) {
+                this.setDirectionFromVector(moveVector);
+                this.aimVector = this.directionToVector(this.direction);
+            }
             
             // 速度計算
             let speed = this.baseSpeed;
-            if (input.isSprintPressed()) {
+            if (this.isDashing) {
                 speed *= this.sprintMultiplier;
+                this.useStamina(this.dashStaminaCost * deltaTime);
             }
             
             this.velocity = moveVector.mult(speed);
@@ -111,48 +173,155 @@ class Player {
         }
     }
     
-    updateAttack(deltaTime, input) {
-        if (this.attackTimer > 0) {
-            this.attackTimer -= deltaTime;
-            if (this.attackTimer <= 0.2) {
-                this.isAttacking = false;
+    // ---------- 回避 ----------
+    tryDodge(input) {
+        if (this.isDodging || this.dodgeCooldownTimer > 0) return false;
+        if (this.currentStamina < this.dodgeStaminaCost) return false;
+        
+        // 入力方向へ回避。入力がなければ向いている方向へ
+        const move = input.getMovementVector();
+        this.dodgeDirection = move.length() > 0 ? move : this.directionToVector(this.direction);
+        this.setDirectionFromVector(this.dodgeDirection);
+        
+        this.isDodging = true;
+        this.dodgeTimer = this.dodgeDuration;
+        this.dodgedAttack = false;
+        this.isMoving = true;
+        this.useStamina(this.dodgeStaminaCost);
+        return true;
+    }
+    
+    updateDodge(deltaTime) {
+        const speed = this.dodgeDistance / this.dodgeDuration;
+        this.velocity = this.dodgeDirection.mult(speed);
+        this.position = this.position.add(this.velocity.mult(deltaTime));
+        
+        // 残像を残す
+        this.afterImages.push({ pos: this.position.clone(), life: 0.2, maxLife: 0.2 });
+        
+        this.dodgeTimer -= deltaTime;
+        if (this.dodgeTimer <= 0) {
+            this.isDodging = false;
+            this.dodgeCooldownTimer = this.dodgeCooldown;
+            this.velocity = new Vector2(0, 0);
+        }
+    }
+    
+    // ジャスト回避が起きたら true を返して状態をリセット（game.js が使う）
+    consumeJustDodge() {
+        if (this.dodgedAttack) {
+            this.dodgedAttack = false;
+            return true;
+        }
+        return false;
+    }
+    
+    // ---------- スタミナ ----------
+    useStamina(amount) {
+        this.currentStamina = Math.max(0, this.currentStamina - amount);
+        this.timeSinceStaminaUse = 0;
+        if (this.currentStamina <= 0) {
+            this.isExhausted = true;
+        }
+    }
+    
+    updateStamina(deltaTime) {
+        this.timeSinceStaminaUse += deltaTime;
+        if (this.timeSinceStaminaUse >= this.staminaRegenDelay) {
+            this.currentStamina = Math.min(this.maxStamina, this.currentStamina + this.staminaRegenRate * deltaTime);
+        }
+        if (this.isExhausted && this.currentStamina >= this.exhaustRecoverAt) {
+            this.isExhausted = false;
+        }
+    }
+    
+    getStaminaPercent() {
+        return (this.currentStamina / this.maxStamina) * 100;
+    }
+    
+    // ---------- 近接攻撃（ナイフ） ----------
+    updateAttack(deltaTime) {
+        if (this.attackTimer > 0) this.attackTimer -= deltaTime;
+        if (this.attackAnimTimer > 0) {
+            this.attackAnimTimer -= deltaTime;
+            if (this.attackAnimTimer <= 0) this.isAttacking = false;
+        }
+    }
+    
+    // 攻撃を開始する。近くに敵がいればその方向へ向き直って斬る
+    // 戻り値: 攻撃データ（クールダウン中・回避中は null）
+    startAttack(enemies = []) {
+        if (this.attackTimer > 0 || this.isDodging) return null;
+        
+        // 近くの敵を探す（向いている方向にいる敵を優先）
+        const facing = this.directionToVector(this.direction);
+        let target = null;
+        let bestScore = Infinity;
+        for (const enemy of enemies) {
+            if (!enemy.isAlive()) continue;
+            const toEnemy = enemy.position.sub(this.position);
+            const dist = toEnemy.length();
+            if (dist > this.weapon.assistRange || dist === 0) continue;
+            const dot = (toEnemy.x * facing.x + toEnemy.y * facing.y) / dist; // 1=正面, -1=背後
+            const score = dist * (2 - dot); // 正面で近いほど小さい
+            if (score < bestScore) {
+                bestScore = score;
+                target = enemy;
             }
         }
         
-        if (input.isAttackPressed() && this.attackTimer <= 0) {
-            this.performAttack();
+        if (target) {
+            this.aimVector = target.position.sub(this.position).normalize();
+            this.setDirectionFromVector(this.aimVector);
+        } else {
+            this.aimVector = facing;
         }
-    }
-    
-    performAttack() {
+        
         this.isAttacking = true;
         this.attackTimer = this.attackCooldown;
+        this.attackAnimTimer = this.attackAnimDuration;
         
-        // 攻撃効果音
-        if (window.soundManager) {
-            window.soundManager.playSFX('attack');
-        }
+        // 少しだけ踏み込む
+        this.position = this.position.add(this.aimVector.mult(8));
         
-        // 攻撃判定は game.js で処理
+        if (window.soundManager) window.soundManager.playSFX('attack');
+        
         return {
-            position: this.getAttackPosition(),
-            damage: this.attack,
-            range: this.attackRange
+            origin: this.position.clone(),
+            aim: this.aimVector.clone(),
+            range: this.weapon.range,
+            arc: this.weapon.arc,
+            damage: this.attack + this.weapon.power,
+            knockback: this.weapon.knockback
         };
     }
     
+    // 互換用：旧コードから呼ばれた場合
+    performAttack() {
+        return this.startAttack([]);
+    }
+    
     getAttackPosition() {
-        const offset = 40;
-        const pos = this.position.clone();
-        
-        switch (this.direction) {
-            case 'up': pos.y -= offset; break;
-            case 'down': pos.y += offset; break;
-            case 'left': pos.x -= offset; break;
-            case 'right': pos.x += offset; break;
+        return this.position.add(this.aimVector.mult(40));
+    }
+    
+    // ---------- 向きのヘルパー ----------
+    setDirectionFromVector(v) {
+        if (Math.abs(v.x) > Math.abs(v.y)) {
+            this.direction = v.x < 0 ? 'left' : 'right';
+        } else if (v.y !== 0) {
+            this.direction = v.y < 0 ? 'up' : 'down';
         }
-        
-        return pos;
+    }
+    
+    directionToVector(direction) {
+        switch (direction) {
+            case 'up': return new Vector2(0, -1);
+            case 'down': return new Vector2(0, 1);
+            case 'left': return new Vector2(-1, 0);
+            case 'right': return new Vector2(1, 0);
+            default: return new Vector2(0, 1);
+        }
     }
     
     castMagic(magicId) {
@@ -209,6 +378,11 @@ class Player {
     }
     
     takeDamage(damage) {
+        // 回避中は無敵。攻撃を避けたらジャスト回避成立
+        if (this.isDodging) {
+            this.dodgedAttack = true;
+            return 0;
+        }
         if (this.invincibleTime > 0) return 0;
         
         const actualDamage = Math.max(1, damage - this.defense);
@@ -287,23 +461,63 @@ class Player {
     draw(ctx, camera) {
         const screenPos = this.position.sub(camera);
         
-        // 無敵時間中は点滅
+        // 性別に応じた個別ファイルを取得
+        const imgKey = this.getPlayerImageKey();
+        const playerImg = window.assetManager ? window.assetManager.get(imgKey) : null;
+        
+        // 回避の残像（青白く薄く）
+        if (this.afterImages.length > 0) {
+            ctx.save();
+            for (const img of this.afterImages) {
+                const p = img.pos.sub(camera);
+                ctx.globalAlpha = (img.life / img.maxLife) * 0.35;
+                if (playerImg) {
+                    ctx.drawImage(playerImg, p.x - this.size/2, p.y - this.size/2, this.size, this.size);
+                } else {
+                    ctx.fillStyle = '#9fd8ff';
+                    ctx.fillRect(p.x - this.size/2, p.y - this.size/2, this.size, this.size);
+                }
+            }
+            ctx.restore();
+        }
+        
+        // ダッシュ中の足元の砂ぼこり
+        if (this.isDashing) {
+            ctx.save();
+            ctx.fillStyle = 'rgba(220, 210, 180, 0.5)';
+            const back = this.velocity.normalize().mult(-this.size * 0.4);
+            for (let i = 0; i < 3; i++) {
+                const r = 4 + Math.random() * 4;
+                ctx.beginPath();
+                ctx.arc(screenPos.x + back.x + (Math.random() - 0.5) * 16,
+                        screenPos.y + this.size * 0.4 + back.y * 0.3 + (Math.random() - 0.5) * 6,
+                        r, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.restore();
+        }
+        
+        // 被ダメージ後の無敵時間中は点滅
         if (this.invincibleTime > 0 && Math.floor(this.invincibleTime * 10) % 2 === 0) {
             return;
         }
         
         ctx.save();
         
-        // 性別に応じた個別ファイルを取得
-        const imgKey = this.getPlayerImageKey();
-        const playerImg = window.assetManager ? window.assetManager.get(imgKey) : null;
+        // 回避中は少し伸び縮みさせて「シュッ」と動いた感じを出す
+        let drawW = this.size, drawH = this.size;
+        if (this.isDodging) {
+            drawW = this.size * 0.85;
+            drawH = this.size * 0.85;
+            ctx.globalAlpha = 0.8;
+        }
         
         if (playerImg) {
             // 個別ファイルなのでそのまま描画
             ctx.drawImage(
                 playerImg,
-                screenPos.x - this.size/2, screenPos.y - this.size/2,
-                this.size, this.size
+                screenPos.x - drawW/2, screenPos.y - drawH/2,
+                drawW, drawH
             );
         } else {
             // 画像がない場合は色で描画（従来の方法）
@@ -330,15 +544,51 @@ class Player {
             ctx.fillText(this.gender === 'male' ? '♂' : '♀', screenPos.x, screenPos.y + this.size/2 + 15);
         }
         
-        // 攻撃エフェクト
+        ctx.restore();
+        
+        // ナイフの斬撃モーション
         if (this.isAttacking) {
-            ctx.strokeStyle = '#ffb347';
-            ctx.lineWidth = 3;
-            const attackPos = this.getAttackPosition().sub(camera);
-            ctx.beginPath();
-            ctx.arc(attackPos.x, attackPos.y, this.attackRange, 0, Math.PI * 2);
-            ctx.stroke();
+            this.drawKnifeSlash(ctx, screenPos);
         }
+    }
+    
+    // ナイフの斬撃：攻撃方向に扇形の軌跡を描き、刃が振り抜かれていく
+    drawKnifeSlash(ctx, screenPos) {
+        const progress = 1 - Math.max(0, this.attackAnimTimer) / this.attackAnimDuration; // 0→1
+        const baseAngle = Math.atan2(this.aimVector.y, this.aimVector.x);
+        const half = this.weapon.arc / 2;
+        const start = baseAngle - half;
+        const current = start + this.weapon.arc * progress;
+        const range = this.weapon.range;
+        
+        ctx.save();
+        ctx.translate(screenPos.x, screenPos.y);
+        
+        // 軌跡（白っぽい三日月）
+        ctx.globalAlpha = 0.6 * (1 - progress * 0.5);
+        ctx.fillStyle = '#e8f4ff';
+        ctx.beginPath();
+        ctx.arc(0, 0, range, start, current);
+        ctx.arc(0, 0, range * 0.55, current, start, true);
+        ctx.closePath();
+        ctx.fill();
+        
+        // 刃先のライン
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(current) * range * 0.35, Math.sin(current) * range * 0.35);
+        ctx.lineTo(Math.cos(current) * range, Math.sin(current) * range);
+        ctx.stroke();
+        
+        // ナイフの柄
+        ctx.strokeStyle = '#6b4a2b';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(current) * range * 0.2, Math.sin(current) * range * 0.2);
+        ctx.lineTo(Math.cos(current) * range * 0.35, Math.sin(current) * range * 0.35);
+        ctx.stroke();
         
         ctx.restore();
     }

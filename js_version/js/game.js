@@ -11,6 +11,11 @@ class Game {
         // バトル設定
         this.battleDifficulty = 'normal'; // 'easy', 'normal', 'hard'
         
+        // ジャスト回避（成功すると約1秒間、敵がスローになる）
+        this.justDodgeDuration = 1.0;
+        this.justDodgeSlowRate = 0.2;
+        this.justDodgeTimer = 0;
+        
         // システム
         this.input = new InputManager();
         this.ui = new UIManager();
@@ -79,6 +84,7 @@ class Game {
         }
         
         this.player.unlockStarPower(3); // テスト用：段階3解放
+        this.justDodgeTimer = 0;
         
         // 難易度に応じて敵のスポーナーを設定
         this.enemySpawner.setDifficulty(this.battleDifficulty);
@@ -110,7 +116,13 @@ class Game {
             // 敵データ
             const enemyResponse = await fetch('data/enemies.json');
             const enemyData = await enemyResponse.json();
-            window.gameData.enemies = enemyData.enemies.filter(e => e.spawnEnabled);
+            // 出現させる敵：spawnEnabled 指定があればそれに従い、なければ草原（ティウム周辺）の敵
+            let spawnable = enemyData.enemies.filter(e =>
+                e.spawnEnabled === true || (e.spawnEnabled === undefined && e.region === 'ティウム周辺')
+            );
+            if (spawnable.length === 0) spawnable = enemyData.enemies.slice(0, 1);
+            window.gameData.enemies = spawnable;
+            console.log('出現する敵:', spawnable.map(e => e.name).join(', '));
             
             this.ui.updateLoadingProgress(1.0, '読み込み完了！');
             
@@ -192,11 +204,11 @@ class Game {
             }
         }
         
-        // プレイヤー攻撃
+        // プレイヤーの近接攻撃（ナイフ）：近くの敵の方向へ向き直って斬る
         if (this.input.isAttackPressed()) {
-            const attackData = this.player.performAttack();
+            const attackData = this.player.startAttack(this.enemySpawner.enemies);
             if (attackData) {
-                const hits = this.enemySpawner.checkPlayerAttack(attackData);
+                const hits = this.enemySpawner.checkMeleeAttack(attackData);
                 for (const hit of hits) {
                     if (!hit.enemy.isAlive()) {
                         const drops = hit.enemy.getDrops();
@@ -224,11 +236,23 @@ class Game {
             }
         }
         
+        // ジャスト回避の時間：敵の動きが約1秒スローになる
+        if (this.justDodgeTimer > 0) {
+            this.justDodgeTimer -= deltaTime;
+        }
+        const enemyDeltaTime = this.justDodgeTimer > 0 ? deltaTime * this.justDodgeSlowRate : deltaTime;
+        
         // 敵更新
-        this.enemySpawner.update(deltaTime, this.player, window.gameData.enemies);
+        this.enemySpawner.update(enemyDeltaTime, this.player, window.gameData.enemies);
         
         // 敵の攻撃
         this.enemySpawner.checkEnemyAttacks(this.player);
+        
+        // 回避中に攻撃を避けていたらジャスト回避発動
+        if (this.player.consumeJustDodge() && this.justDodgeTimer <= 0) {
+            this.justDodgeTimer = this.justDodgeDuration;
+            console.log('ジャスト回避！');
+        }
         
         // カメラ更新
         this.camera.update(deltaTime);
@@ -269,6 +293,41 @@ class Game {
         
         // 魔法エフェクト描画
         this.magicSystem.draw(this.ctx, this.camera.position);
+        
+        // ジャスト回避中の演出（画面を青く染めて文字を出す）
+        if (this.justDodgeTimer > 0) {
+            this.drawJustDodgeEffect();
+        }
+    }
+    
+    drawJustDodgeEffect() {
+        const ctx = this.ctx;
+        const t = this.justDodgeTimer / this.justDodgeDuration; // 1→0
+        ctx.save();
+        
+        ctx.fillStyle = `rgba(60, 120, 255, ${0.18 * t + 0.05})`;
+        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // 画面の縁を暗くする
+        const g = ctx.createRadialGradient(
+            this.canvas.width / 2, this.canvas.height / 2, this.canvas.height * 0.3,
+            this.canvas.width / 2, this.canvas.height / 2, this.canvas.height * 0.8
+        );
+        g.addColorStop(0, 'rgba(0, 0, 40, 0)');
+        g.addColorStop(1, `rgba(0, 0, 40, ${0.5 * t})`);
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        ctx.globalAlpha = Math.min(1, t * 2);
+        ctx.font = 'bold 40px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#e0f0ff';
+        ctx.strokeStyle = '#1a3a8a';
+        ctx.lineWidth = 5;
+        ctx.strokeText('ジャスト回避！', this.canvas.width / 2, 120);
+        ctx.fillText('ジャスト回避！', this.canvas.width / 2, 120);
+        
+        ctx.restore();
     }
     
     gameLoop(currentTime) {

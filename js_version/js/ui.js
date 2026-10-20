@@ -7,6 +7,8 @@ class UIManager {
             hpText: document.getElementById('hp-text'),
             spBar: document.getElementById('sp-bar'),
             spText: document.getElementById('sp-text'),
+            staminaBar: document.getElementById('stamina-bar'),
+            staminaText: document.getElementById('stamina-text'),
             level: document.getElementById('player-level'),
             xp: document.getElementById('player-xp'),
             xpNext: document.getElementById('player-xp-next'),
@@ -41,6 +43,13 @@ class UIManager {
         const spPercent = player.getSPPercent();
         this.elements.spBar.style.width = spPercent + '%';
         this.elements.spText.textContent = `${Math.ceil(player.currentSP)}/${player.maxSP}`;
+        
+        // スタミナバー
+        if (this.elements.staminaBar) {
+            this.elements.staminaBar.style.width = player.getStaminaPercent() + '%';
+            this.elements.staminaBar.classList.toggle('exhausted', player.isExhausted);
+            this.elements.staminaText.textContent = `${Math.floor(player.currentStamina)}/${player.maxStamina}`;
+        }
         
         // レベル & 経験値
         this.elements.level.textContent = player.level;

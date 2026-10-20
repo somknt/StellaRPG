@@ -12,7 +12,7 @@ class Enemy {
         this.currentHP = enemyData.hp;
         this.attack = enemyData.attack;
         this.defense = enemyData.defense;
-        this.speed = enemyData.speed;
+        this.speed = enemyData.speed || 80;
         this.detectionRange = enemyData.detectionRange || 200;
         this.attackRange = enemyData.attackRange || 40;
         
@@ -26,6 +26,7 @@ class Enemy {
         // 攻撃
         this.attackCooldown = enemyData.attackCooldown || 1.5;
         this.attackTimer = 0;
+        this.hitFlashTimer = 0;
         
         // アニメーション
         this.animationFrame = 0;
@@ -44,7 +45,7 @@ class Enemy {
         this.chargeTimer = 0;
         
         // ドロップ
-        this.dropExp = enemyData.dropExp;
+        this.dropExp = enemyData.dropExp ?? enemyData.exp ?? 1;
         this.dropItems = enemyData.dropItems || [];
     }
     
@@ -70,6 +71,9 @@ class Enemy {
         // 攻撃タイマー
         if (this.attackTimer > 0) {
             this.attackTimer -= deltaTime;
+        }
+        if (this.hitFlashTimer > 0) {
+            this.hitFlashTimer -= deltaTime;
         }
         
         // アニメーション
@@ -240,9 +244,22 @@ class Enemy {
         };
     }
     
+    // 攻撃を受けて後ろに押し出される
+    applyKnockback(direction, distance) {
+        this.position = this.position.add(direction.normalize().mult(distance));
+        // 突進中なら止める
+        if (this.isCharging) {
+            this.isCharging = false;
+            this.chargeDuration = 0;
+            this.attackTimer = this.attackCooldown;
+        }
+        this.chargeTimer = 0;
+    }
+    
     takeDamage(damage) {
         const actualDamage = Math.max(1, damage - this.defense);
         this.currentHP = Math.max(0, this.currentHP - actualDamage);
+        this.hitFlashTimer = 0.12;
         
         // ダメージエフェクト
         return {
@@ -299,6 +316,16 @@ class Enemy {
                 // デフォルト
                 ctx.fillRect(screenPos.x - this.size/2, screenPos.y - this.size/2, this.size, this.size);
             }
+        }
+        
+        // 被弾した瞬間は白く光らせる
+        if (this.hitFlashTimer > 0) {
+            ctx.globalAlpha = 0.7;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(screenPos.x, screenPos.y, this.size * 0.6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
         }
         
         // HPバー
@@ -397,6 +424,9 @@ class EnemySpawner {
             playerPos.y + Math.sin(angle) * distance
         );
         
+        // 出現できる敵がいなければ何もしない（空配列で落ちないように）
+        if (!enemyDataList || enemyDataList.length === 0) return;
+        
         // ランダムな敵を選択
         const baseEnemyData = enemyDataList[Math.floor(Math.random() * enemyDataList.length)];
         
@@ -418,6 +448,33 @@ class EnemySpawner {
         for (const enemy of this.enemies) {
             enemy.draw(ctx, camera);
         }
+    }
+    
+    // ナイフなどの近接攻撃：攻撃方向の扇形に入った敵にヒット
+    checkMeleeAttack(attack) {
+        const hits = [];
+        const cosHalf = Math.cos(attack.arc / 2);
+        
+        for (const enemy of this.enemies) {
+            if (!enemy.isAlive()) continue;
+            
+            const toEnemy = enemy.position.sub(attack.origin);
+            // 敵の体の大きさ分だけ届く距離をおまけする
+            const dist = toEnemy.length();
+            if (dist > attack.range + enemy.size / 2) continue;
+            
+            // 密着していれば角度に関係なく当たる
+            if (dist > enemy.size / 2) {
+                const dot = (toEnemy.x * attack.aim.x + toEnemy.y * attack.aim.y) / dist;
+                if (dot < cosHalf) continue;
+            }
+            
+            const result = enemy.takeDamage(attack.damage);
+            enemy.applyKnockback(attack.aim, attack.knockback);
+            hits.push({ enemy, ...result });
+        }
+        
+        return hits;
     }
     
     checkPlayerAttack(attackData) {

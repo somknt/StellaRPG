@@ -15,6 +15,7 @@ class InputManager {
         this.mouseX = 0;
         this.mouseY = 0;
         this.isMouseClicked = false;
+        this.isRightClicked = false;
         
         this.init();
     }
@@ -69,7 +70,13 @@ class InputManager {
             if (e.button === 0) {
                 this.isMouseClicked = true;
             }
+            if (e.button === 2) {
+                this.isRightClicked = true;
+            }
         });
+        
+        // 右クリックメニューを出さない（右クリックは回避に使う）
+        canvas.addEventListener('contextmenu', (e) => e.preventDefault());
         
         window.addEventListener('mouseup', (e) => {
             this.mouseButtons[e.button] = false;
@@ -81,6 +88,7 @@ class InputManager {
         this.pressedKeys = {};
         this.releasedKeys = {};
         this.isMouseClicked = false;
+        this.isRightClicked = false;
     }
     
     // 互換用（旧コードから呼ばれても問題ないよう何もしない）
@@ -120,6 +128,11 @@ class InputManager {
     // ダッシュキー
     isSprintPressed() {
         return this.isKeyDown('ShiftLeft') || this.isKeyDown('ShiftRight');
+    }
+    
+    // 回避キー（C キー or 右クリック）
+    isDodgePressed() {
+        return this.isKeyPressed('KeyC') || this.isRightClicked === true;
     }
     
     // 攻撃キー

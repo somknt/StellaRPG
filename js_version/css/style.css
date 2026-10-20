@@ -60,6 +60,25 @@ body {
     top: 70px;
 }
 
+#stamina-bar-container {
+    top: 120px;
+}
+
+.stamina-fill {
+    background: linear-gradient(90deg, #e6b800, #ffe066);
+}
+
+/* スタミナ切れ中は赤っぽく点滅 */
+.stamina-fill.exhausted {
+    background: linear-gradient(90deg, #b34700, #ff8040);
+    animation: stamina-blink 0.5s infinite alternate;
+}
+
+@keyframes stamina-blink {
+    from { opacity: 1; }
+    to { opacity: 0.5; }
+}
+
 .stat-label {
     font-weight: bold;
     font-size: 14px;
@@ -101,7 +120,7 @@ body {
 /* Level Info */
 .stat-info {
     position: absolute;
-    top: 120px;
+    top: 170px;
     left: 20px;
     background: rgba(0, 0, 0, 0.6);
     padding: 8px 12px;
