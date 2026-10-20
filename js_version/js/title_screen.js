@@ -116,6 +116,17 @@ class TitleScreen {
     handleInput(input) {
         const currentMenu = this.getCurrentMenu();
         
+        // デバッグ: 入力状態を表示
+        if (input.isMouseClicked) {
+            console.log('マウスクリック検出:', {
+                mouseX: input.mouseX,
+                mouseY: input.mouseY,
+                hoverIndex: this.hoverIndex,
+                selectedIndex: this.selectedIndex,
+                buttonBounds: this.buttonBounds
+            });
+        }
+        
         // 上下キーでメニュー選択
         if (input.isKeyPressed('ArrowDown') || input.isKeyPressed('KeyS')) {
             do {
@@ -132,17 +143,23 @@ class TitleScreen {
         
         // Enterキーまたはスペースキーで決定
         if (input.isKeyPressed('Enter') || input.isKeyPressed('Space')) {
+            console.log('キーボード決定キー押下');
             if (!currentMenu[this.selectedIndex].disabled) {
                 console.log('決定キー押下:', currentMenu[this.selectedIndex].text);
                 this.selectMenuItem();
+            } else {
+                console.log('無効化された項目です');
             }
         }
         
         // マウスクリックで決定
         if (input.isMouseClicked && this.hoverIndex !== -1) {
+            console.log('マウスクリック判定通過');
             if (!currentMenu[this.hoverIndex].disabled) {
                 console.log('マウスクリック:', currentMenu[this.hoverIndex].text);
                 this.selectMenuItem();
+            } else {
+                console.log('無効化された項目をクリックしました');
             }
         }
         
@@ -157,14 +174,21 @@ class TitleScreen {
         const currentMenu = this.getCurrentMenu();
         const selectedItem = currentMenu[this.selectedIndex];
         
-        console.log('選択:', selectedItem.action);
+        console.log('=== selectMenuItem 呼び出し ===');
+        console.log('選択アクション:', selectedItem.action);
+        console.log('window.game存在:', !!window.game);
         
         switch (selectedItem.action) {
             case 'battle':
                 // 難易度選択をスキップして直接キャラクター選択へ
+                console.log('フリーバトル選択 - キャラクター選択に遷移');
                 if (window.game) {
+                    console.log('gameStateを変更: title → character_select');
                     window.game.battleDifficulty = 'normal'; // デフォルト難易度
                     window.game.gameState = 'character_select';
+                    console.log('現在のgameState:', window.game.gameState);
+                } else {
+                    console.error('window.gameが存在しません！');
                 }
                 break;
             case 'story_coming_soon':
