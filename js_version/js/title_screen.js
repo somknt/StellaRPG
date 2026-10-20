@@ -3,7 +3,7 @@
 class TitleScreen {
     constructor() {
         this.state = 'main'; // 'main', 'story', 'battle', 'settings', 'credits'
-        this.selectedIndex = 0;
+        this.selectedIndex = 0; // 最初は「フリーバトル」が選択される
         this.isTransitioning = false;
         this.hoverIndex = -1; // マウスホバー中のインデックス
         
@@ -91,14 +91,19 @@ class TitleScreen {
         const mouseX = input.mouseX || 0;
         const mouseY = input.mouseY || 0;
         
+        const currentMenu = this.getCurrentMenu();
+        
         // ホバー中のボタンを検出
         this.hoverIndex = -1;
         for (let i = 0; i < this.buttonBounds.length; i++) {
             const bounds = this.buttonBounds[i];
             if (mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
                 mouseY >= bounds.y && mouseY <= bounds.y + bounds.height) {
-                this.hoverIndex = i;
-                break;
+                // 無効化されていないボタンのみホバー可能
+                if (!currentMenu[i].disabled) {
+                    this.hoverIndex = i;
+                    break;
+                }
             }
         }
         
@@ -116,16 +121,19 @@ class TitleScreen {
             do {
                 this.selectedIndex = (this.selectedIndex + 1) % currentMenu.length;
             } while (currentMenu[this.selectedIndex].disabled);
+            console.log('選択変更（下）:', this.selectedIndex, currentMenu[this.selectedIndex].text);
         }
         if (input.isKeyPressed('ArrowUp') || input.isKeyPressed('KeyW')) {
             do {
                 this.selectedIndex = (this.selectedIndex - 1 + currentMenu.length) % currentMenu.length;
             } while (currentMenu[this.selectedIndex].disabled);
+            console.log('選択変更（上）:', this.selectedIndex, currentMenu[this.selectedIndex].text);
         }
         
         // Enterキーまたはスペースキーで決定
         if (input.isKeyPressed('Enter') || input.isKeyPressed('Space')) {
             if (!currentMenu[this.selectedIndex].disabled) {
+                console.log('決定キー押下:', currentMenu[this.selectedIndex].text);
                 this.selectMenuItem();
             }
         }
@@ -133,12 +141,14 @@ class TitleScreen {
         // マウスクリックで決定
         if (input.isMouseClicked && this.hoverIndex !== -1) {
             if (!currentMenu[this.hoverIndex].disabled) {
+                console.log('マウスクリック:', currentMenu[this.hoverIndex].text);
                 this.selectMenuItem();
             }
         }
         
         // Escapeキーで戻る
         if (input.isKeyPressed('Escape') && this.state !== 'main') {
+            console.log('Escape押下: メイン画面に戻る');
             this.goBack();
         }
     }
