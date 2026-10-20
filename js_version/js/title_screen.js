@@ -5,19 +5,15 @@ class TitleScreen {
         this.state = 'main'; // 'main', 'story', 'battle', 'settings', 'credits'
         this.selectedIndex = 0;
         this.isTransitioning = false;
+        this.hoverIndex = -1; // マウスホバー中のインデックス
         
         // メニュー定義
         this.menus = {
             main: [
-                { text: 'ストーリー', action: 'story' },
-                { text: 'バトル', action: 'battle' },
+                { text: 'フリーバトル', action: 'battle' },
+                { text: 'メインストーリー（実装予定）', action: 'story_coming_soon', disabled: true },
                 { text: 'せってい', action: 'settings' },
                 { text: 'クレジット', action: 'credits' }
-            ],
-            story: [
-                { text: 'はじめから', action: 'new_game' },
-                { text: 'つづきから', action: 'continue' },
-                { text: 'もどる', action: 'back' }
             ],
             battle: [
                 { text: 'かんたん', action: 'battle_easy' },
@@ -26,6 +22,9 @@ class TitleScreen {
                 { text: 'もどる', action: 'back' }
             ]
         };
+        
+        // ボタンの位置とサイズ（クリック判定用）
+        this.buttonBounds = [];
         
         // アニメーション
         this.slideOffset = 0;
@@ -78,9 +77,34 @@ class TitleScreen {
             this.isTransitioning = false;
         }
         
+        // マウスホバー処理
+        this.updateMouseHover(input);
+        
         // 入力処理
         if (!this.isTransitioning) {
             this.handleInput(input);
+        }
+    }
+    
+    updateMouseHover(input) {
+        // マウス座標を取得
+        const mouseX = input.mouseX || 0;
+        const mouseY = input.mouseY || 0;
+        
+        // ホバー中のボタンを検出
+        this.hoverIndex = -1;
+        for (let i = 0; i < this.buttonBounds.length; i++) {
+            const bounds = this.buttonBounds[i];
+            if (mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
+                mouseY >= bounds.y && mouseY <= bounds.y + bounds.height) {
+                this.hoverIndex = i;
+                break;
+            }
+        }
+        
+        // ホバー中のボタンを選択中にする
+        if (this.hoverIndex !== -1) {
+            this.selectedIndex = this.hoverIndex;
         }
     }
     
@@ -89,15 +113,28 @@ class TitleScreen {
         
         // 上下キーでメニュー選択
         if (input.isKeyPressed('ArrowDown') || input.isKeyPressed('KeyS')) {
-            this.selectedIndex = (this.selectedIndex + 1) % currentMenu.length;
+            do {
+                this.selectedIndex = (this.selectedIndex + 1) % currentMenu.length;
+            } while (currentMenu[this.selectedIndex].disabled);
         }
         if (input.isKeyPressed('ArrowUp') || input.isKeyPressed('KeyW')) {
-            this.selectedIndex = (this.selectedIndex - 1 + currentMenu.length) % currentMenu.length;
+            do {
+                this.selectedIndex = (this.selectedIndex - 1 + currentMenu.length) % currentMenu.length;
+            } while (currentMenu[this.selectedIndex].disabled);
         }
         
         // Enterキーまたはスペースキーで決定
         if (input.isKeyPressed('Enter') || input.isKeyPressed('Space')) {
-            this.selectMenuItem();
+            if (!currentMenu[this.selectedIndex].disabled) {
+                this.selectMenuItem();
+            }
+        }
+        
+        // マウスクリックで決定
+        if (input.isMouseClicked && this.hoverIndex !== -1) {
+            if (!currentMenu[this.hoverIndex].disabled) {
+                this.selectMenuItem();
+            }
         }
         
         // Escapeキーで戻る
@@ -113,26 +150,21 @@ class TitleScreen {
         console.log('選択:', selectedItem.action);
         
         switch (selectedItem.action) {
-            case 'story':
-                this.changeState('story');
-                break;
             case 'battle':
                 this.changeState('battle');
                 break;
+            case 'story_coming_soon':
+                console.log('メインストーリーは実装予定です');
+                // 何もしない（実装予定）
+                break;
             case 'settings':
-                this.changeState('settings');
+                console.log('設定画面は実装予定です');
                 break;
             case 'credits':
-                this.changeState('credits');
+                console.log('クレジット画面は実装予定です');
                 break;
             case 'back':
                 this.goBack();
-                break;
-            case 'new_game':
-                this.startNewGame();
-                break;
-            case 'continue':
-                this.continueGame();
                 break;
             case 'battle_easy':
                 this.startBattle('easy');
@@ -264,19 +296,35 @@ class TitleScreen {
         const buttonWidth = 300;
         const spacing = 20;
         
+        // ボタン境界情報をリセット
+        this.buttonBounds = [];
+        
         ctx.save();
         
         currentMenu.forEach((item, index) => {
             const y = startY + (buttonHeight + spacing) * index;
             const isSelected = index === this.selectedIndex;
             const isBackButton = item.action === 'back';
+            const isDisabled = item.disabled || false;
+            
+            // ボタン境界を記録
+            this.buttonBounds.push({
+                x: centerX - buttonWidth/2,
+                y: y,
+                width: buttonWidth,
+                height: buttonHeight
+            });
             
             // ボタン背景
-            ctx.fillStyle = isBackButton 
-                ? 'rgba(60, 60, 80, 0.7)' 
-                : 'rgba(0, 0, 0, 0.6)';
+            if (isDisabled) {
+                ctx.fillStyle = 'rgba(40, 40, 50, 0.5)';
+            } else if (isBackButton) {
+                ctx.fillStyle = 'rgba(60, 60, 80, 0.7)';
+            } else {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+            }
             
-            if (isSelected) {
+            if (isSelected && !isDisabled) {
                 ctx.fillStyle = 'rgba(255, 215, 0, 0.3)';
                 ctx.shadowColor = '#ffd700';
                 ctx.shadowBlur = 20;
@@ -287,21 +335,31 @@ class TitleScreen {
             ctx.fill();
             
             // ボタンの枠線
-            ctx.strokeStyle = isSelected ? '#ffd700' : 'rgba(255, 255, 255, 0.3)';
+            if (isDisabled) {
+                ctx.strokeStyle = 'rgba(100, 100, 120, 0.3)';
+            } else {
+                ctx.strokeStyle = isSelected ? '#ffd700' : 'rgba(255, 255, 255, 0.3)';
+            }
             ctx.lineWidth = 2;
             ctx.stroke();
             
             ctx.shadowBlur = 0;
             
             // ボタンテキスト
-            ctx.font = isSelected ? 'bold 28px sans-serif' : '24px sans-serif';
+            ctx.font = isSelected && !isDisabled ? 'bold 28px sans-serif' : '24px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillStyle = isSelected ? '#ffd700' : '#ffffff';
+            
+            if (isDisabled) {
+                ctx.fillStyle = 'rgba(150, 150, 160, 0.5)';
+            } else {
+                ctx.fillStyle = isSelected ? '#ffd700' : '#ffffff';
+            }
+            
             ctx.fillText(item.text, centerX, y + buttonHeight/2);
             
-            // 選択カーソル
-            if (isSelected) {
+            // 選択カーソル（無効化されていない場合のみ）
+            if (isSelected && !isDisabled) {
                 ctx.fillStyle = '#ffd700';
                 ctx.beginPath();
                 ctx.moveTo(centerX - buttonWidth/2 - 20, y + buttonHeight/2);

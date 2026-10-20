@@ -6,6 +6,12 @@ class InputManager {
         this.keysPrev = {};
         this.mousePos = new Vector2(0, 0);
         this.mouseButtons = {};
+        this.mouseButtonsPrev = {};
+        
+        // タイトル画面用のマウス座標とクリック状態
+        this.mouseX = 0;
+        this.mouseY = 0;
+        this.isMouseClicked = false;
         
         this.init();
     }
@@ -26,6 +32,10 @@ class InputManager {
             const rect = canvas.getBoundingClientRect();
             this.mousePos.x = (e.clientX - rect.left) * (canvas.width / rect.width);
             this.mousePos.y = (e.clientY - rect.top) * (canvas.height / rect.height);
+            
+            // タイトル画面用
+            this.mouseX = this.mousePos.x;
+            this.mouseY = this.mousePos.y;
         });
         
         window.addEventListener('mousedown', (e) => {
@@ -39,6 +49,10 @@ class InputManager {
     
     update() {
         this.keysPrev = { ...this.keys };
+        this.mouseButtonsPrev = { ...this.mouseButtons };
+        
+        // マウスクリック判定（左クリック）
+        this.isMouseClicked = this.mouseButtons[0] === true && this.mouseButtonsPrev[0] !== true;
     }
     
     // キーが押されているか
