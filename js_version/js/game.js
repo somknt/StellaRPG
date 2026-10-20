@@ -170,6 +170,7 @@ class Game {
         
         // タイトル画面
         if (this.gameState === 'title') {
+            this.input.update(); // 入力を更新
             this.titleScreen.update(deltaTime, this.input);
             return;
         }
@@ -178,6 +179,7 @@ class Game {
         if (this.gameState === 'character_select') {
             this.characterSelect.update(this.input);
             if (this.characterSelect.isComplete) {
+                console.log('ゲーム開始処理実行');
                 this.startGame(this.characterSelect.getSelectedGender());
             }
             return;

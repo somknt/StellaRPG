@@ -10,6 +10,9 @@ class CharacterSelectScreen {
     }
     
     update(input) {
+        // 入力を更新（これがないとマウスクリックが検出されない）
+        input.update();
+        
         // マウス位置でホバー判定
         const mousePos = input.mousePos;
         
@@ -25,9 +28,10 @@ class CharacterSelectScreen {
             this.hoverGender = null;
         }
         
-        // クリックで選択
-        if (input.mouseButtons[0]) { // 左クリック
+        // クリックで選択（isMouseClickedを使用）
+        if (input.isMouseClicked) {
             if (this.hoverGender) {
+                console.log('キャラクター選択:', this.hoverGender);
                 this.selectedGender = this.hoverGender;
                 this.isComplete = true;
             }
@@ -35,10 +39,12 @@ class CharacterSelectScreen {
         
         // キーボードでも選択可能
         if (input.isKeyPressed('Digit1') || input.isKeyPressed('ArrowLeft')) {
+            console.log('キャラクター選択: male（キーボード）');
             this.selectedGender = 'male';
             this.isComplete = true;
         }
         if (input.isKeyPressed('Digit2') || input.isKeyPressed('ArrowRight')) {
+            console.log('キャラクター選択: female（キーボード）');
             this.selectedGender = 'female';
             this.isComplete = true;
         }
