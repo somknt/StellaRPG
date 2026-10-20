@@ -6,11 +6,12 @@ class Game {
         this.ctx = canvas.getContext('2d');
         this.running = false;
         this.paused = false;
-        this.gameState = 'character_select'; // 'character_select', 'playing', 'game_over'
+        this.gameState = 'title'; // 'title', 'character_select', 'playing', 'game_over'
         
         // システム
         this.input = new InputManager();
         this.ui = new UIManager();
+        this.titleScreen = new TitleScreen();
         this.characterSelect = new CharacterSelectScreen();
         
         // ゲームオブジェクト
@@ -161,6 +162,12 @@ class Game {
     update(deltaTime) {
         if (this.paused) return;
         
+        // タイトル画面
+        if (this.gameState === 'title') {
+            this.titleScreen.update(deltaTime, this.input);
+            return;
+        }
+        
         // キャラクター選択中
         if (this.gameState === 'character_select') {
             this.characterSelect.update(this.input);
@@ -242,6 +249,12 @@ class Game {
         // 画面クリア
         this.ctx.fillStyle = '#000000';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // タイトル画面
+        if (this.gameState === 'title') {
+            this.titleScreen.draw(this.ctx);
+            return;
+        }
         
         // キャラクター選択画面
         if (this.gameState === 'character_select') {
