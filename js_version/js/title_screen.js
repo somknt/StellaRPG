@@ -100,6 +100,9 @@ class TitleScreen {
         
         const currentMenu = this.getCurrentMenu();
         
+        // デバッグ: マウス座標とボタン情報
+        // console.log('マウス:', mouseX.toFixed(0), mouseY.toFixed(0), 'ボタン数:', this.buttonBounds.length);
+        
         // ホバー中のボタンを検出
         this.hoverIndex = -1;
         for (let i = 0; i < this.buttonBounds.length; i++) {
@@ -109,6 +112,7 @@ class TitleScreen {
                 // 無効化されていないボタンのみホバー可能
                 if (!currentMenu[i].disabled) {
                     this.hoverIndex = i;
+                    console.log('🎯 ホバー検出:', i, currentMenu[i].text, bounds);
                     break;
                 }
             }
@@ -361,6 +365,12 @@ class TitleScreen {
         // ボタン境界情報をリセット
         this.buttonBounds = [];
         
+        // デバッグ: 最初のフレームのみログ出力
+        if (!this._boundsLogged) {
+            console.log('🎨 drawMenu - centerX:', centerX, 'slideOffset:', this.slideOffset);
+            this._boundsLogged = true;
+        }
+        
         ctx.save();
         
         currentMenu.forEach((item, index) => {
@@ -370,12 +380,19 @@ class TitleScreen {
             const isDisabled = item.disabled || false;
             
             // ボタン境界を記録
-            this.buttonBounds.push({
+            const bounds = {
                 x: centerX - buttonWidth/2,
                 y: y,
                 width: buttonWidth,
                 height: buttonHeight
-            });
+            };
+            this.buttonBounds.push(bounds);
+            
+            // デバッグ: 最初のボタンのみログ
+            if (index === 0 && !this._firstButtonLogged) {
+                console.log('📐 第1ボタン境界:', bounds, 'テキスト:', item.text);
+                this._firstButtonLogged = true;
+            }
             
             // ボタン背景
             if (isDisabled) {
