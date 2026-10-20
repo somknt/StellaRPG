@@ -10,9 +10,6 @@ class CharacterSelectScreen {
     }
     
     update(input) {
-        // 入力を更新（これがないとマウスクリックが検出されない）
-        input.update();
-        
         // マウス位置でホバー判定
         const mousePos = input.mousePos;
         

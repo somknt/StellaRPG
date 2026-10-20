@@ -168,9 +168,11 @@ class Game {
     update(deltaTime) {
         if (this.paused) return;
         
+        // 入力を毎フレーム必ず更新
+        this.input.update();
+        
         // タイトル画面
         if (this.gameState === 'title') {
-            this.input.update(); // 入力を更新
             this.titleScreen.update(deltaTime, this.input);
             return;
         }
@@ -187,9 +189,6 @@ class Game {
         
         // ゲームプレイ中
         if (this.gameState !== 'playing') return;
-        
-        // 入力更新
-        this.input.update();
         
         // プレイヤー更新
         this.player.update(deltaTime, this.input);

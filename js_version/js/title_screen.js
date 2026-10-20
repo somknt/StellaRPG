@@ -53,6 +53,9 @@ class TitleScreen {
     }
     
     update(deltaTime, input) {
+        // デバッグ: updateが呼ばれているか確認
+        // console.log('TitleScreen.update() 呼び出し');
+        
         // ロゴのフェードイン
         if (this.logoAlpha < 1) {
             this.logoAlpha = Math.min(1, this.logoAlpha + deltaTime);
