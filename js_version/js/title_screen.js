@@ -84,9 +84,6 @@ class TitleScreen {
             this.isTransitioning = false;
         }
         
-        // マウスホバー処理
-        this.updateMouseHover(input);
-        
         // 入力処理
         if (!this.isTransitioning) {
             this.handleInput(input);
@@ -127,26 +124,13 @@ class TitleScreen {
     handleInput(input) {
         const currentMenu = this.getCurrentMenu();
         
-        console.log('📋 handleInput 呼び出し:', {
-            isMouseClicked: input.isMouseClicked,
-            mouseButtons0: input.mouseButtons[0],
-            hoverIndex: this.hoverIndex,
-            selectedIndex: this.selectedIndex
-        });
-        
         // Enterキーまたはスペースキーで決定
-        const enterPressed = input.isKeyPressed('Enter');
-        const spacePressed = input.isKeyPressed('Space');
-        
-        if (enterPressed || spacePressed) {
-            console.log('🎮 キーボード決定キー押下');
+        if (input.isKeyPressed('Enter') || input.isKeyPressed('Space')) {
+            console.log('🎮 Enter/Space押下 → 選択実行');
             if (!currentMenu[this.selectedIndex].disabled) {
-                console.log('✅ 決定キー実行:', currentMenu[this.selectedIndex].text);
                 this.selectMenuItem();
-            } else {
-                console.log('❌ 無効化された項目です');
             }
-            return; // 処理したので終了
+            return;
         }
         
         // 上下キーでメニュー選択
@@ -154,43 +138,41 @@ class TitleScreen {
             do {
                 this.selectedIndex = (this.selectedIndex + 1) % currentMenu.length;
             } while (currentMenu[this.selectedIndex].disabled);
-            console.log('⬇️ 選択変更（下）:', this.selectedIndex, currentMenu[this.selectedIndex].text);
+            console.log('⬇️ 選択:', currentMenu[this.selectedIndex].text);
         }
         if (input.isKeyPressed('ArrowUp') || input.isKeyPressed('KeyW')) {
             do {
                 this.selectedIndex = (this.selectedIndex - 1 + currentMenu.length) % currentMenu.length;
             } while (currentMenu[this.selectedIndex].disabled);
-            console.log('⬆️ 選択変更（上）:', this.selectedIndex, currentMenu[this.selectedIndex].text);
+            console.log('⬆️ 選択:', currentMenu[this.selectedIndex].text);
         }
         
-        // マウスクリックで決定
-        // isMouseClickedが機能しない場合の代替策：mouseButtons[0]を直接チェック
-        if (input.isMouseClicked || input.mouseButtons[0]) {
-            console.log('🖱️ マウスクリック判定:', {
-                isMouseClicked: input.isMouseClicked,
-                mouseButtons0: input.mouseButtons[0],
-                hoverIndex: this.hoverIndex
-            });
+        // マウスクリック判定（簡略化）
+        // クリックイベントは発火しているので、ボタン境界をチェック
+        const mouseX = input.mouseX;
+        const mouseY = input.mouseY;
+        
+        // ボタン境界チェック
+        for (let i = 0; i < this.buttonBounds.length; i++) {
+            const bounds = this.buttonBounds[i];
+            const isInside = mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
+                           mouseY >= bounds.y && mouseY <= bounds.y + bounds.height;
             
-            if (this.hoverIndex !== -1) {
-                console.log('✅ ホバー中のボタンあり');
-                if (!currentMenu[this.hoverIndex].disabled) {
-                    console.log('✅ マウスクリック実行:', currentMenu[this.hoverIndex].text);
-                    this.selectMenuItem();
-                    // クリック後にボタン状態をリセット
-                    input.mouseButtons[0] = false;
-                } else {
-                    console.log('❌ 無効化された項目をクリックしました');
+            if (isInside) {
+                // マウスがボタン内にある
+                this.hoverIndex = i;
+                this.selectedIndex = i;
+                
+                // マウスボタンが押された瞬間をチェック
+                if (input.mouseButtons[0] && !input.mouseButtonsPrev[0]) {
+                    console.log('🖱️ クリック検出:', currentMenu[i].text);
+                    if (!currentMenu[i].disabled) {
+                        this.selectMenuItem();
+                    }
+                    return;
                 }
-            } else {
-                console.log('❌ ボタン外をクリック');
+                break;
             }
-        }
-        
-        // Escapeキーで戻る
-        if (input.isKeyPressed('Escape') && this.state !== 'main') {
-            console.log('↩️ Escape押下: メイン画面に戻る');
-            this.goBack();
         }
     }
     
