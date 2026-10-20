@@ -43,7 +43,7 @@ class Game {
         
         console.log('初期化完了！');
         this.running = true;
-        this.gameState = 'character_select';
+        // gameStateはコンストラクタで'title'に設定済み
     }
     
     startGame(gender) {
