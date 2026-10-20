@@ -161,7 +161,11 @@ class TitleScreen {
         
         switch (selectedItem.action) {
             case 'battle':
-                this.changeState('battle');
+                // 難易度選択をスキップして直接キャラクター選択へ
+                if (window.game) {
+                    window.game.battleDifficulty = 'normal'; // デフォルト難易度
+                    window.game.gameState = 'character_select';
+                }
                 break;
             case 'story_coming_soon':
                 console.log('メインストーリーは実装予定です');
