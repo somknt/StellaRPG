@@ -124,13 +124,24 @@ class TitleScreen {
     handleInput(input) {
         const currentMenu = this.getCurrentMenu();
         
-        // Enterキーまたはスペースキーで決定
-        if (input.isKeyPressed('Enter') || input.isKeyPressed('Space')) {
-            console.log('🎮 Enter/Space押下 → 選択実行');
+        // 🔥 最優先: Enterキーで確実に動作させる
+        if (input.keys['Enter'] && !input.keysPrev['Enter']) {
+            console.log('🔥 Enter検出 → 即座に実行！');
             if (!currentMenu[this.selectedIndex].disabled) {
+                console.log('🔥 選択項目:', currentMenu[this.selectedIndex].text);
                 this.selectMenuItem();
+                return;
             }
-            return;
+        }
+        
+        // Spaceキーでも決定
+        if (input.keys['Space'] && !input.keysPrev['Space']) {
+            console.log('🔥 Space検出 → 即座に実行！');
+            if (!currentMenu[this.selectedIndex].disabled) {
+                console.log('🔥 選択項目:', currentMenu[this.selectedIndex].text);
+                this.selectMenuItem();
+                return;
+            }
         }
         
         // 上下キーでメニュー選択
@@ -147,10 +158,9 @@ class TitleScreen {
             console.log('⬆️ 選択:', currentMenu[this.selectedIndex].text);
         }
         
-        // マウスクリック判定（簡略化）
-        // クリックイベントは発火しているので、ボタン境界をチェック
-        const mouseX = input.mouseX;
-        const mouseY = input.mouseY;
+        // マウスクリック判定
+        const mouseX = input.mouseX || 0;
+        const mouseY = input.mouseY || 0;
         
         // ボタン境界チェック
         for (let i = 0; i < this.buttonBounds.length; i++) {
@@ -159,13 +169,13 @@ class TitleScreen {
                            mouseY >= bounds.y && mouseY <= bounds.y + bounds.height;
             
             if (isInside) {
-                // マウスがボタン内にある
                 this.hoverIndex = i;
                 this.selectedIndex = i;
                 
-                // マウスボタンが押された瞬間をチェック
-                if (input.mouseButtons[0] && !input.mouseButtonsPrev[0]) {
-                    console.log('🖱️ クリック検出:', currentMenu[i].text);
+                // マウスボタンが押された瞬間
+                if (input.mouseButtons && input.mouseButtons[0] && 
+                    input.mouseButtonsPrev && !input.mouseButtonsPrev[0]) {
+                    console.log('🔥 クリック検出:', currentMenu[i].text);
                     if (!currentMenu[i].disabled) {
                         this.selectMenuItem();
                     }
