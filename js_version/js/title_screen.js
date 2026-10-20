@@ -119,15 +119,19 @@ class TitleScreen {
     handleInput(input) {
         const currentMenu = this.getCurrentMenu();
         
-        // デバッグ: 入力状態を表示
-        if (input.isMouseClicked) {
-            console.log('マウスクリック検出:', {
-                mouseX: input.mouseX,
-                mouseY: input.mouseY,
-                hoverIndex: this.hoverIndex,
-                selectedIndex: this.selectedIndex,
-                buttonBounds: this.buttonBounds
-            });
+        // Enterキーまたはスペースキーで決定
+        const enterPressed = input.isKeyPressed('Enter');
+        const spacePressed = input.isKeyPressed('Space');
+        
+        if (enterPressed || spacePressed) {
+            console.log('🎮 キーボード決定キー押下');
+            if (!currentMenu[this.selectedIndex].disabled) {
+                console.log('✅ 決定キー実行:', currentMenu[this.selectedIndex].text);
+                this.selectMenuItem();
+            } else {
+                console.log('❌ 無効化された項目です');
+            }
+            return; // 処理したので終了
         }
         
         // 上下キーでメニュー選択
@@ -135,40 +139,40 @@ class TitleScreen {
             do {
                 this.selectedIndex = (this.selectedIndex + 1) % currentMenu.length;
             } while (currentMenu[this.selectedIndex].disabled);
-            console.log('選択変更（下）:', this.selectedIndex, currentMenu[this.selectedIndex].text);
+            console.log('⬇️ 選択変更（下）:', this.selectedIndex, currentMenu[this.selectedIndex].text);
         }
         if (input.isKeyPressed('ArrowUp') || input.isKeyPressed('KeyW')) {
             do {
                 this.selectedIndex = (this.selectedIndex - 1 + currentMenu.length) % currentMenu.length;
             } while (currentMenu[this.selectedIndex].disabled);
-            console.log('選択変更（上）:', this.selectedIndex, currentMenu[this.selectedIndex].text);
-        }
-        
-        // Enterキーまたはスペースキーで決定
-        if (input.isKeyPressed('Enter') || input.isKeyPressed('Space')) {
-            console.log('キーボード決定キー押下');
-            if (!currentMenu[this.selectedIndex].disabled) {
-                console.log('決定キー押下:', currentMenu[this.selectedIndex].text);
-                this.selectMenuItem();
-            } else {
-                console.log('無効化された項目です');
-            }
+            console.log('⬆️ 選択変更（上）:', this.selectedIndex, currentMenu[this.selectedIndex].text);
         }
         
         // マウスクリックで決定
-        if (input.isMouseClicked && this.hoverIndex !== -1) {
-            console.log('マウスクリック判定通過');
-            if (!currentMenu[this.hoverIndex].disabled) {
-                console.log('マウスクリック:', currentMenu[this.hoverIndex].text);
-                this.selectMenuItem();
+        if (input.isMouseClicked) {
+            console.log('🖱️ マウスクリック検出:', {
+                mouseX: input.mouseX,
+                mouseY: input.mouseY,
+                hoverIndex: this.hoverIndex,
+                selectedIndex: this.selectedIndex
+            });
+            
+            if (this.hoverIndex !== -1) {
+                console.log('✅ ホバー中のボタンあり');
+                if (!currentMenu[this.hoverIndex].disabled) {
+                    console.log('✅ マウスクリック実行:', currentMenu[this.hoverIndex].text);
+                    this.selectMenuItem();
+                } else {
+                    console.log('❌ 無効化された項目をクリックしました');
+                }
             } else {
-                console.log('無効化された項目をクリックしました');
+                console.log('❌ ボタン外をクリック');
             }
         }
         
         // Escapeキーで戻る
         if (input.isKeyPressed('Escape') && this.state !== 'main') {
-            console.log('Escape押下: メイン画面に戻る');
+            console.log('↩️ Escape押下: メイン画面に戻る');
             this.goBack();
         }
     }
