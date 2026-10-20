@@ -168,9 +168,6 @@ class Game {
     update(deltaTime) {
         if (this.paused) return;
         
-        // 入力を毎フレーム必ず更新
-        this.input.update();
-        
         // タイトル画面
         if (this.gameState === 'title') {
             this.titleScreen.update(deltaTime, this.input);
@@ -306,6 +303,9 @@ class Game {
         
         // 描画
         this.draw();
+        
+        // 「押された瞬間」の入力をクリア（必ずフレームの最後に行う）
+        this.input.endFrame();
         
         // 次のフレーム
         requestAnimationFrame((time) => this.gameLoop(time));

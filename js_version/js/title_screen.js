@@ -53,13 +53,6 @@ class TitleScreen {
     }
     
     update(deltaTime, input) {
-        // デバッグ: updateが呼ばれているか確認（最初の5秒だけ）
-        if (!this._startTime) this._startTime = performance.now();
-        const elapsed = (performance.now() - this._startTime) / 1000;
-        if (elapsed < 2) {
-            console.log('TitleScreen.update() 呼び出し中... (', elapsed.toFixed(1), '秒)');
-        }
-        
         // ロゴのフェードイン
         if (this.logoAlpha < 1) {
             this.logoAlpha = Math.min(1, this.logoAlpha + deltaTime);
@@ -90,99 +83,58 @@ class TitleScreen {
         }
     }
     
-    updateMouseHover(input) {
-        // マウス座標を取得
-        const mouseX = input.mouseX || 0;
-        const mouseY = input.mouseY || 0;
-        
-        const currentMenu = this.getCurrentMenu();
-        
-        // デバッグ: マウス座標とボタン情報
-        // console.log('マウス:', mouseX.toFixed(0), mouseY.toFixed(0), 'ボタン数:', this.buttonBounds.length);
-        
-        // ホバー中のボタンを検出
-        this.hoverIndex = -1;
+    // マウス座標の下にあるボタンの番号を返す（なければ -1）
+    getButtonIndexAt(x, y) {
         for (let i = 0; i < this.buttonBounds.length; i++) {
-            const bounds = this.buttonBounds[i];
-            if (mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
-                mouseY >= bounds.y && mouseY <= bounds.y + bounds.height) {
-                // 無効化されていないボタンのみホバー可能
-                if (!currentMenu[i].disabled) {
-                    this.hoverIndex = i;
-                    console.log('🎯 ホバー検出:', i, currentMenu[i].text, bounds);
-                    break;
-                }
+            const b = this.buttonBounds[i];
+            if (x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height) {
+                return i;
             }
         }
-        
-        // ホバー中のボタンを選択中にする
-        if (this.hoverIndex !== -1) {
-            this.selectedIndex = this.hoverIndex;
-        }
+        return -1;
     }
     
     handleInput(input) {
         const currentMenu = this.getCurrentMenu();
         
-        // 🔥 最優先: Enterキーで確実に動作させる
-        if (input.keys['Enter'] && !input.keysPrev['Enter']) {
-            console.log('🔥 Enter検出 → 即座に実行！');
-            if (!currentMenu[this.selectedIndex].disabled) {
-                console.log('🔥 選択項目:', currentMenu[this.selectedIndex].text);
-                this.selectMenuItem();
-                return;
-            }
+        // マウスホバー：有効なボタンの上なら選択中にする
+        this.hoverIndex = this.getButtonIndexAt(input.mouseX, input.mouseY);
+        if (this.hoverIndex !== -1 && !currentMenu[this.hoverIndex].disabled) {
+            this.selectedIndex = this.hoverIndex;
         }
         
-        // Spaceキーでも決定
-        if (input.keys['Space'] && !input.keysPrev['Space']) {
-            console.log('🔥 Space検出 → 即座に実行！');
-            if (!currentMenu[this.selectedIndex].disabled) {
-                console.log('🔥 選択項目:', currentMenu[this.selectedIndex].text);
+        // マウスクリックで決定
+        if (input.isMouseClicked && this.hoverIndex !== -1) {
+            if (!currentMenu[this.hoverIndex].disabled) {
+                this.selectedIndex = this.hoverIndex;
                 this.selectMenuItem();
-                return;
             }
+            return;
         }
         
-        // 上下キーでメニュー選択
+        // Enter / Space で決定
+        if (input.isKeyPressed('Enter') || input.isKeyPressed('Space')) {
+            if (!currentMenu[this.selectedIndex].disabled) {
+                this.selectMenuItem();
+            }
+            return;
+        }
+        
+        // 上下キーで選択（無効な項目はスキップ）
         if (input.isKeyPressed('ArrowDown') || input.isKeyPressed('KeyS')) {
             do {
                 this.selectedIndex = (this.selectedIndex + 1) % currentMenu.length;
             } while (currentMenu[this.selectedIndex].disabled);
-            console.log('⬇️ 選択:', currentMenu[this.selectedIndex].text);
         }
         if (input.isKeyPressed('ArrowUp') || input.isKeyPressed('KeyW')) {
             do {
                 this.selectedIndex = (this.selectedIndex - 1 + currentMenu.length) % currentMenu.length;
             } while (currentMenu[this.selectedIndex].disabled);
-            console.log('⬆️ 選択:', currentMenu[this.selectedIndex].text);
         }
         
-        // マウスクリック判定
-        const mouseX = input.mouseX || 0;
-        const mouseY = input.mouseY || 0;
-        
-        // ボタン境界チェック
-        for (let i = 0; i < this.buttonBounds.length; i++) {
-            const bounds = this.buttonBounds[i];
-            const isInside = mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
-                           mouseY >= bounds.y && mouseY <= bounds.y + bounds.height;
-            
-            if (isInside) {
-                this.hoverIndex = i;
-                this.selectedIndex = i;
-                
-                // マウスボタンが押された瞬間
-                if (input.mouseButtons && input.mouseButtons[0] && 
-                    input.mouseButtonsPrev && !input.mouseButtonsPrev[0]) {
-                    console.log('🔥 クリック検出:', currentMenu[i].text);
-                    if (!currentMenu[i].disabled) {
-                        this.selectMenuItem();
-                    }
-                    return;
-                }
-                break;
-            }
+        // Escapeキーで戻る
+        if (input.isKeyPressed('Escape') && this.state !== 'main') {
+            this.goBack();
         }
     }
     
@@ -190,21 +142,16 @@ class TitleScreen {
         const currentMenu = this.getCurrentMenu();
         const selectedItem = currentMenu[this.selectedIndex];
         
-        console.log('=== selectMenuItem 呼び出し ===');
-        console.log('選択アクション:', selectedItem.action);
-        console.log('window.game存在:', !!window.game);
+        console.log('メニュー選択:', selectedItem.action);
         
         switch (selectedItem.action) {
             case 'battle':
-                // 難易度選択をスキップして直接キャラクター選択へ
-                console.log('フリーバトル選択 - キャラクター選択に遷移');
+                // フリーバトル → キャラクター選択へ（難易度は「ふつう」固定）
                 if (window.game) {
-                    console.log('gameStateを変更: title → character_select');
-                    window.game.battleDifficulty = 'normal'; // デフォルト難易度
+                    window.game.battleDifficulty = 'normal';
                     window.game.gameState = 'character_select';
-                    console.log('現在のgameState:', window.game.gameState);
                 } else {
-                    console.error('window.gameが存在しません！');
+                    console.error('window.game が見つかりません');
                 }
                 break;
             case 'story_coming_soon':
@@ -357,12 +304,6 @@ class TitleScreen {
         // ボタン境界情報をリセット
         this.buttonBounds = [];
         
-        // デバッグ: 最初のフレームのみログ出力
-        if (!this._boundsLogged) {
-            console.log('🎨 drawMenu - centerX:', centerX, 'slideOffset:', this.slideOffset);
-            this._boundsLogged = true;
-        }
-        
         ctx.save();
         
         currentMenu.forEach((item, index) => {
@@ -379,12 +320,6 @@ class TitleScreen {
                 height: buttonHeight
             };
             this.buttonBounds.push(bounds);
-            
-            // デバッグ: 最初のボタンのみログ
-            if (index === 0 && !this._firstButtonLogged) {
-                console.log('📐 第1ボタン境界:', bounds, 'テキスト:', item.text);
-                this._firstButtonLogged = true;
-            }
             
             // ボタン背景
             if (isDisabled) {

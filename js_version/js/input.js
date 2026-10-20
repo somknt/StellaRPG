@@ -1,14 +1,17 @@
 // 入力管理システム
+// キー/クリックの「押された瞬間」はイベント発生時に記録し、
+// フレームの最後に endFrame() でクリアする方式。
+// （フレーム先頭で前フレーム状態をコピーすると判定が常に false になるため）
 
 class InputManager {
     constructor() {
-        this.keys = {};
-        this.keysPrev = {};
+        this.keys = {};             // 押しっぱなし状態
+        this.pressedKeys = {};      // このフレームで押されたキー
+        this.releasedKeys = {};     // このフレームで離されたキー
         this.mousePos = new Vector2(0, 0);
-        this.mouseButtons = {};
-        this.mouseButtonsPrev = {};
+        this.mouseButtons = {};     // 押しっぱなし状態
         
-        // タイトル画面用のマウス座標とクリック状態
+        // マウス座標とクリック状態（タイトル画面・キャラ選択用）
         this.mouseX = 0;
         this.mouseY = 0;
         this.isMouseClicked = false;
@@ -17,73 +20,71 @@ class InputManager {
     }
     
     init() {
-        console.log('=== InputManager 初期化開始 ===');
-        
         // キーボードイベント
         window.addEventListener('keydown', (e) => {
-            console.log('🔑 キー押下イベント:', e.code);
+            // 押しっぱなしのリピートは「押された瞬間」にしない
+            if (!this.keys[e.code]) {
+                this.pressedKeys[e.code] = true;
+            }
             this.keys[e.code] = true;
+            
+            // ゲームで使うキーはブラウザのスクロール等を防ぐ
+            if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(e.code)) {
+                e.preventDefault();
+            }
         });
         
         window.addEventListener('keyup', (e) => {
             this.keys[e.code] = false;
+            this.releasedKeys[e.code] = true;
         });
         
-        // マウスイベント
+        // ウィンドウからフォーカスが外れたらキー状態をリセット
+        window.addEventListener('blur', () => {
+            this.keys = {};
+            this.mouseButtons = {};
+        });
+        
         const canvas = document.getElementById('gameCanvas');
         if (!canvas) {
-            console.error('❌ Canvas要素が見つかりません！');
+            console.error('Canvas要素が見つかりません');
             return;
         }
         
-        console.log('✅ Canvas要素を取得:', canvas);
-        
-        // キャンバスにマウスムーブ
-        canvas.addEventListener('mousemove', (e) => {
+        // キャンバス座標に変換（CSSで拡大縮小されていてもズレないように）
+        const updateMousePos = (e) => {
             const rect = canvas.getBoundingClientRect();
             this.mousePos.x = (e.clientX - rect.left) * (canvas.width / rect.width);
             this.mousePos.y = (e.clientY - rect.top) * (canvas.height / rect.height);
-            
-            // タイトル画面用
             this.mouseX = this.mousePos.x;
             this.mouseY = this.mousePos.y;
-        });
+        };
         
-        // キャンバスにマウスダウン
-        canvas.addEventListener('mousedown', (e) => {
-            console.log('🖱️ マウスダウンイベント:', e.button);
+        // UIオーバーレイがキャンバスの上に重なっていても拾えるよう window で受ける
+        window.addEventListener('mousemove', updateMousePos);
+        
+        window.addEventListener('mousedown', (e) => {
+            updateMousePos(e);
             this.mouseButtons[e.button] = true;
+            if (e.button === 0) {
+                this.isMouseClicked = true;
+            }
         });
         
-        // キャンバスにマウスアップ
-        canvas.addEventListener('mouseup', (e) => {
+        window.addEventListener('mouseup', (e) => {
             this.mouseButtons[e.button] = false;
         });
-        
-        // キャンバスにクリック（追加の保険）
-        canvas.addEventListener('click', (e) => {
-            console.log('🖱️ クリックイベント発火！');
-            const rect = canvas.getBoundingClientRect();
-            const x = (e.clientX - rect.left) * (canvas.width / rect.width);
-            const y = (e.clientY - rect.top) * (canvas.height / rect.height);
-            console.log(`クリック座標: (${x.toFixed(0)}, ${y.toFixed(0)})`);
-        });
-        
-        console.log('=== InputManager 初期化完了 ===');
     }
     
-    update() {
-        // console.log('InputManager.update() 呼び出し'); // 毎フレーム出るので通常はコメントアウト
-        this.keysPrev = { ...this.keys };
-        this.mouseButtonsPrev = { ...this.mouseButtons };
-        
-        // マウスクリック判定（左クリック）
-        const wasClicked = this.mouseButtons[0] === true && this.mouseButtonsPrev[0] !== true;
-        if (wasClicked) {
-            console.log('🖱️ isMouseClicked = true');
-        }
-        this.isMouseClicked = wasClicked;
+    // フレームの最後に呼ぶ：「押された瞬間」系の状態をクリア
+    endFrame() {
+        this.pressedKeys = {};
+        this.releasedKeys = {};
+        this.isMouseClicked = false;
     }
+    
+    // 互換用（旧コードから呼ばれても問題ないよう何もしない）
+    update() {}
     
     // キーが押されているか
     isKeyDown(keyCode) {
@@ -92,12 +93,12 @@ class InputManager {
     
     // キーが押された瞬間か
     isKeyPressed(keyCode) {
-        return this.keys[keyCode] === true && this.keysPrev[keyCode] !== true;
+        return this.pressedKeys[keyCode] === true;
     }
     
     // キーが離された瞬間か
     isKeyReleased(keyCode) {
-        return this.keys[keyCode] !== true && this.keysPrev[keyCode] === true;
+        return this.releasedKeys[keyCode] === true;
     }
     
     // 移動入力ベクトルを取得
