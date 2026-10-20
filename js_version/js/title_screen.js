@@ -123,6 +123,13 @@ class TitleScreen {
     handleInput(input) {
         const currentMenu = this.getCurrentMenu();
         
+        console.log('📋 handleInput 呼び出し:', {
+            isMouseClicked: input.isMouseClicked,
+            mouseButtons0: input.mouseButtons[0],
+            hoverIndex: this.hoverIndex,
+            selectedIndex: this.selectedIndex
+        });
+        
         // Enterキーまたはスペースキーで決定
         const enterPressed = input.isKeyPressed('Enter');
         const spacePressed = input.isKeyPressed('Space');
@@ -153,12 +160,12 @@ class TitleScreen {
         }
         
         // マウスクリックで決定
-        if (input.isMouseClicked) {
-            console.log('🖱️ マウスクリック検出:', {
-                mouseX: input.mouseX,
-                mouseY: input.mouseY,
-                hoverIndex: this.hoverIndex,
-                selectedIndex: this.selectedIndex
+        // isMouseClickedが機能しない場合の代替策：mouseButtons[0]を直接チェック
+        if (input.isMouseClicked || input.mouseButtons[0]) {
+            console.log('🖱️ マウスクリック判定:', {
+                isMouseClicked: input.isMouseClicked,
+                mouseButtons0: input.mouseButtons[0],
+                hoverIndex: this.hoverIndex
             });
             
             if (this.hoverIndex !== -1) {
@@ -166,6 +173,8 @@ class TitleScreen {
                 if (!currentMenu[this.hoverIndex].disabled) {
                     console.log('✅ マウスクリック実行:', currentMenu[this.hoverIndex].text);
                     this.selectMenuItem();
+                    // クリック後にボタン状態をリセット
+                    input.mouseButtons[0] = false;
                 } else {
                     console.log('❌ 無効化された項目をクリックしました');
                 }
