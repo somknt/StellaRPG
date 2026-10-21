@@ -11,6 +11,26 @@ class AssetManager {
     
     // 画像リストを定義
     getAssetList() {
+        const list = this.getBaseAssetList();
+        
+        // キャラクターのアクション画像（ダッシュ・回避・攻撃 × 4方向 × 4コマ）
+        // 女性はまだ画像がないので男性のみ。用意できたら genders に 'female' を足す
+        const genders = ['male'];
+        const actions = ['dash', 'dodge', 'attack'];
+        const directions = ['down', 'up', 'left', 'right'];
+        for (const g of genders) {
+            for (const a of actions) {
+                for (const d of directions) {
+                    for (let f = 1; f <= 4; f++) {
+                        list[`player_${g}_${a}_${d}_${f}`] = `assets/characters/${g}/${a}_${d}_${f}.png`;
+                    }
+                }
+            }
+        }
+        return list;
+    }
+    
+    getBaseAssetList() {
         return {
             // キャラクター - 男性（各向き3コマ）
             'player_male_down_1': 'assets/characters/male/down_1.png',

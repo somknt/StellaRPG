@@ -38,7 +38,7 @@ class Player {
         
         // 回避
         this.isDodging = false;
-        this.dodgeDuration = 0.18;     // 一気に進む時間
+        this.dodgeDuration = 0.22;     // 一気に進む時間（4コマ分）
         this.dodgeDistance = 128;      // 進む距離（32pxタイル × 4マス）
         this.dodgeTimer = 0;
         this.dodgeDirection = new Vector2(0, 1);
@@ -69,7 +69,7 @@ class Player {
         this.attackTimer = 0;
         this.attackRange = this.weapon.range;
         this.isAttacking = false;
-        this.attackAnimDuration = 0.15; // 斬撃モーションの長さ
+        this.attackAnimDuration = 0.24; // 斬撃モーションの長さ（4コマ × 0.06秒）
         this.attackAnimTimer = 0;
         this.aimVector = new Vector2(0, 1); // 攻撃する向き
         
@@ -83,6 +83,10 @@ class Player {
         this.animationFrame = 0;
         this.animationTimer = 0;
         this.animationSpeed = 0.2;
+        this.actionFrameCount = 4;  // ダッシュ・回避・攻撃画像のコマ数
+        this.dashFrame = 0;
+        this.dashFrameTimer = 0;
+        this.dashFrameSpeed = 0.09; // ダッシュ1コマの表示時間
         
         // 無敵時間
         this.invincibleTime = 0;
@@ -130,6 +134,18 @@ class Player {
         // 残像を薄くしていく
         for (const img of this.afterImages) img.life -= deltaTime;
         this.afterImages = this.afterImages.filter(img => img.life > 0);
+        
+        // ダッシュのコマ送り（4コマ）
+        if (this.isDashing) {
+            this.dashFrameTimer += deltaTime;
+            if (this.dashFrameTimer >= this.dashFrameSpeed) {
+                this.dashFrameTimer = 0;
+                this.dashFrame = (this.dashFrame + 1) % this.actionFrameCount;
+            }
+        } else {
+            this.dashFrame = 0;
+            this.dashFrameTimer = 0;
+        }
         
         // アニメーション（ダッシュ中は足を速く動かす）
         if (this.isMoving) {
@@ -481,8 +497,8 @@ class Player {
             ctx.restore();
         }
         
-        // ダッシュ中の足元の砂ぼこり
-        if (this.isDashing) {
+        // ダッシュ中の足元の砂ぼこり（ダッシュ画像には砂ぼこりが描いてあるので、画像がない時だけ）
+        if (this.isDashing && !this.hasActionSprite('dash')) {
             ctx.save();
             ctx.fillStyle = 'rgba(220, 210, 180, 0.5)';
             const back = this.velocity.normalize().mult(-this.size * 0.4);
@@ -506,7 +522,7 @@ class Player {
         
         // 回避中は少し伸び縮みさせて「シュッ」と動いた感じを出す
         let drawW = this.size, drawH = this.size;
-        if (this.isDodging) {
+        if (this.isDodging && !this.hasActionSprite('dodge')) {
             drawW = this.size * 0.85;
             drawH = this.size * 0.85;
             ctx.globalAlpha = 0.8;
@@ -546,8 +562,8 @@ class Player {
         
         ctx.restore();
         
-        // ナイフの斬撃モーション
-        if (this.isAttacking) {
+        // ナイフの斬撃モーション（攻撃画像に斬撃が描いてあるので、画像がない時だけ）
+        if (this.isAttacking && !this.hasActionSprite('attack')) {
             this.drawKnifeSlash(ctx, screenPos);
         }
     }
@@ -594,12 +610,46 @@ class Player {
     }
     
     // 向きとアニメーションフレームから画像キーを取得
+    // 攻撃 > 回避 > ダッシュ > 歩き の優先順。アクション画像がなければ歩き画像を使う
     getPlayerImageKey() {
-        const gender = this.gender;
-        const direction = this.direction;
+        const actionKey = this.getActionImageKey();
+        if (actionKey && window.assetManager && window.assetManager.get(actionKey)) {
+            return actionKey;
+        }
+        return this.getWalkImageKey();
+    }
+    
+    getWalkImageKey() {
         const frame = this.animationFrame + 1; // 1, 2, 3
+        return `player_${this.gender}_${this.direction}_${frame}`;
+    }
+    
+    // 今の動きに合ったアクション画像のキー（該当なしなら null）
+    getActionImageKey() {
+        const frames = this.actionFrameCount;
+        const base = `player_${this.gender}`;
         
-        return `player_${gender}_${direction}_${frame}`;
+        if (this.isAttacking) {
+            // 攻撃モーションの進み具合からコマを決める（振りかぶり→斬る→振り抜き）
+            const progress = 1 - Math.max(0, this.attackAnimTimer) / this.attackAnimDuration;
+            const f = Math.min(frames, Math.floor(progress * frames) + 1);
+            return `${base}_attack_${this.direction}_${f}`;
+        }
+        if (this.isDodging) {
+            const progress = 1 - Math.max(0, this.dodgeTimer) / this.dodgeDuration;
+            const f = Math.min(frames, Math.floor(progress * frames) + 1);
+            return `${base}_dodge_${this.direction}_${f}`;
+        }
+        if (this.isDashing) {
+            return `${base}_dash_${this.direction}_${this.dashFrame + 1}`;
+        }
+        return null;
+    }
+    
+    // アクション画像が使えるか（使えるなら手描きの演出は画像に任せる）
+    hasActionSprite(action) {
+        if (!window.assetManager) return false;
+        return !!window.assetManager.get(`player_${this.gender}_${action}_${this.direction}_1`);
     }
     
     getDirectionRow() {
