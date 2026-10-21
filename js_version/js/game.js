@@ -116,9 +116,10 @@ class Game {
             // 敵データ
             const enemyResponse = await fetch('data/enemies.json');
             const enemyData = await enemyResponse.json();
-            // 出現させる敵：spawnEnabled 指定があればそれに従い、なければ草原（ティウム周辺）の敵
+            // 出現させる敵：spawnEnabled 指定があればそれに従い、なければ草原フィールドの敵
+            const GRASSLAND_ENEMIES = ['角ウサギ', '星光スライム'];
             let spawnable = enemyData.enemies.filter(e =>
-                e.spawnEnabled === true || (e.spawnEnabled === undefined && e.region === 'ティウム周辺')
+                e.spawnEnabled === true || (e.spawnEnabled === undefined && GRASSLAND_ENEMIES.includes(e.name))
             );
             if (spawnable.length === 0) spawnable = enemyData.enemies.slice(0, 1);
             window.gameData.enemies = spawnable;

@@ -26,6 +26,14 @@ class AssetManager {
                 }
             }
         }
+        
+        // 敵 - 星光スライム（4方向 × 3コマ + ジャンプ）
+        for (const d of directions) {
+            for (let f = 1; f <= 3; f++) {
+                list[`starlight_slime_${d}_${f}`] = `assets/enemies/starlight_slime/${d}_${f}.png`;
+            }
+            list[`starlight_slime_${d}_jump`] = `assets/enemies/starlight_slime/${d}_jump.png`;
+        }
         return list;
     }
     
@@ -82,9 +90,7 @@ class AssetManager {
             'horn_rabbit_2': 'assets/enemies/horn_rabbit_2.png',
             'wolf_1': 'assets/enemies/wolf_1.png',
             'wolf_2': 'assets/enemies/wolf_2.png',
-            'slime_1': 'assets/enemies/slime_1.png',
-            'slime_2': 'assets/enemies/slime_2.png',
-            'slime_3': 'assets/enemies/slime_3.png',
+
             
             // エフェクト - 個別ファイル
             'magic_light_1': 'assets/effects/magic_light_1.png',

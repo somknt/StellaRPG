@@ -44,6 +44,26 @@ class Enemy {
         this.chargePreparationTime = 0.3; // 突進準備時間
         this.chargeTimer = 0;
         
+        // 星光スライム専用：ぴょんぴょん跳ねて移動、攻撃されたら距離をとって光弾を撃つ
+        this.isSlime = enemyData.name === '星光スライム';
+        if (this.isSlime) {
+            this.size = 36;
+            this.isHopping = false;
+            this.hopTime = 0;
+            this.hopDuration = 0.35;     // 1回の跳ねの長さ
+            this.hopSpeed = 110;         // 跳ねている間の速さ
+            this.hopDirection = new Vector2(0, 0);
+            this.restTimer = Math.random() * 1.0; // 着地して休む時間
+            this.restDuration = 0.9;
+            this.provoked = false;       // 攻撃されたら true（それまでは襲ってこない）
+            this.shootRange = 340;       // 光弾を撃つ距離
+            this.shootCooldown = 2.2;
+            this.shootTimer = 1.0;
+            this.shootWindupTime = 0.45; // 撃つ前に光を溜める時間（避けるための予告）
+            this.shootWindup = 0;
+            this.pendingShot = null;     // EnemySpawner が拾って光弾を生成する
+        }
+        
         // ドロップ
         this.dropExp = enemyData.dropExp ?? enemyData.exp ?? 1;
         this.dropItems = enemyData.dropItems || [];
@@ -57,6 +77,8 @@ class Enemy {
         // 角ウサギのジャンプ突進処理
         if (this.data.name === '角ウサギ') {
             this.updateHornRabbitBehavior(deltaTime);
+        } else if (this.isSlime) {
+            this.updateSlimeBehavior(deltaTime);
         } else {
             // その他の敵は通常のAI
             this.updateAI(deltaTime);
@@ -76,8 +98,8 @@ class Enemy {
             this.hitFlashTimer -= deltaTime;
         }
         
-        // アニメーション
-        if (this.velocity.length() > 0) {
+        // アニメーション（スライムは止まっていてもぷるぷる動かす）
+        if (this.velocity.length() > 0 || this.isSlime) {
             this.animationTimer += deltaTime;
             if (this.animationTimer >= this.animationSpeed) {
                 this.animationTimer = 0;
@@ -88,7 +110,78 @@ class Enemy {
         }
         
         // ジャンプ判定
-        this.isJumping = this.isCharging;
+        this.isJumping = this.isSlime ? this.isHopping : this.isCharging;
+    }
+    
+    // 星光スライム専用の行動AI
+    updateSlimeBehavior(deltaTime) {
+        const toPlayer = this.target.position.sub(this.position);
+        const dist = toPlayer.length();
+        
+        // 跳ねている最中
+        if (this.isHopping) {
+            this.hopTime += deltaTime;
+            this.velocity = this.hopDirection.mult(this.hopSpeed);
+            if (this.hopTime >= this.hopDuration) {
+                this.isHopping = false;
+                this.velocity = new Vector2(0, 0);
+                this.restTimer = this.restDuration * (0.7 + Math.random() * 0.6);
+            }
+            return;
+        }
+        
+        // 着地中は止まる
+        this.velocity = new Vector2(0, 0);
+        this.restTimer -= deltaTime;
+        this.state = this.provoked ? 'provoked' : 'idle';
+        
+        // 攻撃されて怒っている時だけ光弾を撃つ
+        if (this.provoked) {
+            this.shootTimer -= deltaTime;
+            
+            // 光を溜めている最中：プレイヤーの方を向いて、溜め終わったら発射
+            if (this.shootWindup > 0) {
+                this.faceTowards(toPlayer);
+                this.shootWindup -= deltaTime;
+                if (this.shootWindup <= 0) {
+                    this.pendingShot = toPlayer.normalize();
+                    this.shootTimer = this.shootCooldown;
+                    this.restTimer = Math.max(this.restTimer, 0.3);
+                }
+                return;
+            }
+            if (this.shootTimer <= 0 && dist <= this.shootRange) {
+                this.shootWindup = this.shootWindupTime;
+                return;
+            }
+        }
+        
+        // 次の跳ね
+        if (this.restTimer <= 0) {
+            let dir;
+            if (this.provoked) {
+                if (dist < 150) {
+                    dir = toPlayer.normalize().mult(-1);              // 近すぎる → 離れる
+                } else if (dist > 280) {
+                    dir = toPlayer.normalize();                       // 遠すぎる → 近づく
+                } else {
+                    const side = Math.random() < 0.5 ? 1 : -1;        // ちょうどいい → 横に回り込む
+                    dir = new Vector2(-toPlayer.y * side, toPlayer.x * side).normalize();
+                }
+            } else {
+                // のんびり散歩（たまにその場で跳ねるだけ）
+                const angle = Math.random() * Math.PI * 2;
+                dir = Math.random() < 0.25 ? new Vector2(0, 0) : new Vector2(Math.cos(angle), Math.sin(angle));
+            }
+            this.hopDirection = dir;
+            this.isHopping = true;
+            this.hopTime = 0;
+        }
+    }
+    
+    faceTowards(v) {
+        if (Math.abs(v.x) > Math.abs(v.y)) this.direction = v.x < 0 ? 'left' : 'right';
+        else this.direction = v.y < 0 ? 'up' : 'down';
     }
     
     // 角ウサギ専用の行動AI
@@ -260,6 +353,7 @@ class Enemy {
         const actualDamage = Math.max(1, damage - this.defense);
         this.currentHP = Math.max(0, this.currentHP - actualDamage);
         this.hitFlashTimer = 0.12;
+        if (this.isSlime) this.provoked = true; // 攻撃されたら怒る
         
         // ダメージエフェクト
         return {
@@ -318,6 +412,23 @@ class Enemy {
             }
         }
         
+        // スライムが光弾を溜めている間：体の上に光が集まる（発射の予告）
+        if (this.isSlime && this.shootWindup > 0) {
+            const t = 1 - this.shootWindup / this.shootWindupTime; // 0→1
+            const r = 4 + t * 8;
+            ctx.save();
+            ctx.globalAlpha = 0.5 + 0.5 * t;
+            const g = ctx.createRadialGradient(screenPos.x, screenPos.y - this.size * 0.9, 0, screenPos.x, screenPos.y - this.size * 0.9, r * 2);
+            g.addColorStop(0, '#fffbe0');
+            g.addColorStop(0.5, 'rgba(255, 230, 120, 0.8)');
+            g.addColorStop(1, 'rgba(255, 220, 100, 0)');
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(screenPos.x, screenPos.y - this.size * 0.9, r * 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+        
         // 被弾した瞬間は白く光らせる
         if (this.hitFlashTimer > 0) {
             ctx.globalAlpha = 0.7;
@@ -354,8 +465,11 @@ class Enemy {
             // 移動アニメーション（1〜3フレーム）
             const frame = this.animationFrame + 1;
             return window.assetManager.get(`horn_rabbit_${this.direction}_${frame}`);
-        } else if (this.data.name === '星光スライム') {
-            return window.assetManager.get('starlight_slime');
+        } else if (this.isSlime) {
+            if (this.isJumping) {
+                return window.assetManager.get(`starlight_slime_${this.direction}_jump`);
+            }
+            return window.assetManager.get(`starlight_slime_${this.direction}_${this.animationFrame + 1}`);
         } else if (this.data.name === '草原狼') {
             return window.assetManager.get('wolf_1');
         }
@@ -381,6 +495,7 @@ class EnemySpawner {
         this.spawnInterval = 5.0;
         this.maxEnemies = 10;
         this.spawnRadius = 400;
+        this.projectiles = [];      // 敵の光弾
         this.difficulty = 'normal'; // 'easy', 'normal', 'hard'
         this.difficultyMultipliers = {
             easy: { hp: 0.7, attack: 0.7, spawn: 1.5 },
@@ -409,7 +524,28 @@ class EnemySpawner {
         // 敵更新
         for (const enemy of this.enemies) {
             enemy.update(deltaTime, player);
+            
+            // スライムの光弾を生成
+            if (enemy.pendingShot) {
+                this.projectiles.push({
+                    position: enemy.position.add(new Vector2(0, -enemy.size * 0.5)),
+                    velocity: enemy.pendingShot.mult(190), // ゆっくりめ：見てから避けられる速さ
+                    damage: enemy.attack,
+                    radius: 9,
+                    life: 2.5,
+                    age: 0
+                });
+                enemy.pendingShot = null;
+            }
         }
+        
+        // 光弾を動かす（ジャスト回避中はこの deltaTime 自体がスローになっている）
+        for (const p of this.projectiles) {
+            p.position = p.position.add(p.velocity.mult(deltaTime));
+            p.life -= deltaTime;
+            p.age += deltaTime;
+        }
+        this.projectiles = this.projectiles.filter(p => p.life > 0);
         
         // 死んだ敵を削除
         this.enemies = this.enemies.filter(e => e.isAlive());
@@ -427,8 +563,14 @@ class EnemySpawner {
         // 出現できる敵がいなければ何もしない（空配列で落ちないように）
         if (!enemyDataList || enemyDataList.length === 0) return;
         
-        // ランダムな敵を選択
-        const baseEnemyData = enemyDataList[Math.floor(Math.random() * enemyDataList.length)];
+        // 出現率（spawnWeight）に応じて敵を選択
+        const totalWeight = enemyDataList.reduce((s, e) => s + (e.spawnWeight || 1), 0);
+        let roll = Math.random() * totalWeight;
+        let baseEnemyData = enemyDataList[enemyDataList.length - 1];
+        for (const e of enemyDataList) {
+            roll -= (e.spawnWeight || 1);
+            if (roll < 0) { baseEnemyData = e; break; }
+        }
         
         // 難易度に応じてステータスを調整
         const multiplier = this.difficultyMultipliers[this.difficulty];
@@ -447,6 +589,24 @@ class EnemySpawner {
     draw(ctx, camera) {
         for (const enemy of this.enemies) {
             enemy.draw(ctx, camera);
+        }
+        
+        // 光弾：黄色く光る星の玉
+        for (const p of this.projectiles) {
+            const s = p.position.sub(camera);
+            const pulse = 1 + Math.sin(p.age * 20) * 0.15;
+            const r = p.radius * pulse;
+            ctx.save();
+            const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r * 2.2);
+            g.addColorStop(0, '#ffffff');
+            g.addColorStop(0.35, '#fff1a8');
+            g.addColorStop(0.7, 'rgba(255, 210, 90, 0.5)');
+            g.addColorStop(1, 'rgba(255, 200, 80, 0)');
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, r * 2.2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
         }
     }
     
@@ -497,6 +657,18 @@ class EnemySpawner {
     }
     
     checkEnemyAttacks(player) {
+        // 光弾の当たり判定
+        for (const p of this.projectiles) {
+            if (p.position.distance(player.position) > p.radius + player.size * 0.3) continue;
+            if (player.isDodging) {
+                // 回避中はすり抜ける（ジャスト回避の判定だけ起こす）
+                player.takeDamage(p.damage);
+            } else {
+                player.takeDamage(p.damage);
+                p.life = 0;
+            }
+        }
+        
         for (const enemy of this.enemies) {
             if (!enemy.isAlive()) continue;
             
@@ -525,5 +697,6 @@ class EnemySpawner {
     
     clear() {
         this.enemies = [];
+        this.projectiles = [];
     }
 }
