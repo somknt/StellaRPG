@@ -4,7 +4,8 @@ class Player {
     constructor(x, y, gender = 'male') {
         this.position = new Vector2(x, y);
         this.velocity = new Vector2(0, 0);
-        this.size = 64; // 32から64に拡大（2倍）
+        this.size = 64;     // 当たり判定の大きさ
+        this.drawSize = 90; // 画面に表示する大きさ（見た目だけ大きくする）
         this.gender = gender; // 'male' or 'female'
         
         // ステータス
@@ -488,10 +489,10 @@ class Player {
                 const p = img.pos.sub(camera);
                 ctx.globalAlpha = (img.life / img.maxLife) * 0.35;
                 if (playerImg) {
-                    ctx.drawImage(playerImg, p.x - this.size/2, p.y - this.size/2, this.size, this.size);
+                    ctx.drawImage(playerImg, p.x - this.drawSize/2, p.y - this.drawSize/2, this.drawSize, this.drawSize);
                 } else {
                     ctx.fillStyle = '#9fd8ff';
-                    ctx.fillRect(p.x - this.size/2, p.y - this.size/2, this.size, this.size);
+                    ctx.fillRect(p.x - this.drawSize/2, p.y - this.drawSize/2, this.drawSize, this.drawSize);
                 }
             }
             ctx.restore();
@@ -501,12 +502,12 @@ class Player {
         if (this.isDashing && !this.hasActionSprite('dash')) {
             ctx.save();
             ctx.fillStyle = 'rgba(220, 210, 180, 0.5)';
-            const back = this.velocity.normalize().mult(-this.size * 0.4);
+            const back = this.velocity.normalize().mult(-this.drawSize * 0.4);
             for (let i = 0; i < 3; i++) {
                 const r = 4 + Math.random() * 4;
                 ctx.beginPath();
                 ctx.arc(screenPos.x + back.x + (Math.random() - 0.5) * 16,
-                        screenPos.y + this.size * 0.4 + back.y * 0.3 + (Math.random() - 0.5) * 6,
+                        screenPos.y + this.drawSize * 0.4 + back.y * 0.3 + (Math.random() - 0.5) * 6,
                         r, 0, Math.PI * 2);
                 ctx.fill();
             }
@@ -521,10 +522,10 @@ class Player {
         ctx.save();
         
         // 回避中は少し伸び縮みさせて「シュッ」と動いた感じを出す
-        let drawW = this.size, drawH = this.size;
+        let drawW = this.drawSize, drawH = this.drawSize;
         if (this.isDodging && !this.hasActionSprite('dodge')) {
-            drawW = this.size * 0.85;
-            drawH = this.size * 0.85;
+            drawW = this.drawSize * 0.85;
+            drawH = this.drawSize * 0.85;
             ctx.globalAlpha = 0.8;
         }
         
@@ -538,26 +539,26 @@ class Player {
         } else {
             // 画像がない場合は色で描画（従来の方法）
             ctx.fillStyle = this.clothesColor;
-            ctx.fillRect(screenPos.x - this.size/2, screenPos.y - this.size/2, this.size, this.size);
+            ctx.fillRect(screenPos.x - this.drawSize/2, screenPos.y - this.drawSize/2, this.drawSize, this.drawSize);
             
             // 頭
             ctx.fillStyle = this.hairColor;
             ctx.beginPath();
-            ctx.arc(screenPos.x, screenPos.y - this.size/3, this.size/3, 0, Math.PI * 2);
+            ctx.arc(screenPos.x, screenPos.y - this.drawSize/3, this.drawSize/3, 0, Math.PI * 2);
             ctx.fill();
             
             // 目（星の民の特徴）
             ctx.fillStyle = this.eyeColor;
             ctx.beginPath();
-            ctx.arc(screenPos.x - 5, screenPos.y - this.size/3, 3, 0, Math.PI * 2);
-            ctx.arc(screenPos.x + 5, screenPos.y - this.size/3, 3, 0, Math.PI * 2);
+            ctx.arc(screenPos.x - 5, screenPos.y - this.drawSize/3, 3, 0, Math.PI * 2);
+            ctx.arc(screenPos.x + 5, screenPos.y - this.drawSize/3, 3, 0, Math.PI * 2);
             ctx.fill();
             
             // 性別マーク（仮）
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 12px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText(this.gender === 'male' ? '♂' : '♀', screenPos.x, screenPos.y + this.size/2 + 15);
+            ctx.fillText(this.gender === 'male' ? '♂' : '♀', screenPos.x, screenPos.y + this.drawSize/2 + 15);
         }
         
         ctx.restore();
