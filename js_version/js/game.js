@@ -265,7 +265,6 @@ class Game {
         // 回避中に攻撃を避けていたらジャスト回避発動
         if (this.player.consumeJustDodge() && this.justDodgeTimer <= 0) {
             this.justDodgeTimer = this.justDodgeDuration;
-            console.log('ジャスト回避！');
         }
         
         // カメラ更新
@@ -308,40 +307,7 @@ class Game {
         // 魔法エフェクト描画
         this.magicSystem.draw(this.ctx, this.camera.position);
         
-        // ジャスト回避中の演出（画面を青く染めて文字を出す）
-        if (this.justDodgeTimer > 0) {
-            this.drawJustDodgeEffect();
-        }
-    }
-    
-    drawJustDodgeEffect() {
-        const ctx = this.ctx;
-        const t = this.justDodgeTimer / this.justDodgeDuration; // 1→0
-        ctx.save();
-        
-        ctx.fillStyle = `rgba(60, 120, 255, ${0.18 * t + 0.05})`;
-        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-        
-        // 画面の縁を暗くする
-        const g = ctx.createRadialGradient(
-            this.canvas.width / 2, this.canvas.height / 2, this.canvas.height * 0.3,
-            this.canvas.width / 2, this.canvas.height / 2, this.canvas.height * 0.8
-        );
-        g.addColorStop(0, 'rgba(0, 0, 40, 0)');
-        g.addColorStop(1, `rgba(0, 0, 40, ${0.5 * t})`);
-        ctx.fillStyle = g;
-        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-        
-        ctx.globalAlpha = Math.min(1, t * 2);
-        ctx.font = 'bold 40px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#e0f0ff';
-        ctx.strokeStyle = '#1a3a8a';
-        ctx.lineWidth = 5;
-        ctx.strokeText('ジャスト回避！', this.canvas.width / 2, 120);
-        ctx.fillText('ジャスト回避！', this.canvas.width / 2, 120);
-        
-        ctx.restore();
+        // ジャスト回避は画面演出なし（敵がスローになるだけ）
     }
     
     gameLoop(currentTime) {
