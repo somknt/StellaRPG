@@ -89,6 +89,12 @@ class Game {
         // 難易度に応じて敵のスポーナーを設定
         this.enemySpawner.setDifficulty(this.battleDifficulty);
         
+        // 開始直後から草原の敵が見えるよう、種類ごとに1体ずつ出しておく
+        this.enemySpawner.clear();
+        for (const enemyData of window.gameData.enemies) {
+            this.enemySpawner.spawnEnemy(this.player.position, [enemyData]);
+        }
+        
         // カメラ
         this.camera = new Camera(0, 0, this.canvas.width, this.canvas.height);
         this.camera.follow(this.player);
@@ -129,8 +135,8 @@ class Game {
             
             console.log('データ読み込み完了');
         } catch (error) {
-            console.error('データ読み込みエラー:', error);
-            // ダミーデータで続行
+            // index.html を直接開いた（file://）場合などは JSON を読めないので、ここの予備データで動かす
+            console.warn('データ読み込みエラー（予備データで続行）:', error);
             window.gameData = {
                 playerStatsTable: [{level: 1, hp: 100, attack: 15, defense: 5, maxSP: 50, requiredExp: 10}],
                 magicCircles: [{
@@ -143,19 +149,26 @@ class Game {
                     element: '光',
                     requiredStage: 3
                 }],
+                // 草原に出る敵（data/enemies.json と同じ値）
                 enemies: [{
-                    id: 'enemy_001',
+                    enemyId: 'enemy_001',
                     name: '角ウサギ',
-                    hp: 30,
-                    attack: 8,
+                    hp: 25,
+                    attack: 7,
+                    defense: 1,
+                    exp: 5,
+                    spawnWeight: 40
+                }, {
+                    enemyId: 'enemy_007',
+                    name: '星光スライム',
+                    hp: 35,
+                    attack: 9,
                     defense: 2,
-                    speed: 80,
-                    dropExp: 5,
-                    detectionRange: 200,
-                    attackRange: 40,
-                    attackCooldown: 1.5
+                    exp: 9,
+                    spawnWeight: 30
                 }]
             };
+            console.log('出現する敵:', window.gameData.enemies.map(e => e.name).join(', '));
         }
     }
     
