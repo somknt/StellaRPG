@@ -14,8 +14,7 @@ class AssetManager {
         const list = this.getBaseAssetList();
         
         // キャラクターのアクション画像（ダッシュ・回避・攻撃 × 4方向 × 4コマ）
-        // 女性はまだ画像がないので男性のみ。用意できたら genders に 'female' を足す
-        const genders = ['male'];
+        const genders = ['male', 'female'];
         const actions = ['dash', 'dodge', 'attack'];
         const directions = ['down', 'up', 'left', 'right'];
         for (const g of genders) {
