@@ -189,22 +189,24 @@ const TouchControls = {
             return { list: p.learnedMagic.map(id => p.getMagicData(id)).filter(Boolean), current: p.selectedMagicIndex };
         };
         
-        const open = () => {
+        // anchorX, anchorY：パレットの中心にしたい画面上の位置（スマホ＝ボタン、PC＝マウスの位置）
+        const open = (anchorX, anchorY) => {
             const p = window.game && window.game.player;
-            if (!p || p.isChanting) return; // 詠唱中は選べない
+            if (!p || p.isChanting) return false; // 詠唱中は選べない
+            if (document.body.dataset.state !== 'playing') return false;
             const { list, current } = getMagicList();
-            if (list.length === 0) return;
+            if (list.length === 0) return false;
             
             palette.classList.add('open');
+            this.input.paletteOpen = true;
             const r = parseFloat(getComputedStyle(palette).getPropertyValue('--r')) || 80;
             const itemSize = parseFloat(getComputedStyle(palette).getPropertyValue('--item')) || 56;
             
             // パレットが画面からはみ出さないよう、中心を少し内側にずらす
             const margin = r + itemSize * 0.7;
-            const b = btn.getBoundingClientRect();
             center = {
-                x: Math.min(Math.max(b.left + b.width / 2, margin), window.innerWidth - margin),
-                y: Math.min(Math.max(b.top + b.height / 2, margin), window.innerHeight - margin)
+                x: Math.min(Math.max(anchorX, margin), window.innerWidth - margin),
+                y: Math.min(Math.max(anchorY, margin), window.innerHeight - margin)
             };
             palette.style.transform = `translate(${center.x}px, ${center.y}px)`;
             
@@ -231,9 +233,13 @@ const TouchControls = {
                 itemsBox.appendChild(el);
                 return { el, x, y, index: i };
             });
+            hoverIndex = -2; // 必ず更新させる
             setHover(-1);
             if (navigator.vibrate) navigator.vibrate(15);
+            return true;
         };
+        
+        const isOpen = () => palette.classList.contains('open');
         
         const setHover = (i) => {
             if (i === hoverIndex) return;
@@ -258,21 +264,27 @@ const TouchControls = {
         const close = (commit) => {
             clearTimeout(timer);
             timer = null;
-            if (palette.classList.contains('open') && commit && hoverIndex >= 0) {
+            if (isOpen() && commit && hoverIndex >= 0) {
                 this.input.selectMagic(hoverIndex);
             }
             palette.classList.remove('open');
+            this.input.paletteOpen = false;
             btn.classList.remove('pressed');
             hoverIndex = -1;
             pointerId = null;
+            pcOpen = false;
         };
         
+        // ===== スマホ：魔法選択ボタンを長押し → スワイプ → 離して決定 =====
         btn.addEventListener('pointerdown', (e) => {
             if (pointerId !== null) return;
             pointerId = e.pointerId;
             btn.setPointerCapture(e.pointerId);
             btn.classList.add('pressed');
-            timer = setTimeout(open, this.LONG_PRESS_MS); // 長押しで開く
+            timer = setTimeout(() => {           // 長押しで開く（ボタンの位置を中心に）
+                const b = btn.getBoundingClientRect();
+                open(b.left + b.width / 2, b.top + b.height / 2);
+            }, this.LONG_PRESS_MS);
             e.preventDefault();
         });
         
@@ -286,8 +298,54 @@ const TouchControls = {
         btn.addEventListener('pointercancel', (e) => { if (e.pointerId === pointerId) close(false); });
         btn.addEventListener('lostpointercapture', (e) => { if (e.pointerId === pointerId) close(false); });
         
+        // ===== PC：E キーでマウスの位置にパレット → マウスを動かして合わせる → 決定 =====
+        // 決定：E を離す、または左クリック ／ キャンセル：真ん中で E を離す・右クリック・Esc・もう一度 E
+        // （E をちょんと押しただけなら開いたままになるので、ゆっくり選んでクリックしてもよい）
+        let pcOpen = false;
+        let mouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+        let pcOpenedAt = 0;
+        
+        window.addEventListener('pointermove', (e) => {
+            if (e.pointerType !== 'mouse') return;
+            mouse = { x: e.clientX, y: e.clientY };
+            if (pcOpen) setHover(pick(e.clientX, e.clientY));
+        });
+        
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Escape' && pcOpen) { close(false); return; }
+            if (e.code !== 'KeyE' || e.repeat) return;
+            if (pcOpen) { close(false); return; }   // 開いている時にもう一度 E → 閉じる
+            if (pointerId !== null) return;          // スマホ側で操作中
+            if (open(mouse.x, mouse.y)) {
+                pcOpen = true;
+                pcOpenedAt = performance.now();
+            }
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            if (e.code !== 'KeyE' || !pcOpen) return;
+            // 長押しして属性を指していたら、E を離した時点で決定
+            if (hoverIndex >= 0 && performance.now() - pcOpenedAt > 120) close(true);
+        });
+        
+        // クリックで決定／キャンセル。そのクリックで攻撃・回避しないように消費する
+        // （input.js の pointerdown より後に登録しているので、ここで打ち消せる）
+        window.addEventListener('pointerdown', (e) => {
+            if (!pcOpen || e.pointerType !== 'mouse') return;
+            if (e.button === 0) {
+                setHover(pick(e.clientX, e.clientY));
+                close(true);
+            } else {
+                close(false);
+            }
+            this.input.consumeClick();
+        });
+        
+        // ゲーム画面から外れたら閉じる
+        window.addEventListener('blur', () => { if (isOpen()) close(false); });
+        
         // テスト・デバッグ用
-        this.magicPalette = { open, close, pick, get hoverIndex() { return hoverIndex; } };
+        this.magicPalette = { open, close, pick, isOpen, get hoverIndex() { return hoverIndex; } };
     },
     
     // ---------- 全画面 ----------

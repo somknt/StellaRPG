@@ -18,7 +18,9 @@ class InputManager {
         this.mouseX = 0;
         this.mouseY = 0;
         this.isMouseClicked = false;
+        this.isLeftMouseClicked = false;
         this.isRightClicked = false;
+        this.paletteOpen = false;   // 魔法パレットを開いている間 true（攻撃・回避をしない）
         
         // スマホのバーチャルスティック（-1〜1）
         this.stick = new Vector2(0, 0);
@@ -79,6 +81,8 @@ class InputManager {
             this.mouseButtons[e.button] = true;
             if (e.button === 0) {
                 this.isMouseClicked = true;
+                // 攻撃に使うのはマウスの左クリックだけ（スマホで画面をタップしても攻撃しない）
+                if (e.pointerType === 'mouse') this.isLeftMouseClicked = true;
             }
             if (e.button === 2) {
                 this.isRightClicked = true;
@@ -145,6 +149,14 @@ class InputManager {
         this.pressedKeys = {};
         this.releasedKeys = {};
         this.isMouseClicked = false;
+        this.isLeftMouseClicked = false;
+        this.isRightClicked = false;
+    }
+    
+    // このフレームのクリックを「使用済み」にする（魔法パレットを決定したクリックで攻撃しないように）
+    consumeClick() {
+        this.isMouseClicked = false;
+        this.isLeftMouseClicked = false;
         this.isRightClicked = false;
     }
     
@@ -192,14 +204,21 @@ class InputManager {
         return this.isKeyDown('ShiftLeft') || this.isKeyDown('ShiftRight');
     }
     
-    // 回避キー（C キー or 右クリック）
+    // 回避（右クリック。C キーでも可）
     isDodgePressed() {
+        if (this.paletteOpen) return false;
         return this.isKeyPressed('KeyC') || this.isRightClicked === true;
     }
     
-    // 攻撃キー
+    // 攻撃（左クリック。Space でも可）。魔法パレットを開いている間は攻撃しない
     isAttackPressed() {
-        return this.isKeyPressed('Space');
+        if (this.paletteOpen) return false;
+        return this.isLeftMouseClicked === true || this.isKeyPressed('Space');
+    }
+    
+    // 魔法パレット（E キー）
+    isPaletteKeyPressed() {
+        return this.isKeyPressed('KeyE');
     }
     
     // 魔法キー
@@ -207,8 +226,8 @@ class InputManager {
         return this.isKeyPressed('KeyQ');
     }
     
-    // 相互作用キー
+    // 相互作用キー（E は魔法パレットに使うので F に変更。今は未使用）
     isInteractPressed() {
-        return this.isKeyPressed('KeyE');
+        return this.isKeyPressed('KeyF');
     }
 }

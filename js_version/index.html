@@ -75,11 +75,10 @@
                 <h3>操作方法</h3>
                 <p><strong>WASD</strong>: 移動</p>
                 <p><strong>Shift長押し</strong>: ダッシュ</p>
-                <p><strong>C / 右クリック</strong>: 回避</p>
-                <p><strong>Space</strong>: 攻撃（ナイフ）</p>
+                <p><strong>左クリック</strong>: 攻撃（ナイフ）</p>
+                <p><strong>右クリック</strong>: 回避</p>
                 <p><strong>Q</strong>: 魔法（詠唱→発動）</p>
-                <p><strong>1〜5 / R</strong>: 魔法の切り替え</p>
-                <p><strong>E</strong>: 相互作用</p>
+                <p><strong>E</strong>: 魔法パレット（マウスで選ぶ）</p>
                 <p><strong>F1</strong>: ヘルプ表示/非表示</p>
             </div>
         </div>
@@ -102,15 +101,15 @@
             <!-- 魔法の選択：長押しで星形パレットを出し、指を滑らせて離した属性を選ぶ（data-key なし＝専用処理） -->
             <button class="touch-btn" id="btn-magic-switch"><span id="magic-switch-label">炎</span></button>
         </div>
-        
-        <!-- 魔法パレット（長押し中だけ表示。星の5つの頂点に5属性） -->
-        <div id="magic-palette">
-            <svg id="magic-palette-star" viewBox="-100 -100 200 200" aria-hidden="true">
-                <polygon id="magic-palette-star-shape" points=""></polygon>
-            </svg>
-            <div id="magic-palette-items"></div>
-            <div id="magic-palette-center"></div>
-        </div>
+    </div>
+    
+    <!-- 魔法パレット（スマホ：魔法選択ボタンを長押し / PC：E キー。星の5つの頂点に5属性） -->
+    <div id="magic-palette">
+        <svg id="magic-palette-star" viewBox="-100 -100 200 200" aria-hidden="true">
+            <polygon id="magic-palette-star-shape" points=""></polygon>
+        </svg>
+        <div id="magic-palette-items"></div>
+        <div id="magic-palette-center"></div>
     </div>
     
     <!-- 全画面ボタン（全画面にできるブラウザだけ表示） -->
