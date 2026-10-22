@@ -123,6 +123,17 @@ class InputManager {
         this.stick = new Vector2(x, y);
     }
     
+    // スマホの魔法パレットで選んだ魔法の番号（プレイヤーが次のフレームで受け取る）
+    selectMagic(index) {
+        this.pendingMagicIndex = index;
+    }
+    
+    consumeMagicSelection() {
+        const i = this.pendingMagicIndex;
+        this.pendingMagicIndex = null;
+        return (i === undefined) ? null : i;
+    }
+    
     resetAll() {
         this.keys = {};
         this.mouseButtons = {};

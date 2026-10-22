@@ -27,6 +27,7 @@ const TouchControls = {
         
         this.setupStick();
         this.setupButtons();
+        this.setupMagicPalette();
         this.setupFullscreen();
         
         // iOS Safari はピンチ操作を独自イベントで送ってくるので止める
@@ -135,7 +136,7 @@ const TouchControls = {
     
     // ---------- ボタン ----------
     setupButtons() {
-        document.querySelectorAll('#touch-controls .touch-btn').forEach((btn) => {
+        document.querySelectorAll('#touch-controls .touch-btn[data-key]').forEach((btn) => {
             const code = btn.dataset.key;
             let pointerId = null;
             
@@ -158,6 +159,135 @@ const TouchControls = {
             btn.addEventListener('pointercancel', up);
             btn.addEventListener('lostpointercapture', up);
         });
+    },
+    
+    // ---------- 魔法パレット ----------
+    // 魔法選択ボタンを長押し → ボタンのまわりに星形のパレット（5属性）が出る
+    // → 指を離さずにスワイプして選びたい属性の方へ → 指を離すとその魔法に決定
+    // 中心付近で離す・短いタップで離すとキャンセル（何も変わらない）
+    LONG_PRESS_MS: 250,
+    
+    setupMagicPalette() {
+        const btn = document.getElementById('btn-magic-switch');
+        const palette = document.getElementById('magic-palette');
+        const itemsBox = document.getElementById('magic-palette-items');
+        const starShape = document.getElementById('magic-palette-star-shape');
+        if (!btn || !palette) return;
+        
+        let pointerId = null;
+        let timer = null;
+        let center = { x: 0, y: 0 };
+        let items = [];      // { el, x, y, index }
+        let hoverIndex = -1;
+        
+        // 星の5つの頂点の向き（いちばん上から時計回り）
+        const angleOf = (i) => -Math.PI / 2 + i * (Math.PI * 2 / 5);
+        
+        const getMagicList = () => {
+            const p = window.game && window.game.player;
+            if (!p) return { list: [], current: -1 };
+            return { list: p.learnedMagic.map(id => p.getMagicData(id)).filter(Boolean), current: p.selectedMagicIndex };
+        };
+        
+        const open = () => {
+            const p = window.game && window.game.player;
+            if (!p || p.isChanting) return; // 詠唱中は選べない
+            const { list, current } = getMagicList();
+            if (list.length === 0) return;
+            
+            palette.classList.add('open');
+            const r = parseFloat(getComputedStyle(palette).getPropertyValue('--r')) || 80;
+            const itemSize = parseFloat(getComputedStyle(palette).getPropertyValue('--item')) || 56;
+            
+            // パレットが画面からはみ出さないよう、中心を少し内側にずらす
+            const margin = r + itemSize * 0.7;
+            const b = btn.getBoundingClientRect();
+            center = {
+                x: Math.min(Math.max(b.left + b.width / 2, margin), window.innerWidth - margin),
+                y: Math.min(Math.max(b.top + b.height / 2, margin), window.innerHeight - margin)
+            };
+            palette.style.transform = `translate(${center.x}px, ${center.y}px)`;
+            
+            // 星の形（外側の頂点＝属性の位置、内側の頂点はその間）
+            const pts = [];
+            for (let i = 0; i < 10; i++) {
+                const a = -Math.PI / 2 + i * Math.PI / 5;
+                const rr = (i % 2 === 0 ? 1 : 0.42) * 100 * 0.8; // viewBox 単位（±100）
+                pts.push(`${(Math.cos(a) * rr).toFixed(1)},${(Math.sin(a) * rr).toFixed(1)}`);
+            }
+            starShape.setAttribute('points', pts.join(' '));
+            
+            // 属性ボタンを星の頂点に並べる
+            itemsBox.innerHTML = '';
+            items = list.slice(0, 5).map((m, i) => {
+                const info = window.getElementInfo ? window.getElementInfo(m.element) : { color: '#fff', label: m.element };
+                const el = document.createElement('div');
+                el.className = 'palette-item' + (i === current ? ' current' : '');
+                el.style.setProperty('--c', info.color);
+                el.innerHTML = `<span class="el">${info.label}</span><span class="nm">${m.name}</span>`;
+                const x = Math.cos(angleOf(i)) * r, y = Math.sin(angleOf(i)) * r;
+                el.style.left = `${x}px`;
+                el.style.top = `${y}px`;
+                itemsBox.appendChild(el);
+                return { el, x, y, index: i };
+            });
+            setHover(-1);
+            if (navigator.vibrate) navigator.vibrate(15);
+        };
+        
+        const setHover = (i) => {
+            if (i === hoverIndex) return;
+            hoverIndex = i;
+            items.forEach(it => it.el.classList.toggle('hover', it.index === i));
+            if (i >= 0 && navigator.vibrate) navigator.vibrate(5);
+        };
+        
+        // 指の位置から、どの属性を指しているか（中心付近は「なし」）
+        const pick = (clientX, clientY) => {
+            const dx = clientX - center.x, dy = clientY - center.y;
+            if (Math.hypot(dx, dy) < 22) return -1;
+            let best = -1, bestDot = -Infinity;
+            const len = Math.hypot(dx, dy);
+            for (const it of items) {
+                const d = (dx * it.x + dy * it.y) / (len * Math.hypot(it.x, it.y)); // 向きの近さ
+                if (d > bestDot) { bestDot = d; best = it.index; }
+            }
+            return best;
+        };
+        
+        const close = (commit) => {
+            clearTimeout(timer);
+            timer = null;
+            if (palette.classList.contains('open') && commit && hoverIndex >= 0) {
+                this.input.selectMagic(hoverIndex);
+            }
+            palette.classList.remove('open');
+            btn.classList.remove('pressed');
+            hoverIndex = -1;
+            pointerId = null;
+        };
+        
+        btn.addEventListener('pointerdown', (e) => {
+            if (pointerId !== null) return;
+            pointerId = e.pointerId;
+            btn.setPointerCapture(e.pointerId);
+            btn.classList.add('pressed');
+            timer = setTimeout(open, this.LONG_PRESS_MS); // 長押しで開く
+            e.preventDefault();
+        });
+        
+        btn.addEventListener('pointermove', (e) => {
+            if (e.pointerId !== pointerId || !palette.classList.contains('open')) return;
+            setHover(pick(e.clientX, e.clientY));
+            e.preventDefault();
+        });
+        
+        btn.addEventListener('pointerup', (e) => { if (e.pointerId === pointerId) close(true); });
+        btn.addEventListener('pointercancel', (e) => { if (e.pointerId === pointerId) close(false); });
+        btn.addEventListener('lostpointercapture', (e) => { if (e.pointerId === pointerId) close(false); });
+        
+        // テスト・デバッグ用
+        this.magicPalette = { open, close, pick, get hoverIndex() { return hoverIndex; } };
     },
     
     // ---------- 全画面 ----------

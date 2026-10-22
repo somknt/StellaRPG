@@ -376,9 +376,14 @@ class Player {
         for (let i = 0; i < this.learnedMagic.length && i < 9; i++) {
             if (input.isKeyPressed(`Digit${i + 1}`)) this.selectedMagicIndex = i;
         }
-        // R キー（スマホは切替ボタン）で順番に切り替え
+        // R キーで順番に切り替え（PC 用）
         if (input.isKeyPressed('KeyR')) {
             this.selectedMagicIndex = (this.selectedMagicIndex + 1) % this.learnedMagic.length;
+        }
+        // スマホの星形パレットで選ばれた魔法
+        const picked = input.consumeMagicSelection ? input.consumeMagicSelection() : null;
+        if (picked !== null && picked >= 0 && picked < this.learnedMagic.length) {
+            this.selectedMagicIndex = picked;
         }
     }
     

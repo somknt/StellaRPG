@@ -64,7 +64,7 @@ class UIManager {
                 const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
                 set('magic-name', magic.name);
                 set('magic-cost', `SP${magic.spCost}`);
-                set('btn-magic-switch', info.label);
+                set('magic-switch-label', info.label);
                 const box = document.getElementById('magic-info');
                 if (box) box.classList.toggle('unavailable', unavailable);
                 // スマホ：詠唱中は攻撃・回避・ダッシュ・魔法切替を押せない見た目に

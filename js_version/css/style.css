@@ -368,6 +368,94 @@ body.touch[data-state="playing"] #touch-controls {
     background: rgba(20, 20, 40, 0.55);
 }
 
+/* ---------- 魔法パレット（長押しで出る星形の5属性） ---------- */
+#magic-palette {
+    --r: clamp(64px, 21vmin, 110px);   /* 中心から各属性までの距離 */
+    --item: clamp(44px, 13vmin, 64px); /* 属性ボタンの大きさ */
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 0;
+    display: none;
+    pointer-events: none;              /* 操作は長押しした指のまま（スワイプ）で行う */
+    z-index: 70;
+}
+
+#magic-palette.open {
+    display: block;
+}
+
+/* うしろの星の形 */
+#magic-palette-star {
+    position: absolute;
+    width: calc(var(--r) * 2.5);
+    height: calc(var(--r) * 2.5);
+    left: calc(var(--r) * -1.25);
+    top: calc(var(--r) * -1.25);
+    overflow: visible;
+}
+
+#magic-palette-star-shape {
+    fill: rgba(10, 10, 30, 0.55);
+    stroke: rgba(255, 240, 200, 0.75);
+    stroke-width: 2;
+    stroke-linejoin: round;
+}
+
+/* 中心（指を置いた所）。ここで離すとキャンセル */
+#magic-palette-center {
+    position: absolute;
+    width: 28px;
+    height: 28px;
+    left: -14px;
+    top: -14px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.palette-item {
+    position: absolute;
+    width: var(--item);
+    height: var(--item);
+    margin: calc(var(--item) / -2) 0 0 calc(var(--item) / -2);
+    border-radius: 50%;
+    border: 3px solid var(--c);
+    background: rgba(15, 15, 35, 0.85);
+    box-shadow: 0 0 10px var(--c);
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    line-height: 1.05;
+    transition: transform 0.08s;
+    text-shadow: 0 1px 2px #000;
+}
+
+.palette-item .el {
+    font-weight: bold;
+    font-size: calc(var(--item) * 0.38);
+}
+
+.palette-item .nm {
+    font-size: calc(var(--item) * 0.17);
+    opacity: 0.85;
+}
+
+/* 今選んでいる属性 */
+.palette-item.current {
+    background: rgba(60, 50, 20, 0.9);
+}
+
+/* 指が向いている属性（ここで離すと決定） */
+.palette-item.hover {
+    transform: scale(1.3);
+    background: var(--c);
+    box-shadow: 0 0 18px var(--c), 0 0 4px #fff;
+}
+
 /* 魔法ボタンの枠も今の属性の色に */
 #btn-magic {
     border-color: var(--magic-color, #ff4a3a);
