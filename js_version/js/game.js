@@ -98,6 +98,8 @@ class Game {
         // カメラ
         this.camera = new Camera(0, 0, this.canvas.width, this.canvas.height);
         this.camera.follow(this.player);
+        this.camera.setBounds(this.map.width * this.map.tileSize, this.map.height * this.map.tileSize);
+        this.camera.snapToTarget();
         
         this.gameState = 'playing';
     }
@@ -191,6 +193,12 @@ class Game {
     }
     
     update(deltaTime) {
+        // 画面の状態を body に書いておく（CSS でタッチ操作やステータスの表示を切り替える）
+        if (this._shownState !== this.gameState && typeof document !== 'undefined' && document.body) {
+            this._shownState = this.gameState;
+            document.body.dataset.state = this.gameState;
+        }
+        
         if (this.paused) return;
         
         

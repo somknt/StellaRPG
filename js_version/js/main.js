@@ -16,6 +16,12 @@ window.addEventListener('load', async () => {
     
     // ゲーム初期化
     game = new Game(canvas);
+    window.game = game;
+    
+    // スマホ対応（画面フィット・タッチ操作）
+    if (window.TouchControls) {
+        window.TouchControls.init(game.input);
+    }
     
     try {
         await game.init();
@@ -32,10 +38,7 @@ window.addEventListener('load', async () => {
     }
 });
 
-// ウィンドウリサイズ対応
-window.addEventListener('resize', () => {
-    // TODO: キャンバスリサイズ処理
-});
+// ウィンドウリサイズ対応は touch_controls.js の fitGame で行う
 
 // ページ離脱時の警告（オプション）
 window.addEventListener('beforeunload', (e) => {

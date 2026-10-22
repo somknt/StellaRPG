@@ -2,57 +2,68 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- スマホ：画面幅に合わせる・ピンチ/ダブルタップのズーム禁止・ノッチ部分まで使う -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#1a1a2e">
+    <!-- ホーム画面に追加したとき、ブラウザのバーなしの全画面で起動する -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="星の子">
     <title>星の子 (Hoshi no Ko) - 2D RPG</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
+<body data-state="loading">
+    <!-- ゲーム画面（1280x720 で作り、端末の画面サイズに合わせて JS で拡大縮小する） -->
     <div id="game-container">
         <canvas id="gameCanvas" width="1280" height="720"></canvas>
         
         <!-- UI Overlay -->
         <div id="ui-overlay">
-            <!-- HP Bar -->
-            <div class="stat-bar" id="hp-bar-container">
-                <div class="stat-label">HP</div>
-                <div class="stat-bar-bg">
-                    <div class="stat-bar-fill hp-fill" id="hp-bar"></div>
+            <!-- 左上のステータス（スマホでは読みやすいよう少し大きくする） -->
+            <div id="hud-left">
+                <!-- HP Bar -->
+                <div class="stat-bar" id="hp-bar-container">
+                    <div class="stat-label">HP</div>
+                    <div class="stat-bar-bg">
+                        <div class="stat-bar-fill hp-fill" id="hp-bar"></div>
+                    </div>
+                    <div class="stat-text" id="hp-text">100/100</div>
                 </div>
-                <div class="stat-text" id="hp-text">100/100</div>
-            </div>
-            
-            <!-- SP Bar -->
-            <div class="stat-bar" id="sp-bar-container">
-                <div class="stat-label">SP</div>
-                <div class="stat-bar-bg">
-                    <div class="stat-bar-fill sp-fill" id="sp-bar"></div>
+                
+                <!-- SP Bar -->
+                <div class="stat-bar" id="sp-bar-container">
+                    <div class="stat-label">SP</div>
+                    <div class="stat-bar-bg">
+                        <div class="stat-bar-fill sp-fill" id="sp-bar"></div>
+                    </div>
+                    <div class="stat-text" id="sp-text">50/50</div>
                 </div>
-                <div class="stat-text" id="sp-text">50/50</div>
-            </div>
-            
-            <!-- Stamina Bar -->
-            <div class="stat-bar" id="stamina-bar-container">
-                <div class="stat-label">ST</div>
-                <div class="stat-bar-bg">
-                    <div class="stat-bar-fill stamina-fill" id="stamina-bar"></div>
+                
+                <!-- Stamina Bar -->
+                <div class="stat-bar" id="stamina-bar-container">
+                    <div class="stat-label">ST</div>
+                    <div class="stat-bar-bg">
+                        <div class="stat-bar-fill stamina-fill" id="stamina-bar"></div>
+                    </div>
+                    <div class="stat-text" id="stamina-text">100/100</div>
                 </div>
-                <div class="stat-text" id="stamina-text">100/100</div>
+                
+                <!-- Level & XP -->
+                <div class="stat-info" id="level-info">
+                    <span>Lv.<span id="player-level">1</span></span>
+                    <span class="xp-text">XP: <span id="player-xp">0</span>/<span id="player-xp-next">100</span></span>
+                </div>
             </div>
             
-            <!-- Level & XP -->
-            <div class="stat-info" id="level-info">
-                <span>Lv.<span id="player-level">1</span></span>
-                <span class="xp-text">XP: <span id="player-xp">0</span>/<span id="player-xp-next">100</span></span>
-            </div>
-            
-            <!-- Debug Info -->
+            <!-- Debug Info（タッチ端末では非表示） -->
             <div id="debug-info">
                 <div>FPS: <span id="fps">60</span></div>
                 <div>座標: (<span id="player-x">0</span>, <span id="player-y">0</span>)</div>
                 <div>敵数: <span id="enemy-count">0</span></div>
             </div>
             
-            <!-- Controls Help -->
+            <!-- Controls Help（キーボード用。タッチ端末では非表示） -->
             <div id="controls-help">
                 <h3>操作方法</h3>
                 <p><strong>WASD</strong>: 移動</p>
@@ -64,6 +75,32 @@
                 <p><strong>F1</strong>: ヘルプ表示/非表示</p>
             </div>
         </div>
+    </div>
+    
+    <!-- スマホ用タッチ操作（プレイ中だけ表示。画面の端に固定するので、ゲーム画面の外の黒帯も使う） -->
+    <div id="touch-controls" aria-hidden="true">
+        <!-- 左半分：どこを触ってもそこにスティックが出る -->
+        <div id="stick-zone">
+            <div id="stick-base">
+                <div id="stick-knob"></div>
+            </div>
+        </div>
+        <!-- 右側：アクションボタン -->
+        <div id="action-buttons">
+            <button class="touch-btn" id="btn-attack" data-key="Space">攻撃</button>
+            <button class="touch-btn" id="btn-dodge" data-key="KeyC">回避</button>
+            <button class="touch-btn" id="btn-dash" data-key="ShiftLeft" data-hold="true">ダッシュ</button>
+            <button class="touch-btn" id="btn-magic" data-key="KeyQ">魔法</button>
+        </div>
+    </div>
+    
+    <!-- 全画面ボタン（全画面にできるブラウザだけ表示） -->
+    <button id="fullscreen-btn" type="button" aria-label="全画面表示">⛶</button>
+    
+    <!-- 縦向きのとき：横向きにしてもらう案内 -->
+    <div id="rotate-notice">
+        <div class="rotate-icon">📱↻</div>
+        <p>スマホを横向きにして遊んでください</p>
     </div>
     
     <!-- Loading Screen -->
@@ -90,6 +127,7 @@
     <script src="js/map.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/game.js"></script>
+    <script src="js/touch_controls.js"></script>
     <script src="js/main.js"></script>
 </body>
 </html>

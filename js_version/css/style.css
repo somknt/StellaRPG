@@ -4,21 +4,38 @@
     box-sizing: border-box;
 }
 
-body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: #1a1a2e;
-    color: #eee;
+/* ---------- ページ全体：スクロール・ズーム・長押しメニュー・選択を防ぐ ---------- */
+html, body {
+    width: 100%;
+    height: 100%;
     overflow: hidden;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    min-height: 100vh;
+    overscroll-behavior: none;     /* 引っ張って更新・バウンスを防ぐ */
 }
 
+body {
+    font-family: 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', Tahoma, sans-serif;
+    background: #0b0b16;
+    color: #eee;
+    position: fixed;               /* iOS でページが動かないように固定 */
+    inset: 0;
+    touch-action: none;            /* ピンチズーム・ダブルタップズーム・スクロールを無効化 */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;   /* iOS の長押しメニューを出さない */
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* ---------- ゲーム画面 ----------
+   中身は常に 1280x720 で作り、JS（touch_controls.js の fitGame）が
+   --scale を計算して画面に収まる大きさに拡大縮小する */
 #game-container {
-    position: relative;
+    position: absolute;
+    left: 50%;
+    top: 50%;
     width: 1280px;
     height: 720px;
+    transform: translate(-50%, -50%) scale(var(--scale, 1));
+    transform-origin: center center;
     background: #000;
     box-shadow: 0 0 30px rgba(0, 0, 0, 0.8);
 }
@@ -33,19 +50,31 @@ body {
 
 #ui-overlay {
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+    inset: 0;
     pointer-events: none;
     z-index: 10;
 }
 
-/* Stat Bars */
-.stat-bar {
+/* キャラ選択中・読み込み中はステータスを出さない */
+body:not([data-state="playing"]) #hud-left,
+body:not([data-state="playing"]) #debug-info {
+    display: none;
+}
+
+/* ---------- 左上のステータス ---------- */
+#hud-left {
     position: absolute;
     top: 20px;
     left: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    transform: scale(var(--hud-scale, 1)); /* スマホでは文字が小さくなりすぎないよう拡大 */
+    transform-origin: top left;
+}
+
+.stat-bar {
     width: 300px;
     display: flex;
     align-items: center;
@@ -54,14 +83,6 @@ body {
     padding: 8px 12px;
     border-radius: 8px;
     border: 2px solid rgba(255, 255, 255, 0.2);
-}
-
-#sp-bar-container {
-    top: 70px;
-}
-
-#stamina-bar-container {
-    top: 120px;
 }
 
 .stamina-fill {
@@ -119,9 +140,6 @@ body {
 
 /* Level Info */
 .stat-info {
-    position: absolute;
-    top: 170px;
-    left: 20px;
     background: rgba(0, 0, 0, 0.6);
     padding: 8px 12px;
     border-radius: 8px;
@@ -182,13 +200,196 @@ body {
     display: none;
 }
 
-/* Loading Screen */
+/* タッチ端末ではキーボード用の表示を出さない */
+body.touch #controls-help,
+body.touch #debug-info {
+    display: none;
+}
+
+/* ---------- タッチ操作 ---------- */
+#touch-controls {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    pointer-events: none;           /* ボタンとスティックの場所以外は下に通す */
+    /* ボタンの大きさの基準：画面の短い辺に合わせる（小さいスマホでも押しやすく） */
+    --btn: clamp(56px, 20vmin, 104px);
+}
+
+body.touch[data-state="playing"] #touch-controls {
+    display: block;
+}
+
+/* 左半分：触った場所にスティックが出る */
+#stick-zone {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 45%;
+    pointer-events: auto;
+    touch-action: none;
+}
+
+#stick-base {
+    --size: clamp(110px, 34vmin, 180px);
+    position: absolute;
+    width: var(--size);
+    height: var(--size);
+    /* 触っていない時の定位置（左下） */
+    left: calc(env(safe-area-inset-left, 0px) + 6vmin);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 6vmin);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    border: 2px solid rgba(255, 255, 255, 0.35);
+    opacity: 0.55;
+    transition: opacity 0.15s;
+}
+
+#stick-base.active {
+    opacity: 1;
+    transition: none;
+}
+
+#stick-knob {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 44%;
+    height: 44%;
+    margin: -22% 0 0 -22%;
+    border-radius: 50%;
+    background: rgba(255, 220, 150, 0.55);
+    border: 2px solid rgba(255, 255, 255, 0.7);
+    box-shadow: 0 0 12px rgba(255, 200, 120, 0.4);
+}
+
+/* 右下：アクションボタン（右手の親指で届く配置） */
+#action-buttons {
+    position: absolute;
+    right: calc(env(safe-area-inset-right, 0px) + 4vmin);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 4vmin);
+    width: calc(var(--btn) * 2.6);
+    height: calc(var(--btn) * 2.4);
+    pointer-events: none;
+}
+
+.touch-btn {
+    position: absolute;
+    width: var(--btn);
+    height: var(--btn);
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.55);
+    background: rgba(20, 20, 40, 0.45);
+    color: #fff;
+    font-weight: bold;
+    font-size: calc(var(--btn) * 0.2);
+    font-family: inherit;
+    text-shadow: 0 1px 2px #000;
+    pointer-events: auto;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    outline: none;
+}
+
+.touch-btn.pressed {
+    background: rgba(255, 200, 100, 0.55);
+    border-color: #ffe0a0;
+    transform: scale(0.94);
+}
+
+/* 攻撃：一番大きく、親指の真下 */
+#btn-attack {
+    right: 0;
+    bottom: 0;
+    width: calc(var(--btn) * 1.35);
+    height: calc(var(--btn) * 1.35);
+    font-size: calc(var(--btn) * 0.26);
+    background: rgba(180, 60, 60, 0.45);
+}
+
+/* 回避：攻撃の左 */
+#btn-dodge {
+    right: calc(var(--btn) * 1.5);
+    bottom: calc(var(--btn) * 0.05);
+    background: rgba(60, 120, 200, 0.45);
+}
+
+/* ダッシュ：攻撃の上（長押し） */
+#btn-dash {
+    right: calc(var(--btn) * 0.18);
+    bottom: calc(var(--btn) * 1.5);
+    background: rgba(200, 170, 40, 0.45);
+}
+
+/* 魔法：左上（小さめ） */
+#btn-magic {
+    right: calc(var(--btn) * 1.45);
+    bottom: calc(var(--btn) * 1.35);
+    width: calc(var(--btn) * 0.82);
+    height: calc(var(--btn) * 0.82);
+    font-size: calc(var(--btn) * 0.18);
+    background: rgba(140, 80, 200, 0.45);
+}
+
+/* ---------- 全画面ボタン ---------- */
+#fullscreen-btn {
+    display: none;
+    position: fixed;
+    z-index: 60;
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    right: calc(env(safe-area-inset-right, 0px) + 8px);
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    background: rgba(0, 0, 0, 0.45);
+    color: #fff;
+    font-size: 20px;
+    line-height: 1;
+}
+
+body.touch.can-fullscreen:not(.is-fullscreen) #fullscreen-btn {
+    display: block;
+}
+
+/* ---------- 縦向きの案内 ---------- */
+#rotate-notice {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    background: rgba(11, 11, 22, 0.96);
+    color: #fff;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 16px;
+    text-align: center;
+    padding: 24px;
+    font-size: 18px;
+}
+
+.rotate-icon {
+    font-size: 56px;
+}
+
+body.touch.portrait #rotate-notice {
+    display: flex;
+}
+
+/* 縦向き中は後ろの操作ボタンも消す */
+body.touch.portrait #touch-controls,
+body.touch.portrait #fullscreen-btn {
+    display: none !important;
+}
+
+/* ---------- Loading Screen ---------- */
 #loading-screen {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+    inset: 0;
     background: #1a1a2e;
     display: flex;
     justify-content: center;
@@ -204,12 +405,12 @@ body {
 
 .loading-content {
     text-align: center;
-    max-width: 500px;
-    padding: 40px;
+    width: min(500px, 90vw);
+    padding: 24px;
 }
 
 .loading-content h1 {
-    font-size: 48px;
+    font-size: clamp(24px, 7vmin, 48px);
     margin-bottom: 30px;
     color: #ffb347;
     text-shadow: 0 0 20px rgba(255, 179, 71, 0.5);
@@ -235,14 +436,4 @@ body {
 #loading-text {
     font-size: 16px;
     color: #aaa;
-}
-
-/* Responsive */
-@media (max-width: 1280px) {
-    #game-container {
-        width: 100vw;
-        height: 56.25vw;
-        max-height: 100vh;
-        max-width: 177.78vh;
-    }
 }

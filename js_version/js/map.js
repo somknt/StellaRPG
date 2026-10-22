@@ -144,16 +144,8 @@ class Map {
                 const tileImage = this.getTileImage(tile.type);
                 
                 if (tileImage) {
-                    // 画像を少し大きめに描画して隙間を完全に埋める
-                    const overlap = 1;
-                    ctx.drawImage(
-                        tileImage,
-                        0, 0, tileImage.width, tileImage.height,  // ソース全体
-                        Math.floor(screenX), 
-                        Math.floor(screenY), 
-                        this.tileSize + overlap, 
-                        this.tileSize + overlap
-                    );
+                    // 縮小済みのタイル（タイルより1px大きい）を等倍で置く → 隙間なし・スマホでも軽い
+                    ctx.drawImage(tileImage, Math.floor(screenX), Math.floor(screenY));
                 } else {
                     // 画像がない場合は色で描画（フォールバック）
                     ctx.fillStyle = tile.color;
@@ -180,7 +172,28 @@ class Map {
         };
         
         const imageKey = imageMap[tileType] || 'grass';
-        return window.assetManager.get(imageKey);
+        return this.getScaledTile(imageKey);
+    }
+    
+    // タイル画像をタイルの大きさ(+1px)に一度だけ縮小して保存しておく
+    // （毎フレーム大きな元画像から縮小して描くとスマホでは重いため。見た目は以前と同じ）
+    getScaledTile(imageKey) {
+        this.tileCache = this.tileCache || {};
+        if (imageKey in this.tileCache) return this.tileCache[imageKey];
+        
+        const src = window.assetManager.get(imageKey);
+        if (!src) return null; // まだ読み込まれていない or 画像なし（色で描く）
+        
+        const size = this.tileSize + 1; // 1px 重ねて隙間を防ぐ
+        const canvas = document.createElement('canvas');
+        if (!canvas.getContext) return null;
+        canvas.width = size;
+        canvas.height = size;
+        const c = canvas.getContext('2d');
+        c.imageSmoothingEnabled = false;
+        c.drawImage(src, 0, 0, src.width, src.height, 0, 0, size, size);
+        this.tileCache[imageKey] = canvas;
+        return canvas;
     }
     
     // オブジェクトを描画
@@ -248,6 +261,18 @@ class Camera {
         this.target = target;
     }
     
+    // カメラが動ける範囲（マップ全体の大きさ、px）
+    setBounds(width, height) {
+        this.bounds = { width, height };
+    }
+    
+    // 追従対象の位置へすぐ移動（開始時にカメラが流れてこないように）
+    snapToTarget() {
+        if (!this.target) return;
+        this.position = new Vector2(this.target.position.x - this.width / 2, this.target.position.y - this.height / 2);
+        this.update(0);
+    }
+    
     update(deltaTime) {
         if (this.target) {
             const targetPos = new Vector2(
@@ -258,6 +283,14 @@ class Camera {
             // スムーズに追従
             const diff = targetPos.sub(this.position);
             this.position = this.position.add(diff.mult(this.followSpeed * deltaTime));
+            
+            // マップの外（黒い部分）を映さないよう、カメラをマップの範囲内に収める
+            if (this.bounds) {
+                const maxX = Math.max(0, this.bounds.width - this.width);
+                const maxY = Math.max(0, this.bounds.height - this.height);
+                this.position.x = Math.min(Math.max(this.position.x, 0), maxX);
+                this.position.y = Math.min(Math.max(this.position.y, 0), maxY);
+            }
             
             // タイルの隙間を防ぐため、カメラ座標を整数に丸める
             this.position.x = Math.round(this.position.x);

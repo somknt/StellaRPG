@@ -48,7 +48,8 @@ class CharacterSelectScreen {
     }
     
     isInPreviewArea(pos, center) {
-        const size = 150;
+        // 見た目の枠(150px)より広めに判定して、スマホの指でも押しやすくする
+        const size = 260;
         return pos.x >= center.x - size/2 && pos.x <= center.x + size/2 &&
                pos.y >= center.y - size/2 && pos.y <= center.y + size/2;
     }
@@ -83,9 +84,12 @@ class CharacterSelectScreen {
         // 操作説明
         ctx.save();
         ctx.fillStyle = '#aaaaaa';
-        ctx.font = '16px Arial';
+        const isTouch = document.body && document.body.classList.contains('touch');
+        ctx.font = isTouch ? 'bold 28px Arial' : '16px Arial'; // スマホは画面が縮むので大きめに
         ctx.textAlign = 'center';
-        ctx.fillText('クリックで選択 / キーボード: 1（男性） 2（女性）', 640, 650);
+        ctx.fillText(isTouch
+            ? 'キャラクターをタップして選択'
+            : 'クリックで選択 / キーボード: 1（男性） 2（女性）', 640, 650);
         ctx.restore();
     }
     
