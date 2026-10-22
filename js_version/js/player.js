@@ -23,14 +23,18 @@ class Player {
         
         // 移動
         this.baseSpeed = 150;
-        this.sprintMultiplier = 1.7;   // ダッシュ時の速度倍率
-        this.isDashing = false;
+        this.sprintMultiplier = 1.7;   // 走る時の速度倍率
+        this.isDashing = false;        // 走っているか（ダッシュ画像を使う）
+        // 移動のしかた（マップで決まる。game.js が setMoveMode で設定）
+        //   'run'  : 戦闘フィールド・敵がいるマップ → 常に走る（スタミナは減らない）
+        //   'walk' : 村・町・拠点など敵がいない場所 → 常に歩く
+        // どちらでも詠唱中は歩き
+        this.moveMode = 'run';
         
         // スタミナ
         this.maxStamina = 100;
         this.currentStamina = 100;
-        this.dashStaminaCost = 15;     // ダッシュ中の消費（毎秒）→ ゆっくり減る
-        this.dodgeStaminaCost = 25;    // 回避1回の消費 → パッと減る
+        this.dodgeStaminaCost = 25;    // 回避1回の消費 → パッと減る（走るのは消費なし）
         this.staminaRegenRate = 30;    // 回復量（毎秒）
         this.staminaRegenDelay = 0.8;  // 使ってから回復が始まるまでの秒数
         this.timeSinceStaminaUse = 0;
@@ -184,9 +188,8 @@ class Player {
         const moveVector = input.getMovementVector();
         this.isMoving = moveVector.length() > 0;
         
-        // ダッシュ：長押し中・移動中・スタミナがある時だけ（詠唱中は歩きのみ）
-        this.isDashing = this.isMoving && input.isSprintPressed() && !this.isChanting &&
-                         !this.isExhausted && this.currentStamina > 0;
+        // 走るかどうかはマップで決まる（戦闘フィールドは常に走る・拠点は常に歩く）。詠唱中は歩き
+        this.isDashing = this.isMoving && this.moveMode === 'run' && !this.isChanting;
         
         if (this.isMoving) {
             // 方向を更新（攻撃モーション中は向きを固定）
@@ -198,8 +201,7 @@ class Player {
             // 速度計算
             let speed = this.baseSpeed;
             if (this.isDashing) {
-                speed *= this.sprintMultiplier;
-                this.useStamina(this.dashStaminaCost * deltaTime);
+                speed *= this.sprintMultiplier; // スタミナは減らない
             }
             
             this.velocity = moveVector.mult(speed);
@@ -207,6 +209,10 @@ class Player {
         } else {
             this.velocity = new Vector2(0, 0);
         }
+    }
+    
+    setMoveMode(mode) {
+        this.moveMode = mode === 'walk' ? 'walk' : 'run';
     }
     
     // ---------- 回避 ----------

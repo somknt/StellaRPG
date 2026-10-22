@@ -83,6 +83,9 @@ const TileConfig = {
 // ティウム村のマップデータ
 const TiumVillageMap = {
     name: 'ティウム村',
+    // 村・町・拠点など敵がいない場所は safeZone: true（ストーリーモードでは常に歩く）
+    // 戦闘フィールドは safeZone: false（常に走る）
+    safeZone: true,
     width: 40,
     height: 30,
     tileSize: 32,

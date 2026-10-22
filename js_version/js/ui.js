@@ -68,7 +68,7 @@ class UIManager {
                 const box = document.getElementById('magic-info');
                 if (box) box.classList.toggle('unavailable', unavailable);
                 // スマホ：詠唱中は攻撃・回避・ダッシュ・魔法切替を押せない見た目に
-                for (const id of ['btn-attack', 'btn-dodge', 'btn-dash', 'btn-magic-switch']) {
+                for (const id of ['btn-attack', 'btn-dodge', 'btn-magic-switch']) {
                     const b = document.getElementById(id);
                     if (b) b.classList.toggle('disabled', player.isChanting);
                 }

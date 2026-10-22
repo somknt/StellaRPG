@@ -8,6 +8,9 @@ class Game {
         this.paused = false;
         this.gameState = 'character_select'; // 'character_select', 'playing', 'game_over'
         
+        // ゲームモード：'battle'（フリーバトル。今はこれだけ） / 'story'（今後追加）
+        this.gameMode = 'battle';
+        
         // バトル設定
         this.battleDifficulty = 'normal'; // 'easy', 'normal', 'hard'
         
@@ -86,6 +89,9 @@ class Game {
         this.player.unlockStarPower(3); // テスト用：段階3解放
         this.justDodgeTimer = 0;
         
+        // 移動のしかた：バトルモードと戦闘フィールドは常に走る、村・町・拠点（safeZone）は常に歩く
+        this.player.setMoveMode(this.getMoveModeForMap(villageMapData));
+        
         // 難易度に応じて敵のスポーナーを設定
         this.enemySpawner.setDifficulty(this.battleDifficulty);
         
@@ -102,6 +108,13 @@ class Game {
         this.camera.snapToTarget();
         
         this.gameState = 'playing';
+    }
+    
+    // 今は「バトルモード」（フリーバトル）だけなので常に走る。
+    // ストーリーモードを作ったら、mapData.safeZone が true の村・町・拠点では歩きにする
+    getMoveModeForMap(mapData) {
+        if (this.gameMode === 'battle') return 'run';
+        return mapData && mapData.safeZone ? 'walk' : 'run';
     }
     
     async loadGameData() {

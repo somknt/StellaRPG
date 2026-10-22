@@ -340,27 +340,17 @@ body.touch[data-state="playing"] #touch-controls {
     background: rgba(60, 120, 200, 0.45);
 }
 
-/* ダッシュ：攻撃の上（長押し） */
-#btn-dash {
+/* 魔法：攻撃の上（戦闘中は常に走るのでダッシュボタンはなし。空いた場所に置く） */
+#btn-magic {
     right: calc(var(--btn) * 0.18);
     bottom: calc(var(--btn) * 1.5);
-    background: rgba(200, 170, 40, 0.45);
-}
-
-/* 魔法：左上（小さめ） */
-#btn-magic {
-    right: calc(var(--btn) * 1.45);
-    bottom: calc(var(--btn) * 1.35);
-    width: calc(var(--btn) * 0.82);
-    height: calc(var(--btn) * 0.82);
-    font-size: calc(var(--btn) * 0.18);
     background: rgba(140, 80, 200, 0.45);
 }
 
-/* 魔法の切り替え：魔法ボタンの左上（小さめ）。枠の色は今の属性の色 */
+/* 魔法の選択（長押しでパレット）：魔法ボタンの左（小さめ）。枠の色は今の属性の色 */
 #btn-magic-switch {
-    right: calc(var(--btn) * 2.4);
-    bottom: calc(var(--btn) * 1.75);
+    right: calc(var(--btn) * 1.45);
+    bottom: calc(var(--btn) * 1.45);
     width: calc(var(--btn) * 0.62);
     height: calc(var(--btn) * 0.62);
     font-size: calc(var(--btn) * 0.24);
