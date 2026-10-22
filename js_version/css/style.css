@@ -74,68 +74,66 @@ body:not([data-state="playing"]) #debug-info {
     transform-origin: top left;
 }
 
-.stat-bar {
-    width: 300px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: rgba(0, 0, 0, 0.6);
-    padding: 8px 12px;
-    border-radius: 8px;
-    border: 2px solid rgba(255, 255, 255, 0.2);
+/* ---------- ステータスバー（星章のデザイン） ----------
+   枠の画像（status_frame.png）の上に、同じ大きさの HP/ST/MP の色の画像を重ね、
+   clip-path で「今の量」のところから右を切り取って表示する */
+#status-panel {
+    position: relative;
+    width: 420px;                 /* 元画像 944x321 の比率で表示 */
+    aspect-ratio: 944 / 321;
+    margin-left: -6px;
+    image-rendering: pixelated;
+    filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6));
 }
 
-.stamina-fill {
-    background: linear-gradient(90deg, #e6b800, #ffe066);
+.status-frame {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+    -webkit-user-drag: none;
 }
 
-/* スタミナ切れ中は赤っぽく点滅 */
-.stamina-fill.exhausted {
-    background: linear-gradient(90deg, #b34700, #ff8040);
+.status-fill {
+    --ratio: 1;                   /* 0〜1：今の量（ui.js が設定） */
+    position: absolute;
+    inset: 0;
+    background-size: 100% 100%;
+    image-rendering: pixelated;
+    /* 中身の左端(--l%) から 右端(--r%) の間で、量に応じて右側を切り取る */
+    clip-path: inset(0 calc((100 - (var(--l) + (var(--r) - var(--l)) * var(--ratio))) * 1%) 0 0);
+    transition: clip-path 0.3s ease;
+}
+
+/* スタミナ切れ中は点滅 */
+.status-fill.exhausted {
     animation: stamina-blink 0.5s infinite alternate;
+    filter: hue-rotate(-25deg) saturate(1.4);
 }
 
 @keyframes stamina-blink {
     from { opacity: 1; }
-    to { opacity: 0.5; }
+    to { opacity: 0.45; }
 }
 
-.stat-label {
+/* バーの中の数字（小さく、右寄せ） */
+.status-value {
+    position: absolute;
+    left: calc(var(--l) * 1%);
+    width: calc((var(--r) - var(--l)) * 1%);
+    top: calc(var(--t) * 1%);
+    height: calc((var(--b) - var(--t)) * 1%);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 10px;
+    font-size: 11px;
     font-weight: bold;
-    font-size: 14px;
-    min-width: 30px;
     color: #fff;
-}
-
-.stat-bar-bg {
-    flex: 1;
-    height: 20px;
-    background: rgba(0, 0, 0, 0.8);
-    border-radius: 10px;
-    overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.3);
-}
-
-.stat-bar-fill {
-    height: 100%;
-    transition: width 0.3s ease;
-    border-radius: 10px;
-}
-
-.hp-fill {
-    background: linear-gradient(90deg, #ff4444, #ff6666);
-}
-
-.sp-fill {
-    background: linear-gradient(90deg, #4444ff, #6666ff);
-}
-
-.stat-text {
-    font-size: 12px;
-    min-width: 70px;
-    text-align: right;
-    color: #fff;
-    font-weight: bold;
+    letter-spacing: 0.5px;
+    text-shadow: 0 0 2px #000, 0 1px 2px #000, 0 0 4px #000;
+    font-variant-numeric: tabular-nums;
 }
 
 /* Level Info */

@@ -22,31 +22,17 @@
         <div id="ui-overlay">
             <!-- 左上のステータス（スマホでは読みやすいよう少し大きくする） -->
             <div id="hud-left">
-                <!-- HP Bar -->
-                <div class="stat-bar" id="hp-bar-container">
-                    <div class="stat-label">HP</div>
-                    <div class="stat-bar-bg">
-                        <div class="stat-bar-fill hp-fill" id="hp-bar"></div>
-                    </div>
-                    <div class="stat-text" id="hp-text">100/100</div>
-                </div>
-                
-                <!-- SP Bar -->
-                <div class="stat-bar" id="sp-bar-container">
-                    <div class="stat-label">SP</div>
-                    <div class="stat-bar-bg">
-                        <div class="stat-bar-fill sp-fill" id="sp-bar"></div>
-                    </div>
-                    <div class="stat-text" id="sp-text">50/50</div>
-                </div>
-                
-                <!-- Stamina Bar -->
-                <div class="stat-bar" id="stamina-bar-container">
-                    <div class="stat-label">ST</div>
-                    <div class="stat-bar-bg">
-                        <div class="stat-bar-fill stamina-fill" id="stamina-bar"></div>
-                    </div>
-                    <div class="stat-text" id="stamina-text">100/100</div>
+                <!-- ステータスバー（星章のデザイン）
+                     枠の画像の上に、HP・ST・MP の色の画像を重ねて、今の量のところで切り取って表示する
+                     --l/--r/--t/--b：枠画像の中でのバーの中身の位置（%） -->
+                <div id="status-panel">
+                    <img class="status-frame" src="assets/ui/status_frame.png" alt="" draggable="false">
+                    <div class="status-fill" id="hp-bar" style="--l:34.251; --r:93.647; background-image:url('assets/ui/status_fill_hp.png')"></div>
+                    <div class="status-fill" id="stamina-bar" style="--l:34.727; --r:75.437; background-image:url('assets/ui/status_fill_st.png')"></div>
+                    <div class="status-fill" id="sp-bar" style="--l:34.674; --r:71.784; background-image:url('assets/ui/status_fill_mp.png')"></div>
+                    <div class="status-value" id="hp-text" style="--l:34.251; --r:93.647; --t:29.082; --b:41.991">100/100</div>
+                    <div class="status-value" id="stamina-text" style="--l:34.727; --r:75.437; --t:54.588; --b:62.83">100/100</div>
+                    <div class="status-value" id="sp-text" style="--l:34.674; --r:71.784; --t:74.961; --b:84.292">50/50</div>
                 </div>
                 
                 <!-- Level & XP -->
@@ -59,7 +45,7 @@
                 <div class="stat-info" id="magic-info">
                     <span class="magic-dot" id="magic-dot"></span>
                     <span id="magic-name">火球陣</span>
-                    <span class="magic-cost" id="magic-cost">SP10</span>
+                    <span class="magic-cost" id="magic-cost">MP10</span>
                 </div>
             </div>
             

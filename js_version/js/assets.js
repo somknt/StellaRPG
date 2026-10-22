@@ -119,11 +119,8 @@ class AssetManager {
             // タイル
             'grass': 'assets/tiles/grass.png',
             'road': 'assets/tiles/road.png',
-            'water': 'assets/tiles/water.png',
-            
-            // UI
-            'hp_bar': 'assets/ui/hp_bar.png',
-            'sp_bar': 'assets/ui/sp_bar.png'
+            'water': 'assets/tiles/water.png'
+            // UI（ステータスバー）は index.html / style.css から直接読み込む
         };
     }
     

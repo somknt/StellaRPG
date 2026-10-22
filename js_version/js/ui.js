@@ -34,21 +34,24 @@ class UIManager {
     }
     
     updatePlayerStats(player) {
-        // HPバー
-        const hpPercent = player.getHPPercent();
-        this.elements.hpBar.style.width = hpPercent + '%';
-        this.elements.hpText.textContent = `${Math.ceil(player.currentHP)}/${player.maxHP}`;
-        
-        // SPバー
-        const spPercent = player.getSPPercent();
-        this.elements.spBar.style.width = spPercent + '%';
-        this.elements.spText.textContent = `${Math.ceil(player.currentSP)}/${player.maxSP}`;
-        
-        // スタミナバー
+        // ステータスバー（星章のデザイン）：--ratio(0〜1) を変えると、その量のところで色の画像が切り取られる
+        // 値が変わった時だけ書き換える（毎フレーム書き換えるとスマホで重くなるため）
+        const setBar = (bar, text, cur, max, round) => {
+            if (!bar) return;
+            const ratio = max > 0 ? Math.max(0, Math.min(1, cur / max)) : 0;
+            const r = ratio.toFixed(3);
+            if (bar.dataset.ratio !== r) {
+                bar.dataset.ratio = r;
+                bar.style.setProperty('--ratio', r);
+            }
+            const t = `${round(cur)}/${max}`;
+            if (text && text.textContent !== t) text.textContent = t;
+        };
+        setBar(this.elements.hpBar, this.elements.hpText, player.currentHP, player.maxHP, Math.ceil);
+        setBar(this.elements.staminaBar, this.elements.staminaText, player.currentStamina, player.maxStamina, Math.floor);
+        setBar(this.elements.spBar, this.elements.spText, player.currentSP, player.maxSP, Math.ceil); // 画面上の表記は MP
         if (this.elements.staminaBar) {
-            this.elements.staminaBar.style.width = player.getStaminaPercent() + '%';
-            this.elements.staminaBar.classList.toggle('exhausted', player.isExhausted);
-            this.elements.staminaText.textContent = `${Math.floor(player.currentStamina)}/${player.maxStamina}`;
+            this.elements.staminaBar.classList.toggle('exhausted', !!player.isExhausted);
         }
         
         // 今選んでいる魔法（名前・SP・属性の色）。変わった時だけ書き換える
@@ -63,7 +66,7 @@ class UIManager {
                 document.documentElement.style.setProperty('--magic-color', info.color);
                 const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
                 set('magic-name', magic.name);
-                set('magic-cost', `SP${magic.spCost}`);
+                set('magic-cost', `MP${magic.spCost}`);
                 set('magic-switch-label', info.label);
                 const box = document.getElementById('magic-info');
                 if (box) box.classList.toggle('unavailable', unavailable);
