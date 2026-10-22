@@ -54,6 +54,13 @@
                     <span>Lv.<span id="player-level">1</span></span>
                     <span class="xp-text">XP: <span id="player-xp">0</span>/<span id="player-xp-next">100</span></span>
                 </div>
+                
+                <!-- 今選んでいる魔法 -->
+                <div class="stat-info" id="magic-info">
+                    <span class="magic-dot" id="magic-dot"></span>
+                    <span id="magic-name">火球陣</span>
+                    <span class="magic-cost" id="magic-cost">SP10</span>
+                </div>
             </div>
             
             <!-- Debug Info（タッチ端末では非表示） -->
@@ -70,7 +77,8 @@
                 <p><strong>Shift長押し</strong>: ダッシュ</p>
                 <p><strong>C / 右クリック</strong>: 回避</p>
                 <p><strong>Space</strong>: 攻撃（ナイフ）</p>
-                <p><strong>Q</strong>: 魔法（光弾陣）</p>
+                <p><strong>Q</strong>: 魔法（詠唱→発動）</p>
+                <p><strong>1〜5 / R</strong>: 魔法の切り替え</p>
                 <p><strong>E</strong>: 相互作用</p>
                 <p><strong>F1</strong>: ヘルプ表示/非表示</p>
             </div>
@@ -91,6 +99,7 @@
             <button class="touch-btn" id="btn-dodge" data-key="KeyC">回避</button>
             <button class="touch-btn" id="btn-dash" data-key="ShiftLeft" data-hold="true">ダッシュ</button>
             <button class="touch-btn" id="btn-magic" data-key="KeyQ">魔法</button>
+            <button class="touch-btn" id="btn-magic-switch" data-key="KeyR">炎</button>
         </div>
     </div>
     

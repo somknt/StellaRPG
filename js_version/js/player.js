@@ -74,9 +74,22 @@ class Player {
         this.attackAnimTimer = 0;
         this.aimVector = new Vector2(0, 1); // 攻撃する向き
         
-        // 魔法
-        this.learnedMagic = ['magic_001']; // 光弾陣は最初から習得（テスト用）
+        // 魔法（最初から 炎・水・風・土・雷 の5つが使える）
+        this.learnedMagic = ['magic_201', 'magic_202', 'magic_203', 'magic_204', 'magic_205'];
+        this.selectedMagicIndex = 0;  // 今選んでいる魔法（1〜5キー / Rキー / スマホの切替ボタンで変更）
         this.magicCooldowns = {};
+        
+        // 詠唱：魔法ボタンを押すと頭上のゲージが溜まり、満タンで発動
+        // 詠唱中は歩くことしかできない（ダッシュ・回避・攻撃は不可）
+        this.isChanting = false;
+        this.chantMagic = null;
+        this.chantTime = 0;
+        this.chantDuration = 1;
+        this.chantRotation = 0;    // 足元の魔法陣の回転
+        this.readyCast = null;     // 詠唱完了 → game.js が拾って発動
+        this.castFrame = 0;
+        this.castFrameTimer = 0;
+        this.castFrameSpeed = 0.12; // 詠唱モーション1コマの表示時間
         
         // アニメーション
         this.direction = 'down';
@@ -100,8 +113,11 @@ class Player {
     }
     
     update(deltaTime, input) {
-        // 回避の開始（移動より先に判定）
-        if (input.isDodgePressed()) {
+        // 魔法の切り替え（詠唱中はできない）
+        this.updateMagicSelect(input);
+        
+        // 回避の開始（移動より先に判定。詠唱中はできない）
+        if (input.isDodgePressed() && !this.isChanting) {
             this.tryDodge(input);
         }
         
@@ -114,6 +130,9 @@ class Player {
         
         // 攻撃タイマー（攻撃の開始は game.js から startAttack を呼ぶ）
         this.updateAttack(deltaTime);
+        
+        // 詠唱ゲージ
+        this.updateChant(deltaTime);
         
         // スタミナ
         this.updateStamina(deltaTime);
@@ -165,8 +184,8 @@ class Player {
         const moveVector = input.getMovementVector();
         this.isMoving = moveVector.length() > 0;
         
-        // ダッシュ：長押し中・移動中・スタミナがある時だけ
-        this.isDashing = this.isMoving && input.isSprintPressed() &&
+        // ダッシュ：長押し中・移動中・スタミナがある時だけ（詠唱中は歩きのみ）
+        this.isDashing = this.isMoving && input.isSprintPressed() && !this.isChanting &&
                          !this.isExhausted && this.currentStamina > 0;
         
         if (this.isMoving) {
@@ -268,7 +287,7 @@ class Player {
     // 攻撃を開始する。近くに敵がいればその方向へ向き直って斬る
     // 戻り値: 攻撃データ（クールダウン中・回避中は null）
     startAttack(enemies = []) {
-        if (this.attackTimer > 0 || this.isDodging) return null;
+        if (this.attackTimer > 0 || this.isDodging || this.isChanting) return null;
         
         // 近くの敵を探す（向いている方向にいる敵を優先）
         const facing = this.directionToVector(this.direction);
@@ -341,36 +360,114 @@ class Player {
         }
     }
     
-    castMagic(magicId) {
-        // 魔法陣データを取得（game.jsから渡される）
-        const magic = window.gameData.magicCircles.find(m => m.id === magicId);
+    // ---------- 魔法（詠唱） ----------
+    getMagicData(magicId) {
+        const list = (window.gameData && window.gameData.magicCircles) || [];
+        return list.find(m => m.id === magicId) || null;
+    }
+    
+    getSelectedMagic() {
+        return this.getMagicData(this.learnedMagic[this.selectedMagicIndex]);
+    }
+    
+    updateMagicSelect(input) {
+        if (this.isChanting) return;
+        // 1〜5キーで直接選ぶ
+        for (let i = 0; i < this.learnedMagic.length && i < 9; i++) {
+            if (input.isKeyPressed(`Digit${i + 1}`)) this.selectedMagicIndex = i;
+        }
+        // R キー（スマホは切替ボタン）で順番に切り替え
+        if (input.isKeyPressed('KeyR')) {
+            this.selectedMagicIndex = (this.selectedMagicIndex + 1) % this.learnedMagic.length;
+        }
+    }
+    
+    // 使える状態か（使えない理由も返す）
+    canStartChant(magic) {
+        if (!magic) return 'なし';
+        if (!this.learnedMagic.includes(magic.id)) return '未習得';
+        if (this.starPowerStage < (magic.requiredStage || 0)) return '星力不足';
+        if (this.isChanting || this.isDodging || this.isAttacking) return '行動中';
+        if (this.magicCooldowns[magic.id] > 0) return 'クールダウン';
+        if (this.currentSP < magic.spCost) return 'SP不足';
+        return null;
+    }
+    
+    // 魔法ボタンを押した時：詠唱を始める（SP はこの時点で消費）
+    startChant(magicId = null) {
+        const magic = magicId ? this.getMagicData(magicId) : this.getSelectedMagic();
+        if (this.canStartChant(magic)) return false;
         
-        if (!magic) return false;
-        
-        // 習得チェック
-        if (!this.learnedMagic.includes(magicId)) return false;
-        
-        // 星力段階チェック
-        if (this.starPowerStage < magic.requiredStage) return false;
-        
-        // SPチェック
-        if (this.currentSP < magic.spCost) return false;
-        
-        // クールダウンチェック
-        if (this.magicCooldowns[magicId] > 0) return false;
-        
-        // SP消費
         this.consumeSP(magic.spCost);
+        this.isChanting = true;
+        this.chantMagic = magic;
+        this.chantTime = 0;
+        this.chantDuration = magic.chantTime || 1.0;
+        this.chantRotation = 0;
+        this.castFrame = 0;
+        this.castFrameTimer = 0;
+        this.isDashing = false;
+        return true;
+    }
+    
+    updateChant(deltaTime) {
+        if (!this.isChanting) return;
+        this.chantTime += deltaTime;
+        this.chantRotation += deltaTime * 2.5;
         
-        // クールダウン設定
-        this.magicCooldowns[magicId] = magic.cooldown;
+        // 詠唱モーションのコマ送り（ループ）
+        this.castFrameTimer += deltaTime;
+        if (this.castFrameTimer >= this.castFrameSpeed) {
+            this.castFrameTimer = 0;
+            this.castFrame = (this.castFrame + 1) % this.actionFrameCount;
+        }
         
-        // 魔法発射
+        if (this.chantTime >= this.chantDuration) {
+            // ゲージ満タン → 発動
+            const magic = this.chantMagic;
+            this.isChanting = false;
+            this.chantMagic = null;
+            this.magicCooldowns[magic.id] = magic.cooldown || 0;
+            this.readyCast = magic;
+        }
+    }
+    
+    getChantProgress() {
+        return this.isChanting ? Math.min(1, this.chantTime / this.chantDuration) : 0;
+    }
+    
+    // 詠唱が終わった魔法を受け取る（game.js が発動させる）
+    // 近くの前方に敵がいればその方向へ向き直って撃つ
+    consumeReadyCast(enemies = []) {
+        if (!this.readyCast) return null;
+        const magic = this.readyCast;
+        this.readyCast = null;
+        
+        const facing = this.directionToVector(this.direction);
+        let aim = facing, bestDist = Infinity;
+        for (const e of enemies) {
+            if (!e.isAlive()) continue;
+            const to = e.position.sub(this.position);
+            const d = to.length();
+            if (d === 0 || d > 420) continue;
+            if ((to.x * facing.x + to.y * facing.y) / d < 0.35) continue; // 前方 約70度以内
+            if (d < bestDist) { bestDist = d; aim = to.normalize(); }
+        }
+        this.aimVector = aim;
+        this.setDirectionFromVector(aim);
+        
         return {
-            magic: magic,
-            position: this.position.clone(),
-            direction: this.direction
+            magic,
+            position: this.position.add(aim.mult(30)),          // 手元あたりから撃つ
+            direction: aim,
+            circlePos: this.position.add(new Vector2(0, this.drawSize * 0.4)) // 足元
         };
+    }
+    
+    // 互換用：旧コード（Qキーで即発動）から呼ばれた場合は詠唱を始める
+    castMagic(magicId) {
+        this.startChant(magicId);
+        return false;
     }
     
     updateMagicCooldowns(deltaTime) {
@@ -482,6 +579,15 @@ class Player {
         const imgKey = this.getPlayerImageKey();
         const playerImg = window.assetManager ? window.assetManager.get(imgKey) : null;
         
+        // 詠唱中：足元に属性色の魔法陣（キャラより先に描いて、キャラの下に敷く）
+        if (this.isChanting && window.drawMagicCircle) {
+            const p = this.getChantProgress();
+            const appear = Math.min(1, this.chantTime / 0.2);            // 0.2秒で広がって出てくる
+            const radius = this.drawSize * 0.62 * (0.4 + 0.6 * appear);
+            window.drawMagicCircle(ctx, screenPos.x, screenPos.y + this.drawSize * 0.4,
+                radius, this.chantMagic.element, this.chantRotation, 0.55 + 0.45 * p, 0.5);
+        }
+        
         // 回避の残像（青白く薄く）
         if (this.afterImages.length > 0) {
             ctx.save();
@@ -567,6 +673,33 @@ class Player {
         if (this.isAttacking && !this.hasActionSprite('attack')) {
             this.drawKnifeSlash(ctx, screenPos);
         }
+        
+        // 詠唱ゲージ（頭の上の小さな横ゲージ）
+        if (this.isChanting) {
+            this.drawChantGauge(ctx, screenPos);
+        }
+    }
+    
+    drawChantGauge(ctx, screenPos) {
+        const info = window.getElementInfo ? window.getElementInfo(this.chantMagic.element) : { color: '#ffb347', light: '#fff' };
+        const w = 60, h = 8;
+        const x = Math.round(screenPos.x - w / 2);
+        const y = Math.round(screenPos.y - this.drawSize / 2 - 6);
+        const p = this.getChantProgress();
+        
+        ctx.save();
+        // 枠と背景
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
+        // 溜まっていく部分（属性の色）
+        ctx.fillStyle = info.color;
+        ctx.fillRect(x, y, w * p, h);
+        ctx.fillStyle = info.light;
+        ctx.fillRect(x, y, w * p, 2); // 上側を明るくして立体感
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x - 1.5, y - 1.5, w + 3, h + 3);
+        ctx.restore();
     }
     
     // ナイフの斬撃：攻撃方向に扇形の軌跡を描き、刃が振り抜かれていく
@@ -643,6 +776,11 @@ class Player {
         }
         if (this.isDashing) {
             return `${base}_dash_${this.direction}_${this.dashFrame + 1}`;
+        }
+        if (this.isChanting) {
+            // 歩きながらの詠唱 / 立ち止まっての詠唱（キャラの体だけ。魔法陣は別に描く）
+            const kind = this.isMoving ? 'castwalk' : 'cast';
+            return `${base}_${kind}_${this.direction}_${this.castFrame + 1}`;
         }
         return null;
     }

@@ -51,6 +51,32 @@ class UIManager {
             this.elements.staminaText.textContent = `${Math.floor(player.currentStamina)}/${player.maxStamina}`;
         }
         
+        // 今選んでいる魔法（名前・SP・属性の色）。変わった時だけ書き換える
+        const magic = player.getSelectedMagic ? player.getSelectedMagic() : null;
+        if (magic) {
+            const reason = player.canStartChant(magic);
+            const unavailable = reason === 'SP不足' || reason === 'クールダウン';
+            const key = `${magic.id}|${unavailable}|${player.isChanting}`;
+            if (this._magicKey !== key) {
+                this._magicKey = key;
+                const info = window.getElementInfo ? window.getElementInfo(magic.element) : { color: '#ffb347', label: '' };
+                document.documentElement.style.setProperty('--magic-color', info.color);
+                const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+                set('magic-name', magic.name);
+                set('magic-cost', `SP${magic.spCost}`);
+                set('btn-magic-switch', info.label);
+                const box = document.getElementById('magic-info');
+                if (box) box.classList.toggle('unavailable', unavailable);
+                // スマホ：詠唱中は攻撃・回避・ダッシュ・魔法切替を押せない見た目に
+                for (const id of ['btn-attack', 'btn-dodge', 'btn-dash', 'btn-magic-switch']) {
+                    const b = document.getElementById(id);
+                    if (b) b.classList.toggle('disabled', player.isChanting);
+                }
+                const mb = document.getElementById('btn-magic');
+                if (mb) mb.classList.toggle('disabled', unavailable || player.isChanting);
+            }
+        }
+        
         // レベル & 経験値
         this.elements.level.textContent = player.level;
         this.elements.xp.textContent = Math.floor(player.exp);

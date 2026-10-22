@@ -118,6 +118,10 @@ class Game {
             const magicResponse = await fetch('data/magic_circles.json');
             const magicData = await magicResponse.json();
             window.gameData.magicCircles = magicData.magicCircles;
+            // JSON に最初の5魔法が入っていなければ足す（古いデータでも動くように）
+            for (const m of (window.STARTER_MAGIC || [])) {
+                if (!window.gameData.magicCircles.some(x => x.id === m.id)) window.gameData.magicCircles.push({ ...m });
+            }
             
             this.ui.updateLoadingProgress(0.66, '魔法陣データ読み込み中...');
             
@@ -141,16 +145,7 @@ class Game {
             console.warn('データ読み込みエラー（予備データで続行）:', error);
             window.gameData = {
                 playerStatsTable: [{level: 1, hp: 100, attack: 15, defense: 5, maxSP: 50, requiredExp: 10}],
-                magicCircles: [{
-                    id: 'magic_001',
-                    name: '光弾陣',
-                    category: '攻撃',
-                    power: 20,
-                    spCost: 8,
-                    cooldown: 1.0,
-                    element: '光',
-                    requiredStage: 3
-                }],
+                magicCircles: (window.STARTER_MAGIC || []).map(m => ({ ...m })),
                 // 草原に出る敵（data/enemies.json と同じ値）
                 enemies: [{
                     enemyId: 'enemy_001',
@@ -218,12 +213,13 @@ class Game {
         // プレイヤー更新
         this.player.update(deltaTime, this.input);
         
-        // 魔法発動
+        // 魔法：ボタンで詠唱開始 → 頭上のゲージが満タンになったら発動
         if (this.input.isMagicPressed()) {
-            const magicResult = this.player.castMagic('magic_001');
-            if (magicResult) {
-                this.magicSystem.castMagic(magicResult.magic, magicResult.position, magicResult.direction);
-            }
+            this.player.startChant();
+        }
+        const cast = this.player.consumeReadyCast(this.enemySpawner.enemies);
+        if (cast) {
+            this.magicSystem.castMagic(cast.magic, cast.position, cast.direction, cast.circlePos, this.enemySpawner.enemies);
         }
         
         // プレイヤーの近接攻撃（ナイフ）：近くの敵の方向へ向き直って斬る
@@ -252,6 +248,9 @@ class Game {
                 : hit.damage;
             
             hit.enemy.takeDamage(damage);
+            if (hit.knockback > 0) {
+                hit.enemy.applyKnockback(hit.direction, hit.knockback); // 水・土は敵を押し出す
+            }
             if (!hit.enemy.isAlive()) {
                 const drops = hit.enemy.getDrops();
                 this.player.gainExp(drops.exp);

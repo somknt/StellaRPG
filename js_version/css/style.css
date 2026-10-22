@@ -153,6 +153,29 @@ body:not([data-state="playing"]) #debug-info {
     color: #ffb347;
 }
 
+/* 今選んでいる魔法 */
+#magic-info {
+    align-items: center;
+    gap: 8px;
+}
+
+.magic-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--magic-color, #ff4a3a);
+    box-shadow: 0 0 8px var(--magic-color, #ff4a3a);
+}
+
+.magic-cost {
+    color: #9fa8ff;
+    font-size: 12px;
+}
+
+#magic-info.unavailable {
+    opacity: 0.5;
+}
+
 /* Debug Info */
 #debug-info {
     position: absolute;
@@ -332,6 +355,27 @@ body.touch[data-state="playing"] #touch-controls {
     height: calc(var(--btn) * 0.82);
     font-size: calc(var(--btn) * 0.18);
     background: rgba(140, 80, 200, 0.45);
+}
+
+/* 魔法の切り替え：魔法ボタンの左上（小さめ）。枠の色は今の属性の色 */
+#btn-magic-switch {
+    right: calc(var(--btn) * 2.4);
+    bottom: calc(var(--btn) * 1.75);
+    width: calc(var(--btn) * 0.62);
+    height: calc(var(--btn) * 0.62);
+    font-size: calc(var(--btn) * 0.24);
+    border: 3px solid var(--magic-color, #ff4a3a);
+    background: rgba(20, 20, 40, 0.55);
+}
+
+/* 魔法ボタンの枠も今の属性の色に */
+#btn-magic {
+    border-color: var(--magic-color, #ff4a3a);
+}
+
+/* 詠唱中・使えない時の見た目 */
+.touch-btn.disabled {
+    opacity: 0.35;
 }
 
 /* ---------- 全画面ボタン ---------- */

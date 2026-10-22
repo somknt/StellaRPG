@@ -34,6 +34,24 @@ class AssetManager {
             }
             list[`starlight_slime_${d}_jump`] = `assets/enemies/starlight_slime/${d}_jump.png`;
         }
+        
+        // 詠唱モーション（体だけ。魔法陣は別画像）：cast = 立ち止まって詠唱 / castwalk = 歩きながら詠唱
+        // 画像がそろったキャラだけ CAST_SPRITES_READY に足す（ない間は歩き画像で代用）
+        for (const g of AssetManager.CAST_SPRITES_READY) {
+            for (const a of ['cast', 'castwalk']) {
+                for (const d of directions) {
+                    for (let f = 1; f <= 4; f++) {
+                        list[`player_${g}_${a}_${d}_${f}`] = `assets/characters/${g}/${a}_${d}_${f}.png`;
+                    }
+                }
+            }
+        }
+        
+        // 魔法陣（属性ごとに1枚。真上から見た丸い魔法陣。ゲーム側で地面に寝かせて回転させる）
+        // ない間は線で描いた魔法陣を属性の色で表示する
+        for (const el of AssetManager.MAGIC_CIRCLES_READY) {
+            list[`magic_circle_${el}`] = `assets/effects/magic_circle_${el}.png`;
+        }
         return list;
     }
     
@@ -161,6 +179,11 @@ class AssetManager {
         return this.images[key] !== undefined;
     }
 }
+
+// まだ画像がない物は読み込まない（存在しないファイルを毎回取りに行くとスマホで遅くなるため）
+// 画像を置いたらここに足す
+AssetManager.CAST_SPRITES_READY = [];   // 例: ['male', 'female']
+AssetManager.MAGIC_CIRCLES_READY = [];  // 例: ['fire', 'water', 'wind', 'earth', 'thunder']
 
 // グローバルインスタンス
 window.assetManager = new AssetManager();
