@@ -232,7 +232,8 @@ class Game {
         }
         const cast = this.player.consumeReadyCast(this.enemySpawner.enemies);
         if (cast) {
-            this.magicSystem.castMagic(cast.magic, cast.position, cast.direction, cast.circlePos, this.enemySpawner.enemies);
+            this.magicSystem.castMagic(cast.magic, cast.position, cast.direction, cast.circlePos,
+                this.enemySpawner.enemies, cast.circleShape, cast.circleRadius);
         }
         
         // プレイヤーの近接攻撃（ナイフ）：近くの敵の方向へ向き直って斬る

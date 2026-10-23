@@ -31,14 +31,15 @@ function getElementInfo(element) {
 
 // 魔法陣を描く（画像 assets/effects/magic_circle_<属性>.png があれば画像、なければ六芒星を線で描く）
 // squash: 縦のつぶし具合（地面に置くと 0.5 くらい）
-function drawMagicCircle(ctx, x, y, radius, element, rotation = 0, alpha = 1, squash = 0.5) {
+// scaleX: 横のつぶし具合（横向きのキャラが手の前に出す時は 0.3 くらいで縦長のだ円になる）
+function drawMagicCircle(ctx, x, y, radius, element, rotation = 0, alpha = 1, squash = 0.5, scaleX = 1) {
     const info = getElementInfo(element);
     const img = window.assetManager ? window.assetManager.get(`magic_circle_${info.key}`) : null;
     
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.translate(x, y);
-    ctx.scale(1, squash);
+    ctx.scale(scaleX, squash);
     ctx.rotate(rotation);
     
     if (img) {
@@ -264,7 +265,8 @@ class LightningStrike {
 }
 
 class MagicCircleEffect {
-    constructor(position, radius, duration, element) {
+    // shape：{ sx, sy }（魔法陣の傾き。手の前に出す時は向きで変わる）
+    constructor(position, radius, duration, element, shape = { sx: 1, sy: 0.5 }) {
         this.position = position.clone();
         this.radius = radius;
         this.duration = duration;
@@ -272,6 +274,7 @@ class MagicCircleEffect {
         this.active = true;
         this.element = element;
         this.rotation = 0;
+        this.shape = shape;
     }
     
     update(deltaTime) {
@@ -287,7 +290,7 @@ class MagicCircleEffect {
         const s = this.position.sub(camera);
         const progress = this.age / this.duration;
         // 発動の瞬間：魔法陣が広がりながら消える
-        drawMagicCircle(ctx, s.x, s.y, this.radius * (1 + progress * 0.6), this.element, this.rotation, 1 - progress, 0.5);
+        drawMagicCircle(ctx, s.x, s.y, this.radius * (1 + progress * 0.6), this.element, this.rotation, 1 - progress, this.shape.sy, this.shape.sx);
     }
 }
 
@@ -311,9 +314,9 @@ class MagicSystem {
     
     // magic: 魔法データ / position: 発動位置 / direction: 向き（Vector2 or 'up' など）
     // circlePos: 足元の魔法陣の位置 / enemies: 雷の狙い用
-    castMagic(magic, position, direction, circlePos = null, enemies = []) {
-        // 発動エフェクト（足元の魔法陣が広がって消える）
-        this.effects.push(new MagicCircleEffect(circlePos || position, 46, 0.4, magic.element));
+    castMagic(magic, position, direction, circlePos = null, enemies = [], circleShape = undefined, circleRadius = 46) {
+        // 発動エフェクト（手のひらの前の魔法陣が広がって消える）
+        this.effects.push(new MagicCircleEffect(circlePos || position, circleRadius, 0.4, magic.element, circleShape));
         
         if (magic.category !== '攻撃') return;
         

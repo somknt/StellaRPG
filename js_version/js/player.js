@@ -95,6 +95,19 @@ class Player {
         this.castFrameTimer = 0;
         this.castFrameSpeed = 0.12; // 詠唱モーション1コマの表示時間
         
+        // 詠唱中の魔法陣の出る場所：前に掲げた右手の手のひらの前
+        // x, y：キャラの中心からのずれ（drawSize に対する割合）
+        // sx, sy：魔法陣のつぶし方（正面向きは丸く、横向きは縦長のだ円＝横から見た円）
+        // behind：true ならキャラの後ろに描く（背中向きの時は体の向こう側に出るため）
+        // ※詠唱画像が届いたら、画像の手のひらの位置に合わせてこの数字を調整する
+        this.castHand = {
+            right: { x:  0.46, y: -0.12, sx: 0.32, sy: 1.0,  behind: false },
+            left:  { x: -0.46, y: -0.12, sx: 0.32, sy: 1.0,  behind: false },
+            down:  { x: -0.14, y:  0.20, sx: 1.0,  sy: 0.8,  behind: false, size: 0.26 }, // 顔を隠さないよう小さめ・低め
+            up:    { x:  0.14, y: -0.30, sx: 1.0,  sy: 0.85, behind: true  }
+        };
+        this.castCircleSize = 0.36; // 魔法陣の半径（drawSize に対する割合）
+        
         // アニメーション
         this.direction = 'down';
         this.isMoving = false;
@@ -443,6 +456,16 @@ class Player {
         }
     }
     
+    // 今の向きでの、手のひらの前の魔法陣の位置（ワールド座標）と形
+    getCastHand() {
+        const c = this.castHand[this.direction] || this.castHand.down;
+        return {
+            pos: this.position.add(new Vector2(c.x * this.drawSize, c.y * this.drawSize)),
+            sx: c.sx, sy: c.sy, behind: c.behind,
+            radius: this.drawSize * (c.size || this.castCircleSize)
+        };
+    }
+    
     getChantProgress() {
         return this.isChanting ? Math.min(1, this.chantTime / this.chantDuration) : 0;
     }
@@ -467,11 +490,14 @@ class Player {
         this.aimVector = aim;
         this.setDirectionFromVector(aim);
         
+        const hand = this.getCastHand();
         return {
             magic,
-            position: this.position.add(aim.mult(30)),          // 手元あたりから撃つ
+            position: hand.pos,                 // 手のひらの前の魔法陣から撃つ
             direction: aim,
-            circlePos: this.position.add(new Vector2(0, this.drawSize * 0.4)) // 足元
+            circlePos: hand.pos,
+            circleShape: { sx: hand.sx, sy: hand.sy },
+            circleRadius: hand.radius
         };
     }
     
@@ -590,14 +616,9 @@ class Player {
         const imgKey = this.getPlayerImageKey();
         const playerImg = window.assetManager ? window.assetManager.get(imgKey) : null;
         
-        // 詠唱中：足元に属性色の魔法陣（キャラより先に描いて、キャラの下に敷く）
-        if (this.isChanting && window.drawMagicCircle) {
-            const p = this.getChantProgress();
-            const appear = Math.min(1, this.chantTime / 0.2);            // 0.2秒で広がって出てくる
-            const radius = this.drawSize * 0.62 * (0.4 + 0.6 * appear);
-            window.drawMagicCircle(ctx, screenPos.x, screenPos.y + this.drawSize * 0.4,
-                radius, this.chantMagic.element, this.chantRotation, 0.55 + 0.45 * p, 0.5);
-        }
+        // 詠唱中：背中向きの時は、手のひらの前の魔法陣が体の向こう側なので先に描く
+        const castHand = this.isChanting ? this.getCastHand() : null;
+        if (castHand && castHand.behind) this.drawCastCircle(ctx, camera, castHand);
         
         // 回避の残像（青白く薄く）
         if (this.afterImages.length > 0) {
@@ -685,10 +706,25 @@ class Player {
             this.drawKnifeSlash(ctx, screenPos);
         }
         
+        // 詠唱中：手のひらの前に魔法陣（横・正面向きはキャラの手前に描く）
+        if (castHand && !castHand.behind) this.drawCastCircle(ctx, camera, castHand);
+        
         // 詠唱ゲージ（頭の上の小さな横ゲージ）
         if (this.isChanting) {
             this.drawChantGauge(ctx, screenPos);
         }
+    }
+    
+    // 手のひらの前の魔法陣：手からスッと広がって現れ、くるくる回り、ゲージが溜まるほど明るくなる
+    drawCastCircle(ctx, camera, hand) {
+        if (!window.drawMagicCircle || !this.chantMagic) return;
+        const s = hand.pos.sub(camera);
+        const p = this.getChantProgress();
+        const appear = Math.min(1, this.chantTime / 0.25);           // 0.25秒で広がる
+        const ease = 1 - Math.pow(1 - appear, 3);
+        const radius = hand.radius * (0.15 + 0.85 * ease);
+        window.drawMagicCircle(ctx, s.x, s.y, radius, this.chantMagic.element,
+            this.chantRotation, 0.6 + 0.4 * p, hand.sy, hand.sx);
     }
     
     drawChantGauge(ctx, screenPos) {
