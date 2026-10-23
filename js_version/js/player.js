@@ -99,13 +99,25 @@ class Player {
         // x, y：キャラの中心からのずれ（drawSize に対する割合）
         // sx, sy：魔法陣のつぶし方（正面向きは丸く、横向きは縦長のだ円＝横から見た円）
         // behind：true ならキャラの後ろに描く（背中向きの時は体の向こう側に出るため）
-        // ※詠唱画像が届いたら、画像の手のひらの位置に合わせてこの数字を調整する
-        this.castHand = {
-            right: { x:  0.46, y: -0.12, sx: 0.32, sy: 1.0,  behind: false },
-            left:  { x: -0.46, y: -0.12, sx: 0.32, sy: 1.0,  behind: false },
-            down:  { x: -0.14, y:  0.20, sx: 1.0,  sy: 0.8,  behind: false, size: 0.26 }, // 顔を隠さないよう小さめ・低め
-            up:    { x:  0.14, y: -0.30, sx: 1.0,  sy: 0.85, behind: true  }
+        // 詠唱画像の手のひらの位置から測った値（キャラごと）
+        // 横向きは手のひらの少し先に、魔法陣の面が見えるだ円で出す
+        const CAST_HAND = {
+            // 男の子：128px の画像で 右:x98 y64 / 左:x31 y62 / 正面:x45 y63 / 背中:x93 y45
+            male: {
+                right: { x:  0.40, y:  0.00, sx: 0.32, sy: 1.0,  behind: false },
+                left:  { x: -0.40, y: -0.01, sx: 0.32, sy: 1.0,  behind: false },
+                down:  { x: -0.15, y:  0.12, sx: 1.0,  sy: 0.75, behind: false, size: 0.21 }, // 顔を隠さないよう小さめ・手の少し下
+                up:    { x:  0.22, y: -0.17, sx: 1.0,  sy: 0.85, behind: true,  size: 0.3 }
+            },
+            // 女の子：128px の画像で 右:x90 y59 / 左:x33 y61 / 正面:x52 y66 / 背中:x94 y37
+            female: {
+                right: { x:  0.33, y: -0.04, sx: 0.32, sy: 1.0,  behind: false },
+                left:  { x: -0.37, y: -0.02, sx: 0.32, sy: 1.0,  behind: false },
+                down:  { x: -0.09, y:  0.14, sx: 1.0,  sy: 0.75, behind: false, size: 0.21 },
+                up:    { x:  0.23, y: -0.20, sx: 1.0,  sy: 0.85, behind: true,  size: 0.3 }
+            }
         };
+        this.castHand = CAST_HAND[gender] || CAST_HAND.male;
         this.castCircleSize = 0.36; // 魔法陣の半径（drawSize に対する割合）
         
         // アニメーション

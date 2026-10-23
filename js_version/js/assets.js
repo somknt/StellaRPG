@@ -179,7 +179,7 @@ class AssetManager {
 
 // まだ画像がない物は読み込まない（存在しないファイルを毎回取りに行くとスマホで遅くなるため）
 // 画像を置いたらここに足す
-AssetManager.CAST_SPRITES_READY = [];   // 例: ['male', 'female']
+AssetManager.CAST_SPRITES_READY = ['male', 'female'];
 AssetManager.MAGIC_CIRCLES_READY = [];  // 例: ['fire', 'water', 'wind', 'earth', 'thunder']
 
 // グローバルインスタンス
