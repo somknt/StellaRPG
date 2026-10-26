@@ -429,7 +429,11 @@ body.skin-palette-bg #magic-palette-bg { display: block; }
 body.skin-palette-bg #magic-palette-star { display: none; }
 
 /* 輪の画像に丸が描いてあるので、属性ボタンは枠なしで丸の中にアイコンだけ出す */
-body.skin-palette-bg #magic-palette { --item: calc(var(--r) * 0.66); }
+/* 輪の画像は大きく見えるので、ふつうより小さめにする（スマホ横向きで高さの半分くらい） */
+body.skin-palette-bg #magic-palette {
+    --r: clamp(46px, 14vmin, 76px);
+    --item: calc(var(--r) * 0.66);
+}
 body.skin-palette-bg .palette-item,
 body.skin-palette-bg .palette-item.current,
 body.skin-palette-bg .palette-item.hover {
