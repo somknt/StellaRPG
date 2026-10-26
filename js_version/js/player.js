@@ -60,7 +60,7 @@ class Player {
             arc: Math.PI * 0.6, // 斬撃の扇の角度（約108度）
             cooldown: 0.35,    // 連続攻撃の間隔
             assistRange: 110,  // この距離内の敵には自動で向き直る
-            knockback: 40
+            knockback: 20      // 1回ごとの小さな押し出し（ダメージがたまると敵は大きくひるむ）
         };
         
         // 星力システム
@@ -80,7 +80,10 @@ class Player {
         
         // 魔法（最初から 炎・水・風・土・雷 の5つが使える）
         this.learnedMagic = ['magic_201', 'magic_202', 'magic_203', 'magic_204', 'magic_205'];
-        this.selectedMagicIndex = 0;  // 今選んでいる魔法（1〜5キー / Rキー / スマホの切替ボタンで変更）
+        // 魔法パレットにセットする5つ（覚えた魔法の中から選ぶ。最初は 炎・水・風・土・雷）
+        // パレットの上から時計回りの順。setMagicSlot で入れ替えられる
+        this.magicSlots = [...Player.DEFAULT_MAGIC_SLOTS];
+        this.selectedMagicIndex = 0;  // 今選んでいるスロット（1〜5キー / Rキー / 魔法パレットで変更）
         this.magicCooldowns = {};
         
         // 詠唱：魔法ボタンを押すと頭上のゲージが溜まり、満タンで発動
@@ -230,7 +233,7 @@ class Player {
             }
             
             this.velocity = moveVector.mult(speed);
-            this.position = this.position.add(this.velocity.mult(deltaTime));
+            this.moveBy(this.velocity.mult(deltaTime));
         } else {
             this.velocity = new Vector2(0, 0);
         }
@@ -238,6 +241,20 @@ class Player {
     
     setMoveMode(mode) {
         this.moveMode = mode === 'walk' ? 'walk' : 'run';
+    }
+    
+    // 足元の当たり判定の箱（position からのずれと半分の大きさ）。体の上半分は壁に重なって見えてよい
+    getFootBox() {
+        return { ox: 0, oy: this.drawSize * 0.36, hw: 14, hh: 8 };
+    }
+    
+    // 動かす：当たり判定のあるマップ（闘技場）では壁や障害物をすり抜けない
+    moveBy(delta) {
+        if (this.map && this.map.collisionEnabled) {
+            this.position = this.map.moveEntity(this.position, delta, this.getFootBox()).position;
+        } else {
+            this.position = this.position.add(delta);
+        }
     }
     
     // ---------- 回避 ----------
@@ -261,7 +278,7 @@ class Player {
     updateDodge(deltaTime) {
         const speed = this.dodgeDistance / this.dodgeDuration;
         this.velocity = this.dodgeDirection.mult(speed);
-        this.position = this.position.add(this.velocity.mult(deltaTime));
+        this.moveBy(this.velocity.mult(deltaTime));
         
         // 残像を残す
         this.afterImages.push({ pos: this.position.clone(), life: 0.2, maxLife: 0.2 });
@@ -349,7 +366,7 @@ class Player {
         this.attackAnimTimer = this.attackAnimDuration;
         
         // 少しだけ踏み込む
-        this.position = this.position.add(this.aimVector.mult(8));
+        this.moveBy(this.aimVector.mult(8));
         
         if (window.soundManager) window.soundManager.playSFX('attack');
         
@@ -397,23 +414,41 @@ class Player {
         return list.find(m => m.id === magicId) || null;
     }
     
+    // パレットにセットした5つの魔法のデータ（空のスロットは null）
+    getMagicSlots() {
+        return this.magicSlots.map(id => (id ? this.getMagicData(id) : null));
+    }
+    
+    // スロット i（0〜4）に覚えた魔法をセットする。覚えていない魔法はセットできない
+    setMagicSlot(i, magicId) {
+        if (i < 0 || i >= Player.MAGIC_SLOT_COUNT) return false;
+        if (magicId && !this.learnedMagic.includes(magicId)) return false;
+        this.magicSlots[i] = magicId || null;
+        return true;
+    }
+    
     getSelectedMagic() {
-        return this.getMagicData(this.learnedMagic[this.selectedMagicIndex]);
+        return this.getMagicData(this.magicSlots[this.selectedMagicIndex]);
     }
     
     updateMagicSelect(input) {
         if (this.isChanting) return;
         // 1〜5キーで直接選ぶ
-        for (let i = 0; i < this.learnedMagic.length && i < 9; i++) {
-            if (input.isKeyPressed(`Digit${i + 1}`)) this.selectedMagicIndex = i;
+        for (let i = 0; i < this.magicSlots.length; i++) {
+            if (input.isKeyPressed(`Digit${i + 1}`) && this.magicSlots[i]) this.selectedMagicIndex = i;
         }
         // R キーで順番に切り替え（PC 用）
         if (input.isKeyPressed('KeyR')) {
-            this.selectedMagicIndex = (this.selectedMagicIndex + 1) % this.learnedMagic.length;
+            // 空のスロットはとばす
+            const n = this.magicSlots.length;
+            for (let k = 1; k <= n; k++) {
+                const i = (this.selectedMagicIndex + k) % n;
+                if (this.magicSlots[i]) { this.selectedMagicIndex = i; break; }
+            }
         }
-        // スマホの星形パレットで選ばれた魔法
+        // 魔法パレットで選ばれた魔法
         const picked = input.consumeMagicSelection ? input.consumeMagicSelection() : null;
-        if (picked !== null && picked >= 0 && picked < this.learnedMagic.length) {
+        if (picked !== null && picked >= 0 && picked < this.magicSlots.length && this.magicSlots[picked]) {
             this.selectedMagicIndex = picked;
         }
     }
@@ -872,3 +907,7 @@ class Player {
         return this.currentHP <= 0;
     }
 }
+
+// 魔法パレットのスロット数と、最初にセットされている5つの魔法（炎・水・風・土・雷）
+Player.MAGIC_SLOT_COUNT = 5;
+Player.DEFAULT_MAGIC_SLOTS = ['magic_201', 'magic_202', 'magic_203', 'magic_204', 'magic_205'];

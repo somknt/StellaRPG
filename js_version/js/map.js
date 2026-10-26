@@ -113,6 +113,79 @@ class Map {
         return tile ? tile.walkable : false;
     }
     
+    // ---------- 当たり判定（collisionEnabled のマップだけ。今は闘技場） ----------
+    // キャラは「足元の小さな箱」で壁や障害物とぶつかる（体の上半分は壁に重なって見えてよい）
+    // foot: { ox, oy, hw, hh } … position からの箱の中心のずれと、半分の幅・高さ（px）
+    
+    // 箱が通れない場所に重なっているか
+    isBoxBlocked(cx, cy, hw, hh) {
+        const ts = this.tileSize;
+        const x0 = cx - hw, x1 = cx + hw, y0 = cy - hh, y1 = cy + hh;
+        // マップの外は通れない
+        if (x0 < 0 || y0 < 0 || x1 >= this.width * ts || y1 >= this.height * ts) return true;
+        // タイル（walkable:false）
+        for (let ty = Math.floor(y0 / ts); ty <= Math.floor(y1 / ts); ty++) {
+            for (let tx = Math.floor(x0 / ts); tx <= Math.floor(x1 / ts); tx++) {
+                const t = this.tiles[ty] && this.tiles[ty][tx];
+                if (!t || !t.walkable) return true;
+            }
+        }
+        // 細かい形の障害物（px の四角）
+        if (this.solidRects) {
+            for (const r of this.solidRects) {
+                if (x1 > r.x && x0 < r.x + r.w && y1 > r.y && y0 < r.y + r.h) return true;
+            }
+        }
+        return false;
+    }
+    
+    // 壁をすり抜けないように動かす。横と縦を別々に動かして、壁に沿ってすべれるようにする
+    // 戻り値: { position, blocked }（blocked = どこかでぶつかった）
+    moveEntity(position, delta, foot) {
+        let x = position.x, y = position.y, blocked = false;
+        // 1フレームで大きく動く時（回避・ノックバック）も壁を飛び越えないよう、細かく区切る
+        const steps = Math.max(1, Math.ceil(Math.max(Math.abs(delta.x), Math.abs(delta.y)) / 8));
+        const sx = delta.x / steps, sy = delta.y / steps;
+        for (let i = 0; i < steps; i++) {
+            if (sx !== 0) {
+                if (!this.isBoxBlocked(x + sx + foot.ox, y + foot.oy, foot.hw, foot.hh)) x += sx;
+                else blocked = true;
+            }
+            if (sy !== 0) {
+                if (!this.isBoxBlocked(x + foot.ox, y + sy + foot.oy, foot.hw, foot.hh)) y += sy;
+                else blocked = true;
+            }
+        }
+        return { position: new Vector2(x, y), blocked };
+    }
+    
+    // 魔術の弾が壁や柱に当たったか（低い柵や樽は飛び越える）
+    isShotBlocked(pos) {
+        if (!this.collisionEnabled) return false;
+        const ts = this.tileSize;
+        if (pos.x < 0 || pos.y < 0 || pos.x >= this.width * ts || pos.y >= this.height * ts) return true;
+        if (this.shotRects) {
+            for (const r of this.shotRects) {
+                if (pos.x > r.x && pos.x < r.x + r.w && pos.y > r.y && pos.y < r.y + r.h) return true;
+            }
+        }
+        return false;
+    }
+    
+    // 指定の場所の近くで、箱が置ける場所を探す（敵が壁の中に出ないように）
+    findFreeSpot(position, foot, maxRadius = 200) {
+        const ok = (p) => !this.isBoxBlocked(p.x + foot.ox, p.y + foot.oy, foot.hw, foot.hh);
+        if (!this.collisionEnabled || ok(position)) return position.clone();
+        for (let r = 8; r <= maxRadius; r += 8) {
+            for (let a = 0; a < 16; a++) {
+                const ang = (a / 16) * Math.PI * 2;
+                const p = new Vector2(position.x + Math.cos(ang) * r, position.y + Math.sin(ang) * r);
+                if (ok(p)) return p;
+            }
+        }
+        return position.clone();
+    }
+    
     draw(ctx, camera) {
         // カメラ座標を整数に丸めて安定化
         const cameraX = Math.round(camera.x);

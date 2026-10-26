@@ -28,6 +28,7 @@ const TouchControls = {
         this.setupStick();
         this.setupButtons();
         this.setupMagicPalette();
+        this.loadMagicSkin();
         this.setupFullscreen();
         
         // iOS Safari はピンチ操作を独自イベントで送ってくるので止める
@@ -186,7 +187,9 @@ const TouchControls = {
         const getMagicList = () => {
             const p = window.game && window.game.player;
             if (!p) return { list: [], current: -1 };
-            return { list: p.learnedMagic.map(id => p.getMagicData(id)).filter(Boolean), current: p.selectedMagicIndex };
+            // パレットにセットした5つ（空のスロットは null のまま。並び順＝スロット番号）
+            const list = p.getMagicSlots ? p.getMagicSlots() : p.learnedMagic.map(id => p.getMagicData(id));
+            return { list, current: p.selectedMagicIndex };
         };
         
         // anchorX, anchorY：パレットの中心にしたい画面上の位置（スマホ＝ボタン、PC＝マウスの位置）
@@ -195,15 +198,27 @@ const TouchControls = {
             if (!p || p.isChanting) return false; // 詠唱中は選べない
             if (document.body.dataset.state !== 'playing') return false;
             const { list, current } = getMagicList();
-            if (list.length === 0) return false;
+            if (!list.some(Boolean)) return false;
             
             palette.classList.add('open');
             this.input.paletteOpen = true;
-            const r = parseFloat(getComputedStyle(palette).getPropertyValue('--r')) || 80;
-            const itemSize = parseFloat(getComputedStyle(palette).getPropertyValue('--item')) || 56;
+            // --r / --item は clamp() の式のまま返ってくるので、実際の大きさは要素に当てて測る
+            const measure = (v, fallback) => {
+                const probe = document.createElement('div');
+                probe.style.cssText = `position:absolute;visibility:hidden;width:var(${v})`;
+                palette.appendChild(probe);
+                const w = probe.offsetWidth;
+                probe.remove();
+                return w || fallback;
+            };
+            const r = measure('--r', 80);
+            const itemSize = measure('--item', 56);
             
             // パレットが画面からはみ出さないよう、中心を少し内側にずらす
-            const margin = r + itemSize * 0.7;
+            // （背景の画像がある時は、その画像の半分の大きさぶん）
+            const bgEl = document.getElementById('magic-palette-bg');
+            const bgHalf = bgEl && bgEl.offsetWidth ? bgEl.offsetWidth / 2 : 0;
+            const margin = Math.max(r + itemSize * 0.7, bgHalf);
             center = {
                 x: Math.min(Math.max(anchorX, margin), window.innerWidth - margin),
                 y: Math.min(Math.max(anchorY, margin), window.innerHeight - margin)
@@ -222,14 +237,23 @@ const TouchControls = {
             // 属性ボタンを星の頂点に並べる
             itemsBox.innerHTML = '';
             items = list.slice(0, 5).map((m, i) => {
-                const info = window.getElementInfo ? window.getElementInfo(m.element) : { color: '#fff', label: m.element };
-                const el = document.createElement('div');
-                el.className = 'palette-item' + (i === current ? ' current' : '');
-                el.style.setProperty('--c', info.color);
-                el.innerHTML = `<span class="el">${info.label}</span><span class="nm">${m.name}</span>`;
                 const x = Math.cos(angleOf(i)) * r, y = Math.sin(angleOf(i)) * r;
+                const el = document.createElement('div');
                 el.style.left = `${x}px`;
                 el.style.top = `${y}px`;
+                if (!m) {
+                    // 空のスロット（魔法をセットしていない）。選べない
+                    el.className = 'palette-item empty';
+                    itemsBox.appendChild(el);
+                    return { el, x, y, index: i, empty: true };
+                }
+                const info = window.getElementInfo ? window.getElementInfo(m.element) : { color: '#fff', label: m.element };
+                el.className = 'palette-item' + (i === current ? ' current' : '');
+                el.style.setProperty('--c', info.color);
+                // 属性アイコンの画像があれば文字の代わりに出す
+                const icon = this.elementIcons && this.elementIcons[info.key];
+                el.innerHTML = (icon ? `<img class="ic" src="${icon}" alt="">` : `<span class="el">${info.label}</span>`) +
+                    `<span class="nm">${m.name}</span>`;
                 itemsBox.appendChild(el);
                 return { el, x, y, index: i };
             });
@@ -258,7 +282,9 @@ const TouchControls = {
                 const d = (dx * it.x + dy * it.y) / (len * Math.hypot(it.x, it.y)); // 向きの近さ
                 if (d > bestDot) { bestDot = d; best = it.index; }
             }
-            return best;
+            // いちばん近い向きが空のスロットなら「なし」
+            const hit = items.find(it => it.index === best);
+            return hit && !hit.empty ? best : -1;
         };
         
         const close = (commit) => {
@@ -269,6 +295,7 @@ const TouchControls = {
             }
             palette.classList.remove('open');
             this.input.paletteOpen = false;
+            this.input.paletteClosedAt = performance.now(); // Esc でパレットを閉じた時に一時停止しないように
             btn.classList.remove('pressed');
             hoverIndex = -1;
             pointerId = null;
@@ -346,6 +373,64 @@ const TouchControls = {
         
         // テスト・デバッグ用
         this.magicPalette = { open, close, pick, isOpen, get hoverIndex() { return hoverIndex; } };
+    },
+    
+    // ---------- 魔法の選択ボタン・パレットの画像 ----------
+    // assets/ui/magic_palette/ に画像を置くと、その見た目に切り替わる（置いていない物は今の見た目のまま）
+    //   switch_button.png       魔法の選択ボタン（丸い枠ごと）
+    //   palette_bg.png          パレットの背景（星の形の代わり）
+    //   palette_center.png      パレットの真ん中（指を置く所）
+    //   palette_item.png        属性ボタンの枠（ふだん）
+    //   palette_item_hover.png  属性ボタンの枠（指が向いている時）
+    //   element_fire.png など   属性のアイコン（fire / water / wind / earth / thunder）。ボタンとパレットの両方に出る
+    SKIN_DIR: 'assets/ui/magic_palette',
+    SKIN_PARTS: {
+        'switch': 'switch_button',
+        'palette-bg': 'palette_bg',
+        'palette-center': 'palette_center',
+        'palette-item': 'palette_item',
+        'palette-item-hover': 'palette_item_hover'
+    },
+    
+    loadMagicSkin() {
+        this.elementIcons = {};   // 読めた属性アイコン（key → 画像のパス）
+        const root = document.documentElement;
+        for (const [name, file] of Object.entries(this.SKIN_PARTS)) {
+            const src = `${this.SKIN_DIR}/${file}.png`;
+            const img = new Image();
+            img.onload = () => {
+                // CSS 変数の中の url() は style.css の場所から探されるので、絶対パスにして渡す
+                root.style.setProperty(`--skin-${name}`, `url("${new URL(src, location.href).href}")`);
+                document.body.classList.add(`skin-${name}`);
+            };
+            img.src = src;
+        }
+        const keys = window.MAGIC_ELEMENTS ? Object.values(window.MAGIC_ELEMENTS).map(e => e.key) : [];
+        for (const key of keys) {
+            const src = `${this.SKIN_DIR}/element_${key}.png`;
+            const img = new Image();
+            img.onload = () => {
+                this.elementIcons[key] = src;
+                if (this.switchKey === key) this.updateSwitchIcon(key);
+            };
+            img.src = src;
+        }
+    },
+    
+    // 魔法の選択ボタンの中身（属性アイコンがあれば画像、なければ「炎」などの文字）。ui.js から呼ぶ
+    updateSwitchIcon(key) {
+        this.switchKey = key;
+        const btn = document.getElementById('btn-magic-switch');
+        const icon = document.getElementById('magic-switch-icon');
+        if (!btn || !icon) return;
+        const src = this.elementIcons && this.elementIcons[key];
+        if (src) {
+            if (icon.getAttribute('src') !== src) icon.src = src;
+            icon.hidden = false;
+        } else {
+            icon.hidden = true;
+        }
+        btn.classList.toggle('has-icon', !!src);
     },
     
     // ---------- 全画面 ----------

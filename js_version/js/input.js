@@ -67,8 +67,9 @@ class InputManager {
         };
         
         // タッチ操作ボタン/スティックの上の操作は「画面クリック」として扱わない
+        // （一時停止ボタンや結果画面のボタンを押した時も、攻撃にならないようにする）
         const isOnTouchControls = (e) =>
-            e.target && e.target.closest && e.target.closest('#touch-controls, #fullscreen-btn');
+            e.target && e.target.closest && e.target.closest('#touch-controls, #fullscreen-btn, .ui-btn, .battle-panel, #screens.open');
         
         // UIオーバーレイがキャンバスの上に重なっていても拾えるよう window で受ける
         window.addEventListener('pointermove', (e) => {

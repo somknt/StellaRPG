@@ -6,13 +6,27 @@ class Game {
         this.ctx = canvas.getContext('2d');
         this.running = false;
         this.paused = false;
-        this.gameState = 'character_select'; // 'character_select', 'playing', 'game_over'
+        // 画面：'title' / 'main_menu' / 'story' / 'battle_select' / 'monster_select' / 'hero_select' / 'settings'（screens.js）
+        //       'playing'（バトル中）
+        this.gameState = 'title';
         
         // ゲームモード：'battle'（フリーバトル。今はこれだけ） / 'story'（今後追加）
         this.gameMode = 'battle';
         
         // バトル設定
         this.battleDifficulty = 'normal'; // 'easy', 'normal', 'hard'
+        // バトルの舞台：'arena'（闘技場のウェーブバトル。標準） / 'field'（前の草原。URL に ?stage=field）
+        const params = new URLSearchParams(window.location.search);
+        this.battleStage = params.get('stage') === 'field' ? 'field' : 'arena';
+        this.battleMode = null; // 闘技場のフリーバトル・ウェーブ進行（startArena で作る）
+        this.bossBattle = null; // ボス戦の進行（startBossBattle で作る）
+        this.activeBattle = null; // 今動いている方（battleMode か bossBattle）
+        this.currentBossId = null;
+        
+        // 画面の揺れ
+        this.shakeTime = 0;
+        this.shakeDuration = 0;
+        this.shakePower = 0;
         
         // ジャスト回避（成功すると約1秒間、敵がスローになる）
         this.justDodgeDuration = 1.0;
@@ -22,7 +36,9 @@ class Game {
         // システム
         this.input = new InputManager();
         this.ui = new UIManager();
-        this.characterSelect = new CharacterSelectScreen();
+        this.characterSelect = new CharacterSelectScreen(); // 前のキャラ選択（今は主人公選択画面 screens.js を使う）
+        this.screens = new ScreenManager(this);
+        this.bindBattleButtons();
         
         // ゲームオブジェクト
         this.player = null;
@@ -51,14 +67,49 @@ class Game {
         // 画像読み込み
         await this.loadAssets();
         
+        // 保存してある設定（音量・表示）を反映
+        if (window.settings) window.settings.apply();
+        
         console.log('初期化完了！');
         this.running = true;
-        // 起動時はキャラクター選択画面から開始
+        // 起動時はタイトル画面から開始
+        this.screens.setScreen('title');
+    }
+    
+    // 一時停止の画面のボタン（フリーバトルとボス戦で共通）
+    bindBattleButtons() {
+        const on = (id, fn) => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('click', (e) => { e.preventDefault(); fn(); });
+        };
+        on('pause-btn', () => this.togglePause());
+        on('pause-resume', () => this.togglePause(false));
+        on('pause-retry', () => this.restartBattle());
+        on('pause-select', () => this.leaveBattle(this.activeBattle === this.bossBattle ? 'monster_select' : 'hero_select'));
+        on('pause-menu', () => this.leaveBattle('main_menu'));
+    }
+    
+    // 画面を揺らす（設定で OFF にできる）
+    addShake(power, time = 0.25) {
+        if (window.settings && !window.settings.get('screenShake')) return;
+        if (power >= this.shakePower * (this.shakeTime / Math.max(0.01, this.shakeDuration))) {
+            this.shakePower = power;
+            this.shakeTime = time;
+            this.shakeDuration = time;
+        }
     }
     
     startGame(gender) {
+        document.body.dataset.hero = gender; // スマホのボタンのシルエットを主人公に合わせる
+        if (this.battleStage === 'arena' && typeof ArenaMap === 'function') {
+            this.startArena(gender);
+            return;
+        }
         console.log('ゲーム開始:', gender, '難易度:', this.battleDifficulty);
         this.selectedGender = gender;
+        this.enemySpawner.autoSpawn = true;
+        this.enemySpawner.map = null;
+        document.body.dataset.mode = 'field';
         
         // ティウム村マップを初期化
         const villageMapData = typeof initializeTiumVillageMap === 'function' 
@@ -89,6 +140,10 @@ class Game {
         this.player.unlockStarPower(3); // テスト用：段階3解放
         this.justDodgeTimer = 0;
         
+        // 魔術の残り火が燃える地面かどうかを調べるため、マップを渡しておく
+        this.magicSystem.clear();
+        this.magicSystem.setMap(this.map);
+        
         // 移動のしかた：バトルモードと戦闘フィールドは常に走る、村・町・拠点（safeZone）は常に歩く
         this.player.setMoveMode(this.getMoveModeForMap(villageMapData));
         
@@ -108,6 +163,130 @@ class Game {
         this.camera.snapToTarget();
         
         this.gameState = 'playing';
+    }
+    
+    // ---------- バトルモード：闘技場 ----------
+    // プレイヤー・魔術・敵の処理はフィールドと同じ物を使う。違うのはマップ（壁の当たり判定あり）と、
+    // 敵がウェーブで出てくること（BattleMode）
+    startArena(gender) {
+        console.log('バトルモード（闘技場・フリーバトル）開始:', gender);
+        document.body.dataset.hero = gender;
+        this.stopBattles();
+        this.setupArena(gender);
+        if (!this.battleMode) this.battleMode = new BattleMode(this);
+        this.activeBattle = this.battleMode;
+        this.battleMode.start(this.map);
+        document.body.dataset.mode = 'arena';
+        this.gameState = 'playing';
+    }
+    
+    // ---------- バトルモード：ボス戦 ----------
+    // モンスター選択・主人公選択で選んだボスと主人公で、ボスのフィールドで戦う
+    startBossBattle(bossId, gender) {
+        const def = getBossData(bossId);
+        if (!def || def.status !== 'playable') {
+            console.warn('このボスはまだ戦えません:', bossId);
+            return;
+        }
+        console.log('ボス戦開始:', def.name, '主人公:', gender);
+        document.body.dataset.hero = gender;
+        this.stopBattles();
+        this.currentBossId = bossId;
+        // 今はどのボスも「星の闘技場」（def.field === 'arena'）。専用ステージは今後ここで分ける
+        this.setupArena(gender);
+        if (!this.bossBattle) this.bossBattle = new BossBattle(this);
+        this.activeBattle = this.bossBattle;
+        this.bossBattle.start(this.map, def);
+        document.body.dataset.mode = 'arena';
+        this.gameState = 'playing';
+    }
+    
+    // 前のバトルの表示・状態を片付ける
+    stopBattles() {
+        if (this.battleMode) this.battleMode.stop();
+        if (this.bossBattle) this.bossBattle.stop();
+        this.activeBattle = null;
+        this.paused = false;
+        document.body.classList.remove('paused');
+        this.shakeTime = 0;
+    }
+    
+    // 闘技場・主人公・カメラの準備（フリーバトルとボス戦で共通）
+    // 主人公は毎回作り直すので、HP・スタミナ・MP・クールダウン・状態はすべて最初に戻る
+    setupArena(gender) {
+        this.selectedGender = gender;
+        this.paused = false;
+        document.body.classList.remove('paused');
+        
+        this.map = new ArenaMap(createArenaMapData());
+        const spawn = this.map.getPlayerSpawn();
+        this.player = new Player(spawn.x, spawn.y, gender);
+        this.player.map = this.map;          // 壁をすり抜けない
+        this.player.direction = 'up';        // 闘技場の中央（北の門）を向いて始まる
+        this.player.unlockStarPower(3);
+        this.player.setMoveMode(this.getMoveModeForMap(this.map.mapData));
+        this.justDodgeTimer = 0;
+        
+        this.magicSystem.clear();
+        this.magicSystem.setMap(this.map);
+        
+        this.enemySpawner.setDifficulty(this.battleDifficulty);
+        this.enemySpawner.clear();
+        this.enemySpawner.autoSpawn = false; // 敵はウェーブで出す
+        this.enemySpawner.map = this.map;
+        
+        this.camera = new Camera(0, 0, this.canvas.width, this.canvas.height);
+        this.camera.follow(this.player);
+        this.camera.setBounds(this.map.width * this.map.tileSize, this.map.height * this.map.tileSize);
+        this.camera.snapToTarget();
+        this.input.resetAll();
+    }
+    
+    isArena() {
+        return this.gameState === 'playing' && typeof ArenaMap === 'function' && this.map instanceof ArenaMap;
+    }
+    
+    // 一時停止（force：true=止める / false=再開 / 省略=切り替え）
+    togglePause(force) {
+        const b = this.activeBattle;
+        if (!this.isArena() || !b || b.isOver || b.isFrozen) return;
+        this.paused = force === undefined ? !this.paused : !!force;
+        document.body.classList.toggle('paused', this.paused);
+        if (this.paused) {
+            b.showPause();
+            this.pauseNav = new UINav(document.querySelector('#battle-pause .battle-panel'), 'vertical');
+        } else {
+            b.hidePause();
+            this.pauseNav = null;
+        }
+        this.input.resetAll(); // 止めた時に押していたキーが押しっぱなしにならないように
+    }
+    
+    // もう一度挑戦（同じ主人公・同じボスで最初から。HP・ボスのHP・フェーズ・クールダウンなどはすべて初期化）
+    restartBattle() {
+        const gender = this.selectedGender || 'male';
+        const boss = this.activeBattle === this.bossBattle ? this.currentBossId : null;
+        this.screens.transition(() => {
+            if (boss) this.startBossBattle(boss, gender);
+            else this.startArena(gender);
+        });
+    }
+    
+    // バトルをやめて、メニューの画面へ戻る（'monster_select' / 'main_menu' / 'hero_select'）
+    leaveBattle(target = 'main_menu') {
+        this.screens.transition(() => {
+            this.stopBattles();
+            this.enemySpawner.clear();
+            this.magicSystem.clear();
+            document.body.dataset.mode = '';
+            document.body.dataset.waves = '';
+            this.screens.setScreen(target);
+        });
+    }
+    
+    // 前のキャラクター選択に戻る処理（今は主人公選択画面へ）
+    backToCharacterSelect() {
+        this.leaveBattle('hero_select');
     }
     
     // 今は「バトルモード」（フリーバトル）だけなので常に走る。
@@ -148,6 +327,7 @@ class Game {
             );
             if (spawnable.length === 0) spawnable = enemyData.enemies.slice(0, 1);
             window.gameData.enemies = spawnable;
+            window.gameData.allEnemies = enemyData.enemies; // 闘技場のウェーブで使う（狼・猪など）
             console.log('出現する敵:', spawnable.map(e => e.name).join(', '));
             
             this.ui.updateLoadingProgress(1.0, '読み込み完了！');
@@ -207,10 +387,35 @@ class Game {
             document.body.dataset.state = this.gameState;
         }
         
+        // タイトル・メニュー・選択画面
+        if (this.screens.isMenuState(this.gameState)) {
+            this.screens.update(deltaTime, this.input);
+            return;
+        }
+        
+        // 画面の揺れ
+        if (this.shakeTime > 0) this.shakeTime = Math.max(0, this.shakeTime - deltaTime);
+        
+        // 闘技場：Esc / P で一時停止。勝敗が出たら結果画面の操作
+        const battle = this.activeBattle;
+        if (this.isArena() && battle && !this.screens.busy) {
+            const justClosedPalette = performance.now() - (this.input.paletteClosedAt || 0) < 200;
+            if ((this.input.isKeyPressed('Escape') && !justClosedPalette) || this.input.isKeyPressed('KeyP')) {
+                if (!this.input.paletteOpen) this.togglePause();
+            } else if (this.paused && this.pauseNav) {
+                this.pauseNav.handle(this.input);
+            }
+            if (battle.isOver && document.body.classList.contains('battle-result-open')) {
+                if (battle.handleResultKeys) battle.handleResultKeys(this.input);
+                else if (this.input.isKeyPressed('Enter') || this.input.isKeyPressed('KeyR')) this.restartBattle();
+                return;
+            }
+        }
+        
         if (this.paused) return;
         
         
-        // キャラクター選択中
+        // キャラクター選択中（前の画面。今は使っていない）
         if (this.gameState === 'character_select') {
             this.characterSelect.update(this.input);
             if (this.characterSelect.isComplete) {
@@ -222,6 +427,28 @@ class Game {
         
         // ゲームプレイ中
         if (this.gameState !== 'playing') return;
+        
+        const arena = this.isArena();
+        
+        // ボス戦の開始演出・カウントダウン中：だれも動かない（Enter・クリック・タップで演出を飛ばせる）
+        if (arena && battle && battle.isFrozen) {
+            if ((this.input.isKeyPressed('Enter') || this.input.isMouseClicked) && battle.skipIntro) battle.skipIntro();
+            this.enemySpawner.update(deltaTime, this.player, window.gameData.enemies);
+            battle.update(deltaTime);
+            this.camera.update(deltaTime);
+            this.ui.updatePlayerStats(this.player);
+            this.ui.updateDebugInfo(this.fps, this.player, this.enemySpawner.enemies.length);
+            return;
+        }
+        
+        // 闘技場で勝敗が決まった後：操作は止めて、残りの演出（倒れた敵の星など）だけ動かす
+        if (arena && battle && battle.isOver) {
+            this.magicSystem.update(deltaTime);
+            this.enemySpawner.update(deltaTime, this.player, window.gameData.enemies);
+            battle.update(deltaTime);
+            this.camera.update(deltaTime);
+            return;
+        }
         
         // プレイヤー更新
         this.player.update(deltaTime, this.input);
@@ -261,9 +488,10 @@ class Game {
                 ? Math.floor(hit.damage * 1.2) 
                 : hit.damage;
             
-            hit.enemy.takeDamage(damage);
-            if (hit.knockback > 0) {
-                hit.enemy.applyKnockback(hit.direction, hit.knockback); // 水・土は敵を押し出す
+            // 残り火・竜巻の継続ダメージではひるませない
+            hit.enemy.takeDamage(damage, hit.direction, !hit.noStagger);
+            if (hit.knockback > 0 && hit.enemy.isAlive()) {
+                hit.enemy.applyKnockback(hit.direction, hit.knockback, true); // 水・土は敵を大きく押し出す
             }
             if (!hit.enemy.isAlive()) {
                 const drops = hit.enemy.getDrops();
@@ -295,9 +523,13 @@ class Game {
         this.ui.updatePlayerStats(this.player);
         this.ui.updateDebugInfo(this.fps, this.player, this.enemySpawner.enemies.length);
         
-        // ゲームオーバー
+        // 闘技場：ウェーブの進行（敵を出す・撃破数・次のウェーブ・勝利）
+        if (arena && battle) battle.update(deltaTime);
+        
+        // ゲームオーバー（闘技場は敗北の画面を出す）
         if (this.player.isDead()) {
-            this.gameOver();
+            if (arena && battle) battle.onDefeat();
+            else this.gameOver();
         }
     }
     
@@ -307,7 +539,13 @@ class Game {
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
         
         
-        // キャラクター選択画面
+        // タイトル・メニュー・選択画面
+        if (this.screens.isMenuState(this.gameState)) {
+            this.screens.draw(this.ctx);
+            return;
+        }
+        
+        // キャラクター選択画面（前の画面）
         if (this.gameState === 'character_select') {
             this.characterSelect.draw(this.ctx);
             return;
@@ -316,8 +554,46 @@ class Game {
         // ゲームプレイ画面
         if (this.gameState !== 'playing') return;
         
+        // 画面の揺れ：世界だけずらす（ボタンや HP の表示は揺らさない）
+        this.ctx.save();
+        if (this.shakeTime > 0) {
+            const k = this.shakePower * (this.shakeTime / this.shakeDuration);
+            this.ctx.translate(Math.round((Math.random() - 0.5) * k * 2), Math.round((Math.random() - 0.5) * k * 2));
+        }
+        this.drawWorld();
+        this.ctx.restore();
+        
+        // 画面全体に重ねる演出（ボス戦の色味・フェーズ移行の光）
+        if (this.isArena() && this.activeBattle && this.activeBattle.drawScreen) this.activeBattle.drawScreen(this.ctx);
+    }
+    
+    drawWorld() {
         // マップ描画
         this.map.draw(this.ctx, this.camera.position);
+        
+        // 地面に残る魔術（ファイヤーボールの残り火）：キャラや敵の下に描く
+        this.magicSystem.drawGround(this.ctx, this.camera.position);
+        
+        // 闘技場：樽・柵・屋台などとキャラを、足元が奥の物から順に描く（物の後ろに回り込めるように）
+        if (this.isArena()) {
+            const cam = this.camera.position;
+            // ボスの攻撃の予告範囲・衝撃波など（地面）
+            if (this.activeBattle && this.activeBattle.drawGround) this.activeBattle.drawGround(this.ctx, cam);
+            const items = this.map.getDepthDrawables(this.player);
+            for (const e of this.enemySpawner.enemies) {
+                items.push({ sortY: e.position.y + e.size * 0.55, draw: (ctx, c) => e.draw(ctx, c) });
+            }
+            items.push({ sortY: this.player.position.y + this.player.drawSize * 0.4, draw: (ctx, c) => this.player.draw(ctx, c) });
+            items.sort((a, b) => a.sortY - b.sortY);
+            for (const it of items) it.draw(this.ctx, cam);
+            
+            if (this.activeBattle) this.activeBattle.drawWorld(this.ctx, cam); // 敵の出現・ボスの攻撃の演出
+            this.enemySpawner.drawEffects(this.ctx, cam);       // 倒れた敵の星・敵の光弾
+            this.magicSystem.draw(this.ctx, cam);               // 魔術
+            this.map.drawAbove(this.ctx, cam);                  // 入口のアーチ（キャラより手前）
+            if (window.showCollision) this.map.drawCollisionDebug(this.ctx, cam);
+            return;
+        }
         
         // 敵描画
         this.enemySpawner.draw(this.ctx, this.camera.position);

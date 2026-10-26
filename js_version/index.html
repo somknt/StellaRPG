@@ -11,6 +11,10 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="星の子">
     <title>星の子 (Hoshi no Ko) - 2D RPG</title>
+    <!-- ピクセルアート風の日本語フォント（読めない時はふつうのフォントで表示） -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap">
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body data-state="loading">
@@ -56,6 +60,86 @@
                 <div>敵数: <span id="enemy-count">0</span></div>
             </div>
             
+            <!-- バトルモード（闘技場）：上の真ん中に Wave・残りの敵・撃破数 -->
+            <div id="battle-hud">
+                <div class="bh-wave">WAVE <span id="bh-wave">1</span><small>/<span id="bh-wave-total">5</span></small></div>
+                <div class="bh-row">
+                    <span>残り <b id="bh-remaining">0</b></span>
+                    <span>撃破 <b id="bh-kills">0</b></span>
+                </div>
+            </div>
+            
+            <!-- ボスの HP -->
+            <div id="boss-bar">
+                <div id="boss-name">森の大猪</div>
+                <div class="boss-track"><div id="boss-fill"></div></div>
+            </div>
+            
+            <!-- 一時停止ボタン -->
+            <button id="pause-btn" class="ui-btn" type="button" aria-label="一時停止"><span></span><span></span></button>
+            
+            <!-- 「WAVE 1」「WAVE CLEAR」などの大きな文字 -->
+            <div id="battle-banner">
+                <div id="battle-banner-main"></div>
+                <div id="battle-banner-sub"></div>
+            </div>
+            
+            <!-- ボス戦：画面上のボスの HP（名前・フェーズ・ゲージ・数値） -->
+            <div id="boss-hud" data-phase="1">
+                <div class="bh2-top">
+                    <span id="bh2-name">ボス</span>
+                    <span id="bh2-phase" data-phase="1"><i data-n="1" class="on"></i><i data-n="2"></i><i data-n="3"></i></span>
+                    <span id="bh2-phase-label">PHASE 1　通常</span>
+                </div>
+                <div class="bh2-track">
+                    <div id="bh2-trail"></div>
+                    <div id="bh2-fill"></div>
+                    <!-- フェーズが変わる所（HP50%・30%）の目印 -->
+                    <span class="bh2-tick" style="left:50%"></span>
+                    <span class="bh2-tick" style="left:30%"></span>
+                    <div id="bh2-hp">0 / 0</div>
+                </div>
+            </div>
+            
+            <!-- カウントダウン（3・2・1・GO!） -->
+            <div id="battle-countdown"></div>
+            
+            <!-- 一時停止の画面 -->
+            <div id="battle-pause" class="battle-screen">
+                <div class="battle-panel">
+                    <h2>一時停止</h2>
+                    <button class="ui-btn primary" id="pause-resume" type="button" data-nav>再開する</button>
+                    <button class="ui-btn" id="pause-retry" type="button" data-nav>最初からやり直す</button>
+                    <button class="ui-btn" id="pause-select" type="button" data-nav>モンスター選択へ</button>
+                    <button class="ui-btn" id="pause-menu" type="button" data-nav>メインメニューへ</button>
+                    <p class="battle-hint">Esc / P でも再開できます</p>
+                </div>
+            </div>
+            
+            <!-- ボス戦の勝利・敗北の画面 -->
+            <div id="boss-result" class="battle-screen">
+                <div class="battle-panel">
+                    <h2 id="br-title">VICTORY</h2>
+                    <div id="br-sub">勝利！</div>
+                    <div id="br-stats"></div>
+                    <button class="ui-btn primary" id="br-retry" type="button" data-nav>もう一度戦う</button>
+                    <button class="ui-btn" id="br-monster" type="button" data-nav>モンスター選択に戻る</button>
+                    <button class="ui-btn" id="br-menu" type="button" data-nav>メインメニューに戻る</button>
+                    <p class="battle-hint">↑↓ で選んで Enter</p>
+                </div>
+            </div>
+            
+            <!-- 勝利・敗北の画面 -->
+            <div id="battle-result" class="battle-screen">
+                <div class="battle-panel">
+                    <h2 id="result-title">勝利！</h2>
+                    <div id="result-stats"></div>
+                    <button class="ui-btn primary" id="result-retry" type="button">もう一度挑戦</button>
+                    <button class="ui-btn" id="result-select" type="button">キャラクター選択へ</button>
+                    <p class="battle-hint">Enter / R でもう一度挑戦</p>
+                </div>
+            </div>
+            
             <!-- Controls Help（キーボード用。タッチ端末では非表示） -->
             <div id="controls-help">
                 <h3>操作方法</h3>
@@ -64,9 +148,154 @@
                 <p><strong>右クリック</strong>: 回避</p>
                 <p><strong>Q</strong>: 魔法（詠唱→発動）</p>
                 <p><strong>E</strong>: 魔法パレット（マウスで選ぶ）</p>
+                <p><strong>Esc / P</strong>: 一時停止</p>
                 <p><strong>F1</strong>: ヘルプ表示/非表示</p>
             </div>
         </div>
+        
+        <!-- タイトル・メニュー・選択画面（背景はキャンバスに描く。screens.js） -->
+        <div id="screens">
+            <!-- タイトル -->
+            <div class="screen" id="scr-title">
+                <div class="title-start"><span class="ts-star">✦</span><span class="pc-only">Press Enter</span><span class="touch-only">Tap to Start</span><span class="ts-star">✦</span></div>
+            </div>
+            
+            <!-- メインメニュー -->
+            <div class="screen" id="scr-menu">
+                <div class="menu-panel">
+                    <div class="menu-deco">✦ ─────── ✧ ─────── ✦</div>
+                    <h2 class="menu-title">メインメニュー</h2>
+                    <button class="menu-item ui-btn" id="menu-story" type="button" data-nav>メインストーリー</button>
+                    <button class="menu-item ui-btn" id="menu-battle" type="button" data-nav>バトルモード</button>
+                    <button class="menu-item ui-btn" id="menu-settings" type="button" data-nav>設定</button>
+                    <div class="menu-deco">✦ ─────── ✧ ─────── ✦</div>
+                </div>
+                <p class="screen-hint pc-only">↑↓ で選んで Enter で決定 ／ Esc でタイトルへ</p>
+            </div>
+            
+            <!-- メインストーリー（今後実装予定） -->
+            <div class="screen" id="scr-story">
+                <div class="menu-panel">
+                    <h2 class="menu-title">メインストーリー</h2>
+                    <p class="coming-big">今後実装予定です！</p>
+                    <p class="coming-sub">お楽しみに！</p>
+                    <button class="menu-item ui-btn" id="story-back" type="button" data-nav>メニューに戻る</button>
+                </div>
+            </div>
+            
+            <!-- バトルモード：プレイモード選択 -->
+            <div class="screen" id="scr-battle">
+                <div class="menu-panel">
+                    <div class="menu-deco">✦ ─────── ✧ ─────── ✦</div>
+                    <h2 class="menu-title">バトルモード</h2>
+                    <button class="menu-item ui-btn" id="battle-solo" type="button" data-nav>ソロプレイ</button>
+                    <button class="menu-item ui-btn disabled" id="battle-multi" type="button" data-nav data-nav-skip aria-disabled="true">
+                        マルチプレイ<small>今後実装予定</small>
+                    </button>
+                    <button class="menu-item ui-btn back" id="battle-back" type="button" data-nav>メニューに戻る</button>
+                </div>
+            </div>
+            
+            <!-- 対戦モンスター選択 -->
+            <div class="screen" id="scr-monster">
+                <h2 class="screen-title">対戦モンスター選択</h2>
+                <div id="monster-cards"></div>
+                <div class="screen-buttons">
+                    <button class="menu-item ui-btn back" id="monster-back" type="button" data-nav>戻る</button>
+                </div>
+                <p class="screen-hint pc-only">←→ で選んで Enter で決定 ／ Esc で戻る</p>
+            </div>
+            
+            <!-- 主人公選択 -->
+            <div class="screen" id="scr-hero">
+                <h2 class="screen-title">主人公を選択</h2>
+                <p id="hero-vs"></p>
+                <div class="hero-cards">
+                    <button class="hero-card ui-btn" id="hero-male" type="button" data-nav>
+                        <canvas width="200" height="190"></canvas>
+                        <span class="hc-name">男の子</span>
+                    </button>
+                    <button class="hero-card ui-btn" id="hero-female" type="button" data-nav>
+                        <canvas width="200" height="190"></canvas>
+                        <span class="hc-name">女の子</span>
+                    </button>
+                </div>
+                <p class="hero-note">ステータスは男の子・女の子とも同じです</p>
+                <div class="screen-buttons">
+                    <button class="menu-item ui-btn primary" id="hero-ok" type="button" data-nav>決定</button>
+                    <button class="menu-item ui-btn back" id="hero-back" type="button" data-nav>戻る</button>
+                </div>
+            </div>
+            
+            <!-- 設定 -->
+            <div class="screen" id="scr-settings">
+                <h2 class="screen-title">設定</h2>
+                <div class="settings-wrap">
+                    <div class="settings-col">
+                        <h3>サウンド</h3>
+                        <div class="set-row" data-key="bgmVolume" data-type="volume" data-nav data-adjust>
+                            <span class="set-label">BGM音量</span>
+                            <span class="set-step" data-step="-1">−</span>
+                            <span class="set-bar"><span class="set-fill"></span></span>
+                            <span class="set-step" data-step="1">＋</span>
+                            <span class="set-value">60%</span>
+                        </div>
+                        <div class="set-row" data-key="sfxVolume" data-type="volume" data-nav data-adjust>
+                            <span class="set-label">効果音音量</span>
+                            <span class="set-step" data-step="-1">−</span>
+                            <span class="set-bar"><span class="set-fill"></span></span>
+                            <span class="set-step" data-step="1">＋</span>
+                            <span class="set-value">80%</span>
+                        </div>
+                        <h3>画面表示</h3>
+                        <div class="set-row" data-key="screenShake" data-type="toggle" data-nav data-adjust>
+                            <span class="set-label">画面の揺れ</span><span class="set-toggle">ON</span>
+                        </div>
+                        <div class="set-row pc-only" data-key="showFps" data-type="toggle" data-nav data-adjust>
+                            <span class="set-label">FPS・座標の表示</span><span class="set-toggle">ON</span>
+                        </div>
+                        <div class="set-row pc-only" data-key="showHelp" data-type="toggle" data-nav data-adjust>
+                            <span class="set-label">操作方法の表示</span><span class="set-toggle">ON</span>
+                        </div>
+                        <p class="set-note">設定はこの端末に保存されます</p>
+                    </div>
+                    <div class="settings-col">
+                        <h3>操作説明</h3>
+                        <div class="set-tabs">
+                            <button class="set-tab ui-btn" type="button" data-tab="keyboard">キーボード</button>
+                            <button class="set-tab ui-btn" type="button" data-tab="touch">スマートフォン</button>
+                        </div>
+                        <dl class="set-help" data-tab="keyboard">
+                            <dt>WASD / 矢印</dt><dd>移動（バトルでは常にダッシュ）</dd>
+                            <dt>左クリック / Space</dt><dd>通常攻撃（ナイフ）</dd>
+                            <dt>右クリック / C</dt><dd>回避（スタミナを使う）</dd>
+                            <dt>Q</dt><dd>魔法陣（詠唱 → 発動）</dd>
+                            <dt>E</dt><dd>魔法パレット（マウスで選ぶ）</dd>
+                            <dt>1〜5</dt><dd>魔法の切り替え</dd>
+                            <dt>Esc / P</dt><dd>一時停止</dd>
+                            <dt>F1</dt><dd>操作方法の表示 / 非表示</dd>
+                        </dl>
+                        <dl class="set-help" data-tab="touch">
+                            <dt>画面の左半分</dt><dd>スティックで移動（常にダッシュ）</dd>
+                            <dt>攻撃ボタン</dt><dd>通常攻撃（ナイフ）</dd>
+                            <dt>回避ボタン</dt><dd>回避（スタミナを使う）</dd>
+                            <dt>魔法ボタン</dt><dd>魔法陣（詠唱 → 発動）</dd>
+                            <dt>属性ボタン</dt><dd>長押しでパレット、指を滑らせて選ぶ</dd>
+                            <dt>右上の Ⅱ</dt><dd>一時停止</dd>
+                            <dt>⛶</dt><dd>全画面表示</dd>
+                        </dl>
+                    </div>
+                </div>
+                <div class="screen-buttons">
+                    <button class="menu-item ui-btn back" id="settings-back" type="button" data-nav>メニューに戻る</button>
+                </div>
+            </div>
+            
+            <div id="screen-toast"></div>
+        </div>
+        
+        <!-- 画面切り替えのフェード -->
+        <div id="screen-fade"></div>
     </div>
     
     <!-- スマホ用タッチ操作（プレイ中だけ表示。画面の端に固定するので、ゲーム画面の外の黒帯も使う） -->
@@ -79,16 +308,20 @@
         </div>
         <!-- 右側：アクションボタン -->
         <div id="action-buttons">
-            <button class="touch-btn" id="btn-attack" data-key="Space">攻撃</button>
-            <button class="touch-btn" id="btn-dodge" data-key="KeyC">回避</button>
-            <button class="touch-btn" id="btn-magic" data-key="KeyQ">魔法</button>
+            <!-- 攻撃・回避・魔法は文字ではなく、主人公のその動きのシルエット（assets/ui/buttons/sil_*.png） -->
+            <button class="touch-btn" id="btn-attack" data-key="Space" aria-label="攻撃"><span class="btn-icon"></span></button>
+            <button class="touch-btn" id="btn-dodge" data-key="KeyC" aria-label="回避"><span class="btn-icon"></span></button>
+            <button class="touch-btn" id="btn-magic" data-key="KeyQ" aria-label="魔法"><span class="btn-icon"></span></button>
             <!-- 魔法の選択：長押しで星形パレットを出し、指を滑らせて離した属性を選ぶ（data-key なし＝専用処理） -->
-            <button class="touch-btn" id="btn-magic-switch"><span id="magic-switch-label">炎</span></button>
+            <!-- assets/ui/magic_palette/ に画像を置くと、その画像の見た目になる（置いていない間は今の丸い見た目） -->
+            <button class="touch-btn" id="btn-magic-switch" aria-label="魔法の選択"><img id="magic-switch-icon" alt="" hidden><span id="magic-switch-label">炎</span></button>
         </div>
     </div>
     
     <!-- 魔法パレット（スマホ：魔法選択ボタンを長押し / PC：E キー。星の5つの頂点に5属性） -->
     <div id="magic-palette">
+        <!-- assets/ui/magic_palette/palette_bg.png を置くと、星の形の代わりにこの画像を背景に出す -->
+        <div id="magic-palette-bg"></div>
         <svg id="magic-palette-star" viewBox="-100 -100 200 200" aria-hidden="true">
             <polygon id="magic-palette-star-shape" points=""></polygon>
         </svg>
@@ -127,6 +360,14 @@
     <script src="js/enemy.js"></script>
     <script src="js/magic.js"></script>
     <script src="js/map.js"></script>
+    <script src="js/arena_map.js"></script>
+    <script src="js/battle_mode.js"></script>
+    <script src="js/settings.js"></script>
+    <script src="js/boss_data.js"></script>
+    <script src="js/boss_ai.js"></script>
+    <script src="js/boss_battle.js"></script>
+    <script src="js/title_atlas.js"></script>
+    <script src="js/screens.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/game.js"></script>
     <script src="js/touch_controls.js"></script>

@@ -44,6 +44,23 @@ class Enemy {
         this.chargePreparationTime = 0.3; // 突進準備時間
         this.chargeTimer = 0;
         
+        // 突進する敵（角ウサギ・森イノシシ）。数値は敵データで上書きできる（ボスの大猪など）
+        this.isCharger = enemyData.name === '角ウサギ' || enemyData.name === '森イノシシ';
+        if (enemyData.chargeSpeed) this.chargeSpeed = enemyData.chargeSpeed;
+        if (enemyData.chargeMaxDuration) this.chargeMaxDuration = enemyData.chargeMaxDuration;
+        if (enemyData.chargePreparationTime) this.chargePreparationTime = enemyData.chargePreparationTime;
+        if (enemyData.size) this.size = enemyData.size;
+        this.isBoss = !!enemyData.isBoss;
+        this.displayName = enemyData.displayName || enemyData.name;
+        this.crashTimer = 0;   // ボスが壁に激突して目を回している時間（見た目用）
+        // かみつき（狼など）：溜め → 当たり判定
+        this.attackWindupTime = enemyData.attackWindupTime || 0.3;
+        this.attackWindup = 0;
+        this.pendingMelee = false;
+        this.biteTimer = 0;
+        this.biteDir = new Vector2(1, 0);
+        this.map = null;       // 当たり判定のあるマップ（闘技場）なら壁をすり抜けない
+        
         // 星光スライム専用：ぴょんぴょん跳ねて移動、攻撃されたら距離をとって光弾を撃つ
         this.isSlime = enemyData.name === '星光スライム';
         if (this.isSlime) {
@@ -64,18 +81,59 @@ class Enemy {
             this.pendingShot = null;     // EnemySpawner が拾って光弾を生成する
         }
         
+        // ノックバック（ひるみ）
+        // 受けたダメージが「ひるみ値」までたまると、大きく飛ばされて少しの間動けなくなる
+        this.poiseThreshold = Math.max(1, this.maxHP * (enemyData.poiseRatio || 0.3)); // 最大HPの3割（ボスは別の値）
+        this.knockbackScale = enemyData.knockbackScale ?? 1; // 飛ばされる距離の倍率（重いボスは小さく）
+        this.ai = null;                // ボスAI（boss_ai.js）。ある時はこちらが動きを決める
+        this.poiseDamage = 0;          // たまっているダメージ
+        this.poiseTimer = 0;           // しばらく攻撃されないと、たまった分が消える
+        this.poiseResetTime = 2.5;
+        this.staggerTimer = 0;         // 動けない残り時間
+        this.knockDir = new Vector2(0, 0);
+        this.knockDist = 0;            // 飛ばされる距離
+        this.knockTime = 0;
+        this.knockDuration = 0;        // 飛ばされている時間（0 = 飛ばされていない）
+        this.knockHop = 0;             // 飛ばされる時に少し浮く高さ
+        this.hurtPose = false;         // ひるみ画像を出すか（小さな押し出しでは出さない）
+        this.hurtTime = 0;
+        
         // ドロップ
         this.dropExp = enemyData.dropExp ?? enemyData.exp ?? 1;
         this.dropItems = enemyData.dropItems || [];
     }
     
     update(deltaTime, player) {
-        if (!this.isAlive()) return;
+        if (this.hitFlashTimer > 0) this.hitFlashTimer -= deltaTime;
+        
+        // 倒れた敵：最後のノックバックで飛ばされきるまで動かす（そのあと星のエフェクトになる）
+        if (!this.isAlive()) {
+            if (this.dying && !this.deathReady) this.updateKnockback(deltaTime);
+            return;
+        }
         
         this.target = player;
         
-        // 角ウサギのジャンプ突進処理
-        if (this.data.name === '角ウサギ') {
+        if (this.attackTimer > 0) this.attackTimer -= deltaTime;
+        if (this.poiseDamage > 0) {
+            this.poiseTimer += deltaTime;
+            if (this.poiseTimer >= this.poiseResetTime) this.poiseDamage = 0;
+        }
+        
+        // ノックバック中：AI は止めて、後ろへすべるように飛ばされる
+        if (this.staggerTimer > 0 || this.knockTime < this.knockDuration) {
+            this.updateKnockback(deltaTime);
+            return;
+        }
+        
+        if (this.crashTimer > 0) this.crashTimer -= deltaTime;
+        if (this.biteTimer > 0) this.biteTimer -= deltaTime;
+        
+        // ボス：ボスAIが動きと攻撃を決める
+        if (this.ai) {
+            this.ai.update(deltaTime);
+        // 角ウサギ・森イノシシのジャンプ突進処理
+        } else if (this.isCharger) {
             this.updateHornRabbitBehavior(deltaTime);
         } else if (this.isSlime) {
             this.updateSlimeBehavior(deltaTime);
@@ -84,18 +142,25 @@ class Enemy {
             this.updateAI(deltaTime);
         }
         
-        // 向きを更新
-        this.updateDirection();
+        // 向きを更新（ボスAIが向きを決めている時はそのまま）
+        if (!(this.ai && this.ai.lockFacing)) this.updateDirection();
         
-        // 移動
-        this.position = this.position.add(this.velocity.mult(deltaTime));
-        
-        // 攻撃タイマー
-        if (this.attackTimer > 0) {
-            this.attackTimer -= deltaTime;
-        }
-        if (this.hitFlashTimer > 0) {
-            this.hitFlashTimer -= deltaTime;
+        // 移動（闘技場では壁や障害物をすり抜けない）
+        const blocked = this.moveBy(this.velocity.mult(deltaTime));
+        if (this.ai) {
+            this.ai.blocked = blocked; // 突進で壁にぶつかったかは AI が判断する
+        } else if (blocked && this.isCharging) {
+            // 突進中に壁へぶつかった：突進をやめる。ボスはしばらく目を回して動けない（攻撃のチャンス）
+            this.isCharging = false;
+            this.chargeDuration = 0;
+            this.attackTimer = this.attackCooldown;
+            this.velocity = new Vector2(0, 0);
+            if (this.isBoss) {
+                this.staggerTimer = 1.2;
+                this.knockDuration = 0;
+                this.crashTimer = 1.2;
+                this.state = 'stagger';
+            }
         }
         
         // アニメーション（スライムは止まっていてもぷるぷる動かす）
@@ -177,6 +242,22 @@ class Enemy {
             this.isHopping = true;
             this.hopTime = 0;
         }
+    }
+    
+    // 足元の当たり判定の箱
+    getFootBox() {
+        return { ox: 0, oy: this.size * 0.45, hw: this.size * 0.35, hh: this.size * 0.18 };
+    }
+    
+    // 動かす。当たり判定のあるマップでは壁で止まる。戻り値：壁にぶつかったか
+    moveBy(delta) {
+        if (this.map && this.map.collisionEnabled) {
+            const r = this.map.moveEntity(this.position, delta, this.getFootBox());
+            this.position = r.position;
+            return r.blocked;
+        }
+        this.position = this.position.add(delta);
+        return false;
     }
     
     faceTowards(v) {
@@ -265,8 +346,10 @@ class Enemy {
     updateAI(deltaTime) {
         const distanceToPlayer = this.position.distance(this.target.position);
         
-        // 状態遷移
-        if (distanceToPlayer <= this.detectionRange) {
+        // 状態遷移（かみつきの溜め中は、そのまま攻撃を続ける）
+        if (this.attackWindup > 0) {
+            this.state = 'attack';
+        } else if (distanceToPlayer <= this.detectionRange) {
             if (distanceToPlayer <= this.attackRange) {
                 this.state = 'attack';
             } else {
@@ -309,21 +392,37 @@ class Enemy {
     }
     
     behaviorAttack(deltaTime) {
-        // プレイヤーに向かって少し移動
         const direction = this.target.position.sub(this.position).normalize();
+        
+        // かみつきの溜め：少し止まってから飛びかかる（見てから回避できるように）
+        if (this.attackWindup > 0) {
+            this.velocity = new Vector2(0, 0);
+            this.faceTowards(direction);
+            this.attackWindup -= deltaTime;
+            if (this.attackWindup <= 0) {
+                this.pendingMelee = true;          // EnemySpawner.checkEnemyAttacks が当たり判定をする
+                this.biteTimer = 0.18;             // かみつきの見た目
+                this.biteDir = direction;
+                this.moveBy(direction.mult(14));   // 少し踏み込む
+            }
+            return;
+        }
+        
+        // プレイヤーに向かって少し移動
         this.velocity = direction.mult(this.speed * 0.5);
         
-        // 攻撃実行
+        // 攻撃開始（以前はここで攻撃のタイマーを戻してしまい、当たり判定の前に攻撃が消えていた）
         if (this.attackTimer <= 0) {
-            this.performAttack();
+            this.attackWindup = this.attackWindupTime;
+            this.attackTimer = this.attackCooldown;
         }
     }
     
     performAttack() {
         this.attackTimer = this.attackCooldown;
         
-        // 角ウサギの場合、突進中にダメージを与える
-        if (this.data.name === '角ウサギ' && this.isCharging) {
+        // 突進する敵は、突進中にダメージを与える
+        if (this.isCharger && this.isCharging) {
             return {
                 damage: this.attack,
                 position: this.position.clone(),
@@ -337,28 +436,138 @@ class Enemy {
         };
     }
     
-    // 攻撃を受けて後ろに押し出される
-    applyKnockback(direction, distance) {
-        this.position = this.position.add(direction.normalize().mult(distance));
-        // 突進中なら止める
+    // 攻撃を受けて押し出される
+    // heavy = true：ひるみ画像を出して大きく飛ばす（ひるみ値がたまった時・水/土の魔術）
+    // heavy = false：小さく押し出すだけ（ナイフの1回1回）
+    applyKnockback(direction, distance, heavy = true) {
+        let dir = direction && direction.length() > 0.01 ? direction.normalize() : this.awayFromTarget();
+        if (this.ai) {
+            // ボス：小さな押し出しでは止まらない。突進中・無敵中は大きなノックバックも受けない
+            if (!heavy || this.ai.superArmor || this.ai.invulnerable || !this.isAlive()) return;
+        }
+        distance *= this.knockbackScale;
+        if (heavy) {
+            // 同じフレームで大きなノックバックが重なったら、遠い方を使う
+            const fresh = this.hurtPose && this.knockTime === 0 && this.knockDuration > 0;
+            if (fresh) distance = Math.max(distance, this.knockDist);
+            this.startKnockback(dir, distance, 0.3, 0.6, true);
+        } else if (!(this.hurtPose && this.staggerTimer > 0)) {
+            // 大きく飛ばされている最中は、小さな押し出しで上書きしない
+            this.startKnockback(dir, distance, 0.12, 0.12, false);
+        }
+    }
+    
+    // プレイヤーと反対の向き（向きがわからない攻撃用）
+    awayFromTarget() {
+        if (this.target) {
+            const v = this.position.sub(this.target.position);
+            if (v.length() > 0.01) return v.normalize();
+        }
+        return new Vector2(0, 1);
+    }
+    
+    startKnockback(dir, distance, duration, stun, hurt) {
+        this.knockDir = dir;
+        this.knockDist = distance;
+        this.knockTime = 0;
+        this.knockDuration = duration;
+        this.knockHop = hurt ? 10 : 0;
+        this.staggerTimer = Math.max(this.staggerTimer, stun);
+        if (hurt) {
+            this.hurtPose = true;
+            this.hurtTime = 0;
+            this.faceTowards(dir.mult(-1)); // 攻撃してきた方を向いたまま飛ばされる
+        }
+        this.velocity = new Vector2(0, 0);
+        if (this.ai && hurt && this.isAlive()) this.ai.interrupt(); // ボスの攻撃を中断
+        this.state = 'stagger'; // ひるんでいる間は攻撃してこない
+        this.attackWindup = 0;
+        this.pendingMelee = false;
+        // 突進・跳ね・光弾の溜めは中断
         if (this.isCharging) {
             this.isCharging = false;
             this.chargeDuration = 0;
             this.attackTimer = this.attackCooldown;
         }
         this.chargeTimer = 0;
+        if (this.isSlime) {
+            this.isHopping = false;
+            this.shootWindup = 0;
+            this.restTimer = Math.max(this.restTimer, 0.3);
+        }
+        this.isJumping = false;
     }
     
-    takeDamage(damage) {
+    updateKnockback(deltaTime) {
+        this.velocity = new Vector2(0, 0);
+        this.isJumping = false;
+        this.hurtTime += deltaTime;
+        if (this.knockTime < this.knockDuration) {
+            // 最初は速く、だんだんゆっくり止まる
+            const ease = (t) => 1 - (1 - t) * (1 - t);
+            const t0 = this.knockTime / this.knockDuration;
+            this.knockTime = Math.min(this.knockDuration, this.knockTime + deltaTime);
+            const t1 = this.knockTime / this.knockDuration;
+            this.moveBy(this.knockDir.mult(this.knockDist * (ease(t1) - ease(t0))));
+        }
+        this.staggerTimer -= deltaTime;
+        if (this.staggerTimer <= 0 && this.knockTime >= this.knockDuration) {
+            if (this.dying) {
+                // 飛ばされきった：ひるみ画像のまま、星のエフェクトに切り替える
+                this.deathReady = true;
+                return;
+            }
+            this.staggerTimer = 0;
+            this.knockDuration = 0;
+            this.knockTime = 0;
+            this.hurtPose = false;
+        }
+    }
+    
+    // 飛ばされている時に少し浮く高さ（描画用）
+    getHopOffset() {
+        if (!this.hurtPose || this.knockDuration <= 0 || this.knockTime >= this.knockDuration) return 0;
+        return Math.sin(Math.PI * (this.knockTime / this.knockDuration)) * this.knockHop;
+    }
+    
+    // direction: 攻撃の向き（ひるんだ時に飛ばされる方向）
+    // canStagger: false にすると、ひるみ値をためない（残り火・竜巻の継続ダメージ）
+    takeDamage(damage, direction = null, canStagger = true) {
+        // ボスの影の高速移動・回避・咆哮の間はダメージを受けない
+        if (this.ai && this.ai.invulnerable && this.isAlive()) {
+            return { damage: 0, position: this.position.clone(), staggered: true };
+        }
+        if (this.ai && this.ai.superArmor) canStagger = false;
         const actualDamage = Math.max(1, damage - this.defense);
         this.currentHP = Math.max(0, this.currentHP - actualDamage);
-        this.hitFlashTimer = 0.12;
+        this.hitFlashTimer = 0.1;
         if (this.isSlime) this.provoked = true; // 攻撃されたら怒る
+        
+        // ひるみ値がたまったら大きくノックバック
+        let staggered = false;
+        if (!this.isAlive() && !this.dying) {
+            // 倒れた：最後に大きくノックバックしてから、星になって消える
+            this.dying = true;
+            this.deathReady = false;
+            const dir = direction && direction.length() > 0.01 ? direction.normalize() : this.awayFromTarget();
+            if (this.ai) this.ai.onDeath();
+            this.startKnockback(dir, 70 * Math.max(0.6, this.knockbackScale), 0.3, this.isBoss ? 0.6 : 0.38, true);
+            staggered = true;
+        } else if (canStagger && this.isAlive()) {
+            this.poiseDamage += actualDamage;
+            this.poiseTimer = 0;
+            if (this.poiseDamage >= this.poiseThreshold) {
+                this.poiseDamage = 0;
+                this.applyKnockback(direction, 80, true);
+                staggered = true;
+            }
+        }
         
         // ダメージエフェクト
         return {
             damage: actualDamage,
-            position: this.position.clone()
+            position: this.position.clone(),
+            staggered
         };
     }
     
@@ -374,7 +583,7 @@ class Enemy {
     }
     
     draw(ctx, camera) {
-        if (!this.isAlive()) return;
+        if (!this.isAlive() && !this.dying) return;
         
         const screenPos = this.position.sub(camera);
         
@@ -383,16 +592,56 @@ class Enemy {
         // 敵の画像を取得
         const enemyImage = this.getEnemyImage();
         
+        const hop = this.getHopOffset() + (this.ai ? this.ai.lift : 0);
+        
+        // ボスの突進の予告：これから突っ込む方向に赤い帯を出す（見てから避けられるように）
+        if (this.isBoss && this.chargeTimer > 0) {
+            const t = 1 - this.chargeTimer / this.chargePreparationTime; // 0→1
+            const len = this.chargeSpeed * this.chargeMaxDuration;
+            const ang = Math.atan2(this.chargeDirection.y, this.chargeDirection.x);
+            ctx.save();
+            ctx.translate(screenPos.x, screenPos.y + this.size * 0.35);
+            ctx.rotate(ang);
+            ctx.globalAlpha = 0.18 + 0.25 * t;
+            ctx.fillStyle = '#ff3a2a';
+            ctx.fillRect(0, -this.size * 0.4, len * t, this.size * 0.8);
+            ctx.globalAlpha = 0.6;
+            ctx.strokeStyle = '#ff6a50';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(0, -this.size * 0.4, len, this.size * 0.8);
+            ctx.restore();
+        }
+        
+        // 足元の影
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+        ctx.beginPath();
+        ctx.ellipse(screenPos.x, screenPos.y + this.size * 0.55, this.size * 0.42, this.size * 0.14, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // ボスの仮アニメーション：足元を中心に伸び縮み・小刻みに震える（モーション画像が届くまで）
+        if (this.ai) {
+            const fy = screenPos.y + this.size * 0.55;
+            const jx = this.ai.jitter ? (Math.random() - 0.5) * this.ai.jitter * 2 : 0;
+            ctx.translate(screenPos.x + jx, fy);
+            ctx.scale(this.ai.scaleX, this.ai.scaleY);
+            ctx.translate(-screenPos.x, -fy);
+        }
+        
         if (enemyImage) {
-            // 画像がある場合は画像を描画
+            // 画像がある場合は画像を描画（飛ばされている時は少し浮かせる）
             const imageSize = this.size * 1.5; // 画像は少し大きめに
-            ctx.drawImage(
-                enemyImage,
-                Math.floor(screenPos.x - imageSize/2),
-                Math.floor(screenPos.y - imageSize/2),
-                imageSize,
-                imageSize
-            );
+            const ix = Math.floor(screenPos.x - imageSize/2);
+            const iy = Math.floor(screenPos.y - imageSize/2 - hop);
+            ctx.drawImage(enemyImage, ix, iy, imageSize, imageSize);
+            // 被弾した瞬間は、体の形のまま白く光らせる
+            if (this.hitFlashTimer > 0) {
+                ctx.globalAlpha = 0.75;
+                ctx.drawImage(Enemy.getWhiteSilhouette(enemyImage), ix, iy, imageSize, imageSize);
+                ctx.globalAlpha = 1;
+            }
+        } else if (Enemy.BEAST_LOOKS[this.data.name]) {
+            // 狼・猪：画像が届くまでの仮の見た目（コードで描く）
+            this.drawBeastFallback(ctx, screenPos, hop);
         } else {
             // 画像がない場合は仮の描画（フォールバック）
             ctx.fillStyle = this.getEnemyColor();
@@ -429,14 +678,54 @@ class Enemy {
             ctx.restore();
         }
         
-        // 被弾した瞬間は白く光らせる
-        if (this.hitFlashTimer > 0) {
+        // 画像がない敵：被弾した瞬間は白い丸で光らせる
+        if (this.hitFlashTimer > 0 && !enemyImage) {
             ctx.globalAlpha = 0.7;
             ctx.fillStyle = '#ffffff';
             ctx.beginPath();
             ctx.arc(screenPos.x, screenPos.y, this.size * 0.6, 0, Math.PI * 2);
             ctx.fill();
             ctx.globalAlpha = 1;
+        }
+        
+        // かみつきの溜め：体が赤く光る（予告） / かみついた瞬間：前に白い牙の跡
+        if (this.attackWindup > 0) {
+            ctx.globalAlpha = 0.25 + 0.3 * (1 - this.attackWindup / this.attackWindupTime);
+            ctx.fillStyle = '#ff3030';
+            ctx.beginPath();
+            ctx.ellipse(screenPos.x, screenPos.y, this.size * 0.6, this.size * 0.45, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+        if (this.biteTimer > 0) {
+            const bx = screenPos.x + this.biteDir.x * this.size * 0.7, by = screenPos.y + this.biteDir.y * this.size * 0.7;
+            const ang = Math.atan2(this.biteDir.y, this.biteDir.x);
+            ctx.globalAlpha = this.biteTimer / 0.18;
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 3;
+            for (const k of [-1, 1]) {
+                ctx.beginPath();
+                ctx.arc(bx, by, this.size * 0.35, ang + k * 0.5 - 0.6, ang + k * 0.5 + 0.6);
+                ctx.stroke();
+            }
+            ctx.globalAlpha = 1;
+        }
+        
+        // ボスが壁に激突して目を回している：頭の上で星がくるくる回る
+        if (this.crashTimer > 0) {
+            ctx.fillStyle = '#ffe680';
+            for (let i = 0; i < 3; i++) {
+                const a = this.crashTimer * 6 + i * (Math.PI * 2 / 3);
+                const sx = screenPos.x + Math.cos(a) * this.size * 0.45;
+                const sy = screenPos.y - this.size * 0.75 + Math.sin(a) * this.size * 0.12;
+                drawStarShape(ctx, sx, sy, 6, 2.5);
+            }
+        }
+        
+        // 倒れて飛ばされている間は HP バーを出さない。ボスの HP は画面上の大きなバーで出す
+        if (!this.isAlive() || this.isBoss) {
+            ctx.restore();
+            return;
         }
         
         // HPバー
@@ -456,6 +745,16 @@ class Enemy {
     getEnemyImage() {
         if (!window.assetManager) return null;
         
+        // ノックバック中：ひるみ画像（当たった瞬間と止まりぎわは1コマ目、飛ばされている途中は2コマ目）
+        if (this.hurtPose) {
+            const key = this.data.name === '角ウサギ' ? 'horn_rabbit' : this.isSlime ? 'starlight_slime' : null;
+            if (key) {
+                const flying = this.hurtTime >= 0.08 && this.knockTime < this.knockDuration;
+                const img = window.assetManager.get(`${key}_hurt_${this.direction}_${flying ? 2 : 1}`);
+                if (img) return img;
+            }
+        }
+        
         // 敵の種類に応じた画像キーを取得
         if (this.data.name === '角ウサギ') {
             // ジャンプ中はジャンプ画像
@@ -470,11 +769,180 @@ class Enemy {
                 return window.assetManager.get(`starlight_slime_${this.direction}_jump`);
             }
             return window.assetManager.get(`starlight_slime_${this.direction}_${this.animationFrame + 1}`);
-        } else if (this.data.name === '草原狼') {
+        }
+        
+        // 狼・猪：画像（assets/enemies/<名前>/<向き>_<1〜3>.png）が置かれたらそちらを使う
+        const look = Enemy.BEAST_LOOKS[this.data.name];
+        if (look) {
+            // ボス：今のモーション（突進・咆哮など）の画像があればそれを使う
+            if (this.ai) {
+                const m = window.assetManager.get(`${look.key}_${this.ai.motion}_${this.direction}_${this.animationFrame + 1}`);
+                if (m) return m;
+            }
+            const img = window.assetManager.get(`${look.key}_${this.direction}_${this.animationFrame + 1}`);
+            if (img) return img;
+        }
+        if (this.data.name === '草原狼') {
             return window.assetManager.get('wolf_1');
         }
         
         return null;
+    }
+    
+    // 狼・猪の仮の見た目（画像が届くまで）。見下ろしで、向きに合わせて頭の位置を変える
+    drawBeastFallback(ctx, s, hop) {
+        const look = Enemy.BEAST_LOOKS[this.data.name];
+        const r = this.size * 0.5;
+        const dir = this.direction;
+        const side = dir === 'left' ? -1 : 1;
+        const bob = (this.animationFrame === 1 ? -1.5 : 0) * (this.velocity.length() > 1 ? 1 : 0);
+        const cx = s.x, cy = s.y - hop + bob;
+        const flash = this.hitFlashTimer > 0;
+        const body = flash ? '#ffffff' : look.body;
+        const dark = flash ? '#e8e8e8' : look.dark;
+        ctx.save();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = look.outline;
+        // 脚（歩くと前後に動く）
+        const step = Math.sin(this.animationTimer / this.animationSpeed * Math.PI + this.animationFrame * 2) * r * 0.18;
+        ctx.fillStyle = dark;
+        for (const [lx, ly] of [[-0.45, 0.45], [0.45, 0.45], [-0.3, 0.55], [0.3, 0.55]]) {
+            ctx.fillRect(cx + lx * r - r * 0.09, cy + ly * r + (lx > 0 ? step : -step) * 0.3, r * 0.18, r * 0.35);
+        }
+        // 胴体
+        ctx.fillStyle = body;
+        ctx.beginPath();
+        if (dir === 'left' || dir === 'right') ctx.ellipse(cx, cy + r * 0.15, r * 0.95, r * 0.55, 0, 0, Math.PI * 2);
+        else ctx.ellipse(cx, cy + r * 0.15, r * 0.65, r * 0.75, 0, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+        // 背中の毛（濃い色）
+        ctx.fillStyle = dark;
+        ctx.beginPath();
+        if (dir === 'left' || dir === 'right') ctx.ellipse(cx - side * r * 0.1, cy - r * 0.12, r * 0.7, r * 0.22, 0, 0, Math.PI * 2);
+        else ctx.ellipse(cx, cy, r * 0.25, r * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // たてがみ（巨大森イノシシ）：背中のとげとげの毛
+        if (look.mane) {
+            ctx.fillStyle = dark;
+            for (let i = -2; i <= 2; i++) {
+                const bx = (dir === 'left' || dir === 'right') ? cx - side * r * 0.1 + i * r * 0.22 : cx + i * r * 0.08;
+                const by = (dir === 'left' || dir === 'right') ? cy - r * 0.3 : cy - r * 0.3 + Math.abs(i) * r * 0.12;
+                ctx.beginPath();
+                ctx.moveTo(bx - r * 0.09, by + r * 0.1);
+                ctx.lineTo(bx, by - r * 0.22);
+                ctx.lineTo(bx + r * 0.09, by + r * 0.1);
+                ctx.closePath(); ctx.fill();
+            }
+        }
+        // 侵蝕の亀裂（黒蝕狼）：体に暗紫色の光るひび
+        if (look.cracks && !flash) {
+            ctx.save();
+            ctx.strokeStyle = '#c45cff';
+            ctx.shadowColor = '#b040ff';
+            ctx.shadowBlur = 6;
+            ctx.lineWidth = 2;
+            ctx.globalAlpha = 0.75 + Math.sin(performance.now() / 260) * 0.25;
+            const lines = [[-0.5, 0.0, -0.15, 0.25, 0.1, 0.05], [0.1, -0.15, 0.35, 0.1, 0.55, -0.05], [-0.2, 0.35, 0.05, 0.5, 0.3, 0.4]];
+            for (const l of lines) {
+                const fx = (dir === 'left' || dir === 'right') ? side : 1;
+                ctx.beginPath();
+                ctx.moveTo(cx + l[0] * r * fx, cy + l[1] * r);
+                ctx.lineTo(cx + l[2] * r * fx, cy + l[3] * r);
+                ctx.lineTo(cx + l[4] * r * fx, cy + l[5] * r);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+        // しっぽ
+        if (look.tail) {
+            ctx.fillStyle = body;
+            ctx.beginPath();
+            if (dir === 'left' || dir === 'right') ctx.ellipse(cx - side * r * 1.05, cy - r * 0.05, r * 0.32, r * 0.14, -side * 0.5, 0, Math.PI * 2);
+            else if (dir === 'up') ctx.ellipse(cx, cy + r * 0.85, r * 0.14, r * 0.3, 0, 0, Math.PI * 2);
+            ctx.fill(); ctx.stroke();
+        }
+        // 頭
+        let hx = cx, hy = cy;
+        if (dir === 'left' || dir === 'right') { hx = cx + side * r * 0.85; hy = cy - r * 0.2; }
+        else if (dir === 'down') { hy = cy + r * 0.55; }
+        else { hy = cy - r * 0.55; }
+        if (dir !== 'up') {
+            ctx.fillStyle = body;
+            ctx.beginPath();
+            ctx.ellipse(hx, hy, r * look.head, r * look.head * 0.85, 0, 0, Math.PI * 2);
+            ctx.fill(); ctx.stroke();
+            // 鼻先
+            ctx.fillStyle = look.snout;
+            ctx.beginPath();
+            const nx = dir === 'down' ? hx : hx + side * r * look.head * 0.8;
+            const ny = dir === 'down' ? hy + r * look.head * 0.55 : hy + r * 0.08;
+            ctx.ellipse(nx, ny, r * look.head * 0.45, r * look.head * 0.32, 0, 0, Math.PI * 2);
+            ctx.fill();
+            // 目
+            ctx.fillStyle = look.eye;
+            if (look.glowEyes) { ctx.shadowColor = look.eye; ctx.shadowBlur = 6; }
+            const ey = hy - r * look.head * 0.2;
+            if (dir === 'down') {
+                ctx.fillRect(hx - r * 0.22, ey, 3, 3); ctx.fillRect(hx + r * 0.22 - 3, ey, 3, 3);
+            } else {
+                ctx.fillRect(hx + side * r * 0.12 - 1.5, ey, 3, 3);
+            }
+            ctx.shadowBlur = 0;
+            // 牙（猪）。巨大森イノシシは太く反り返った牙
+            if (look.tusks) {
+                ctx.fillStyle = flash ? '#fff' : '#f4ecd2';
+                const tw = look.bigTusks ? 5 : 3, tl = look.bigTusks ? 0.32 : 0.18;
+                if (dir === 'down') {
+                    ctx.fillRect(nx - r * 0.25, ny - 2, tw, -r * tl); ctx.fillRect(nx + r * 0.25 - tw, ny - 2, tw, -r * tl);
+                } else {
+                    ctx.fillRect(nx + side * r * 0.12, ny - r * tl, tw, r * (tl - 0.02));
+                }
+            }
+        }
+        // 耳
+        ctx.fillStyle = dark;
+        const ex = dir === 'left' || dir === 'right' ? hx - side * r * 0.1 : hx;
+        const eyOff = dir === 'up' ? hy + r * 0.05 : hy - r * look.head * 0.75;
+        for (const k of (dir === 'left' || dir === 'right') ? [0] : [-1, 1]) {
+            ctx.beginPath();
+            const bx = ex + k * r * 0.25;
+            ctx.moveTo(bx - r * 0.12, eyOff + r * 0.08);
+            ctx.lineTo(bx, eyOff - r * look.ear);
+            ctx.lineTo(bx + r * 0.12, eyOff + r * 0.08);
+            ctx.closePath();
+            ctx.fill(); ctx.stroke();
+        }
+        // 侵蝕：体から黒紫のもやが立つ
+        if (look.miasma && !flash) {
+            ctx.globalAlpha = 0.35;
+            ctx.fillStyle = '#5b1f7a';
+            for (let i = 0; i < 4; i++) {
+                const t = (performance.now() / 600 + i * 0.25) % 1;
+                ctx.beginPath();
+                ctx.arc(cx + Math.sin(i * 2.1) * r * 0.6, cy - t * r * 1.1, r * 0.18 * (1 - t), 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+        ctx.restore();
+    }
+    
+    // 画像を白く塗りつぶしたもの（被弾の点滅用）。画像ごとに1回だけ作って使い回す
+    static getWhiteSilhouette(img) {
+        // ※ゲームに Map クラス（マップ）があるので、標準の Map ではなく WeakMap を使う
+        if (!Enemy._whiteCache) Enemy._whiteCache = new WeakMap();
+        let c = Enemy._whiteCache.get(img);
+        if (!c) {
+            c = document.createElement('canvas');
+            c.width = img.naturalWidth || img.width;
+            c.height = img.naturalHeight || img.height;
+            const g = c.getContext('2d');
+            g.drawImage(img, 0, 0);
+            g.globalCompositeOperation = 'source-in';
+            g.fillStyle = '#ffffff';
+            g.fillRect(0, 0, c.width, c.height);
+            Enemy._whiteCache.set(img, c);
+        }
+        return c;
     }
     
     getEnemyColor() {
@@ -488,6 +956,25 @@ class Enemy {
     }
 }
 
+// 狼・猪の仮の見た目の色と形。key は画像を置いた時の名前（assets/enemies/<key>/<向き>_<1〜3>.png）
+Enemy.BEAST_LOOKS = {
+    '草原狼':   { key: 'grass_wolf',     body: '#9a9a9a', dark: '#6b6b70', outline: '#3a3a40', snout: '#c9c3b8', eye: '#ffcf4a', head: 0.42, ear: 0.38, tail: true },
+    '侵蝕狼':   { key: 'corrupted_wolf', body: '#4a3a5c', dark: '#2a1f38', outline: '#160f20', snout: '#6a5878', eye: '#ff4ad2', head: 0.42, ear: 0.4, tail: true, glowEyes: true, miasma: true },
+    '森イノシシ': { key: 'forest_boar',    body: '#7a5234', dark: '#4e331f', outline: '#2a1a0e', snout: '#b0876a', eye: '#ff6a3a', head: 0.48, ear: 0.22, tusks: true }
+};
+
+// 小さな星形（ボスの目回りなど）
+function drawStarShape(ctx, x, y, outer, inner) {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+        const r = i % 2 ? inner : outer;
+        const a = -Math.PI / 2 + i * Math.PI / 5;
+        ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+    }
+    ctx.closePath();
+    ctx.fill();
+}
+
 class EnemySpawner {
     constructor() {
         this.enemies = [];
@@ -496,6 +983,9 @@ class EnemySpawner {
         this.maxEnemies = 10;
         this.spawnRadius = 400;
         this.projectiles = [];      // 敵の光弾
+        this.deathEffects = [];     // 倒れた敵の「星になって消える」エフェクト
+        this.autoSpawn = true;      // 一定時間ごとに自動で出す（闘技場ではウェーブで出すので false）
+        this.map = null;            // 当たり判定のあるマップ（敵に渡す）
         this.difficulty = 'normal'; // 'easy', 'normal', 'hard'
         this.difficultyMultipliers = {
             easy: { hp: 0.7, attack: 0.7, spawn: 1.5 },
@@ -516,10 +1006,13 @@ class EnemySpawner {
     update(deltaTime, player, enemyDataList) {
         this.spawnTimer += deltaTime;
         
-        if (this.spawnTimer >= this.spawnInterval && this.enemies.length < this.maxEnemies) {
+        if (this.autoSpawn && this.spawnTimer >= this.spawnInterval && this.enemies.length < this.maxEnemies) {
             this.spawnEnemy(player.position, enemyDataList);
             this.spawnTimer = 0;
         }
+        
+        // 敵どうしが重なりすぎないよう、少し押し離す（狼の群れが1か所に固まらないように）
+        this.separateEnemies(deltaTime);
         
         // 敵更新
         for (const enemy of this.enemies) {
@@ -537,6 +1030,11 @@ class EnemySpawner {
                 });
                 enemy.pendingShot = null;
             }
+            // ボスの弾（黒蝕狼の侵蝕弾など）
+            if (enemy.ai && enemy.ai.pendingProjectiles.length) {
+                this.projectiles.push(...enemy.ai.pendingProjectiles);
+                enemy.ai.pendingProjectiles = [];
+            }
         }
         
         // 光弾を動かす（ジャスト回避中はこの deltaTime 自体がスローになっている）
@@ -544,11 +1042,21 @@ class EnemySpawner {
             p.position = p.position.add(p.velocity.mult(deltaTime));
             p.life -= deltaTime;
             p.age += deltaTime;
+            // 闘技場：壁に当たったら消える
+            if (this.map && this.map.isShotBlocked && this.map.isShotBlocked(p.position)) p.life = 0;
         }
         this.projectiles = this.projectiles.filter(p => p.life > 0);
         
-        // 死んだ敵を削除
-        this.enemies = this.enemies.filter(e => e.isAlive());
+        // 死んだ敵は、その場に「星になって消える」エフェクトを残してから削除
+        // （最後のノックバック中の敵は、飛ばされきるまで残しておく）
+        const stillFlying = (e) => e.dying && !e.deathReady;
+        for (const e of this.enemies) {
+            if (!e.isAlive() && !stillFlying(e)) this.deathEffects.push(new EnemyDeathEffect(e));
+        }
+        this.enemies = this.enemies.filter(e => e.isAlive() || stillFlying(e));
+        
+        for (const d of this.deathEffects) d.update(deltaTime);
+        this.deathEffects = this.deathEffects.filter(d => !d.done);
     }
     
     spawnEnemy(playerPos, enemyDataList) {
@@ -581,14 +1089,55 @@ class EnemySpawner {
         };
         
         const enemy = new Enemy(adjustedEnemyData, spawnPos);
+        enemy.map = this.map;
         this.enemies.push(enemy);
         
         console.log(`敵出現: ${adjustedEnemyData.name} (HP: ${adjustedEnemyData.hp}, 攻撃: ${adjustedEnemyData.attack})`);
     }
     
+    // 決まった場所に決まった敵を出す（闘技場のウェーブ用）。壁の中なら近くの空いている場所にずらす
+    spawnEnemyAt(enemyData, position) {
+        const enemy = new Enemy(enemyData, position);
+        enemy.map = this.map;
+        if (this.map && this.map.findFreeSpot) enemy.position = this.map.findFreeSpot(position, enemy.getFootBox());
+        this.enemies.push(enemy);
+        return enemy;
+    }
+    
+    separateEnemies(deltaTime) {
+        const list = this.enemies;
+        for (let i = 0; i < list.length; i++) {
+            const a = list[i];
+            if (!a.isAlive()) continue;
+            for (let j = i + 1; j < list.length; j++) {
+                const b = list[j];
+                if (!b.isAlive()) continue;
+                const d = b.position.sub(a.position);
+                const dist = d.length();
+                const min = (a.size + b.size) * 0.42;
+                if (dist >= min) continue;
+                const push = (dist > 0.01 ? d.normalize() : new Vector2(1, 0)).mult(Math.min(min - dist, 120 * deltaTime) / 2);
+                if (!a.isCharging) a.moveBy(push.mult(-1));
+                if (!b.isCharging) b.moveBy(push);
+            }
+        }
+    }
+    
     draw(ctx, camera) {
+        this.drawEnemies(ctx, camera);
+        this.drawEffects(ctx, camera);
+    }
+    
+    drawEnemies(ctx, camera) {
         for (const enemy of this.enemies) {
             enemy.draw(ctx, camera);
+        }
+    }
+    
+    // 倒れた時のエフェクトと敵の光弾（キャラより手前に描く）
+    drawEffects(ctx, camera) {
+        for (const d of this.deathEffects) {
+            d.draw(ctx, camera);
         }
         
         // 光弾：黄色く光る星の玉
@@ -598,10 +1147,18 @@ class EnemySpawner {
             const r = p.radius * pulse;
             ctx.save();
             const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r * 2.2);
-            g.addColorStop(0, '#ffffff');
-            g.addColorStop(0.35, '#fff1a8');
-            g.addColorStop(0.7, 'rgba(255, 210, 90, 0.5)');
-            g.addColorStop(1, 'rgba(255, 200, 80, 0)');
+            if (p.kind === 'corrupt') {
+                // 侵蝕弾：暗紫色の玉
+                g.addColorStop(0, '#f3d6ff');
+                g.addColorStop(0.3, '#b44dff');
+                g.addColorStop(0.65, 'rgba(90, 10, 140, 0.6)');
+                g.addColorStop(1, 'rgba(40, 0, 70, 0)');
+            } else {
+                g.addColorStop(0, '#ffffff');
+                g.addColorStop(0.35, '#fff1a8');
+                g.addColorStop(0.7, 'rgba(255, 210, 90, 0.5)');
+                g.addColorStop(1, 'rgba(255, 200, 80, 0)');
+            }
             ctx.fillStyle = g;
             ctx.beginPath();
             ctx.arc(s.x, s.y, r * 2.2, 0, Math.PI * 2);
@@ -629,8 +1186,9 @@ class EnemySpawner {
                 if (dot < cosHalf) continue;
             }
             
-            const result = enemy.takeDamage(attack.damage);
-            enemy.applyKnockback(attack.aim, attack.knockback);
+            const result = enemy.takeDamage(attack.damage, attack.aim);
+            // ひるまなかった時は、小さく押し出すだけ
+            if (!result.staggered) enemy.applyKnockback(attack.aim, attack.knockback, false);
             hits.push({ enemy, ...result });
         }
         
@@ -672,20 +1230,26 @@ class EnemySpawner {
         for (const enemy of this.enemies) {
             if (!enemy.isAlive()) continue;
             
-            // 角ウサギの突進攻撃
-            if (enemy.data.name === '角ウサギ' && enemy.isCharging) {
+            // ボス：AI が出した当たり判定（牙・突進・踏みつけ・噛みつき・侵蝕波動など）
+            if (enemy.ai) {
+                enemy.ai.checkHits(player);
+                continue;
+            }
+            
+            // 突進攻撃（角ウサギ・森イノシシ）
+            if (enemy.isCharger && enemy.isCharging) {
                 const distance = enemy.position.distance(player.position);
-                if (distance <= enemy.size * 1.5) {
+                if (distance <= enemy.size * 0.75 + 24) {
                     const attackData = enemy.performAttack();
                     player.takeDamage(attackData.damage);
                 }
             }
-            // 通常の攻撃
-            else if (enemy.state === 'attack' && enemy.attackTimer <= 0) {
-                const attackData = enemy.performAttack();
+            // 通常の攻撃（かみつき）：溜めが終わった瞬間に、届く距離にいれば当たる
+            else if (enemy.pendingMelee) {
+                enemy.pendingMelee = false;
                 const distance = enemy.position.distance(player.position);
-                if (distance <= enemy.attackRange) {
-                    player.takeDamage(attackData.damage);
+                if (distance <= enemy.attackRange + player.size * 0.35) {
+                    player.takeDamage(enemy.attack);
                 }
             }
         }
@@ -698,5 +1262,111 @@ class EnemySpawner {
     clear() {
         this.enemies = [];
         this.projectiles = [];
+        this.deathEffects = [];
     }
 }
+
+// 敵が倒れたときのエフェクト（全部の敵で共通）
+// 1) 敵の体が白く光りながら小さく縮んで、光の玉になる（ゲーム側で描く）
+// 2) そこから画像の6コマ：星 → 縦にのびる → 光の柱 → キラキラが残って消える
+class EnemyDeathEffect {
+    constructor(enemy) {
+        this.position = enemy.position.clone();
+        this.sprite = enemy.getEnemyImage();   // 倒れた瞬間の見た目
+        this.spriteSize = enemy.size * 1.5;     // Enemy.draw と同じ大きさ
+        // 画像がない狼・猪・ボス：コードで描いた仮の見た目を1枚の絵にして使う
+        if (!this.sprite && Enemy.BEAST_LOOKS[enemy.data.name] && typeof document !== 'undefined') {
+            const c = document.createElement('canvas');
+            c.width = c.height = Math.ceil(this.spriteSize);
+            const g = c.getContext('2d');
+            if (g) {
+                const flash = enemy.hitFlashTimer;
+                enemy.hitFlashTimer = 0;
+                enemy.drawBeastFallback(g, new Vector2(c.width / 2, c.height / 2), 0);
+                enemy.hitFlashTimer = flash;
+                this.sprite = c;
+            }
+        }
+        this.fallbackColor = enemy.getEnemyColor();
+        this.size = enemy.size;
+        this.age = 0;
+        this.done = false;
+    }
+    
+    update(deltaTime) {
+        this.age += deltaTime;
+        if (this.age >= EnemyDeathEffect.TOTAL) this.done = true;
+    }
+    
+    draw(ctx, camera) {
+        const s = this.position.sub(camera);
+        const t = this.age;
+        const C = EnemyDeathEffect;
+        ctx.save();
+        
+        // 1) 体が白く光って縮む（星の中心に向かって吸い込まれるように）
+        if (t < C.SHRINK_END) {
+            const p = t / C.SHRINK_END;                 // 0→1
+            const whiten = Math.min(1, p / 0.45);         // 前半で真っ白に
+            const scale = 1 - 0.75 * p * p;               // だんだん速く縮む
+            const alpha = p < 0.7 ? 1 : 1 - (p - 0.7) / 0.3;
+            const size = this.spriteSize * scale;
+            const x = s.x - size / 2, y = s.y - size / 2;
+            ctx.globalAlpha = alpha;
+            if (this.sprite) {
+                ctx.drawImage(this.sprite, x, y, size, size);
+                ctx.globalAlpha = alpha * whiten;
+                ctx.drawImage(Enemy.getWhiteSilhouette(this.sprite), x, y, size, size);
+            } else {
+                ctx.fillStyle = whiten > 0.5 ? '#ffffff' : this.fallbackColor;
+                ctx.fillRect(s.x - size / 2, s.y - size / 2, size, size);
+            }
+        }
+        
+        // 縮みきる直前から、まわりに金色の光（画像の星とつなげる）
+        if (t > C.SHRINK_END * 0.4 && t < C.FRAMES_START + 0.15) {
+            const p = Math.min(1, (t - C.SHRINK_END * 0.4) / 0.12);
+            const q = t > C.FRAMES_START ? 1 - (t - C.FRAMES_START) / 0.15 : 1;
+            const r = this.size * 0.7;
+            const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r);
+            g.addColorStop(0, 'rgba(255, 252, 235, 0.95)');
+            g.addColorStop(0.4, 'rgba(255, 220, 120, 0.55)');
+            g.addColorStop(1, 'rgba(255, 200, 80, 0)');
+            ctx.globalAlpha = p * q;
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        // 2) 画像の6コマ（1コマ目の星の中心を、敵がいた場所に合わせる）
+        if (t >= C.FRAMES_START && window.assetManager) {
+            let ft = t - C.FRAMES_START, i = 0;
+            while (i < C.FRAME_TIMES.length - 1 && ft >= C.FRAME_TIMES[i]) { ft -= C.FRAME_TIMES[i]; i++; }
+            const img = window.assetManager.get(`effect_enemy_death_${i + 1}`);
+            if (img) {
+                const k = C.DRAW_SCALE * (this.size / 32);  // 大きい敵ほど少し大きく
+                const w = C.FRAME_W * k, h = C.FRAME_H * k;
+                let alpha = 1;
+                if (i === 0) alpha = Math.min(1, ft / 0.05);                          // ふわっと出る
+                if (i === C.FRAME_TIMES.length - 1) {                                   // 最後は少し見せてから、うすれて消える
+                    const p = ft / C.FRAME_TIMES[i];
+                    alpha = p < 0.35 ? 1 : 1 - (p - 0.35) / 0.65;
+                }
+                ctx.globalAlpha = Math.max(0, alpha);
+                ctx.drawImage(img, s.x - C.ANCHOR_X * k, s.y - C.ANCHOR_Y * k, w, h);
+            }
+        }
+        ctx.restore();
+    }
+}
+// 画像（assets/effects/enemy_death_1〜6.png）の大きさと、1コマ目の星の中心の位置
+EnemyDeathEffect.FRAME_W = 115;
+EnemyDeathEffect.FRAME_H = 480;
+EnemyDeathEffect.ANCHOR_X = 57.5;
+EnemyDeathEffect.ANCHOR_Y = 302.5;
+EnemyDeathEffect.DRAW_SCALE = 0.4;    // 画面に出す大きさ（光の柱の高さ 約170px）
+EnemyDeathEffect.SHRINK_END = 0.22;   // 体が縮んで消えるまで
+EnemyDeathEffect.FRAMES_START = 0.16; // 画像の1コマ目が出始める時間（縮むのと少し重ねる）
+EnemyDeathEffect.FRAME_TIMES = [0.1, 0.08, 0.08, 0.09, 0.11, 0.22]; // 各コマの長さ
+EnemyDeathEffect.TOTAL = EnemyDeathEffect.FRAMES_START + EnemyDeathEffect.FRAME_TIMES.reduce((a, b) => a + b, 0);

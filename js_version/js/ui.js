@@ -68,6 +68,7 @@ class UIManager {
                 set('magic-name', magic.name);
                 set('magic-cost', `MP${magic.spCost}`);
                 set('magic-switch-label', info.label);
+                if (window.TouchControls && TouchControls.updateSwitchIcon) TouchControls.updateSwitchIcon(info.key);
                 const box = document.getElementById('magic-info');
                 if (box) box.classList.toggle('unavailable', unavailable);
                 // スマホ：詠唱中は攻撃・回避・ダッシュ・魔法切替を押せない見た目に

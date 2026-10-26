@@ -151,23 +151,30 @@
     },
     {
       "id": "magic_201",
-      "name": "火球陣",
+      "name": "ファイヤーボール",
       "category": "攻撃",
       "element": "炎",
-      "power": 30,
+      "power": 26,
       "spCost": 10,
       "cooldown": 0.8,
       "chantTime": 1,
       "requiredStage": 0,
       "starter": true,
       "shape": "projectile",
-      "speed": 320,
+      "speed": 330,
       "size": 14,
-      "description": "炎の魔法陣を展開し、火球を放つ。"
+      "range": 420,
+      "burn": {
+        "duration": 3,
+        "interval": 0.5,
+        "damage": 3,
+        "radius": 36
+      },
+      "description": "火の玉を放つ。着弾した地面が燃える素材なら炎が残り、上にいる敵に小さなダメージを与え続ける。"
     },
     {
       "id": "magic_202",
-      "name": "水流陣",
+      "name": "ウォーターボール",
       "category": "攻撃",
       "element": "水",
       "power": 20,
@@ -178,30 +185,35 @@
       "starter": true,
       "shape": "projectile",
       "speed": 380,
-      "size": 12,
+      "size": 13,
+      "range": 400,
       "knockback": 70,
-      "description": "水の魔法陣を展開し、水弾で敵を大きく押し流す。"
+      "description": "水の玉を放つ。当たった敵を大きく押し流す。"
     },
     {
       "id": "magic_203",
-      "name": "疾風陣",
+      "name": "テンペスト",
       "category": "攻撃",
       "element": "風",
-      "power": 16,
-      "spCost": 7,
-      "cooldown": 0.5,
-      "chantTime": 0.6,
+      "power": 6,
+      "spCost": 9,
+      "cooldown": 1,
+      "chantTime": 0.8,
       "requiredStage": 0,
       "starter": true,
-      "shape": "projectile",
-      "speed": 540,
-      "size": 12,
-      "pierce": true,
-      "description": "風の魔法陣を展開し、敵を貫く速い風の刃を放つ。詠唱が短い。"
+      "shape": "tornado",
+      "travel": 110,
+      "travelTime": 0.45,
+      "radius": 30,
+      "duration": 3.0,
+      "interval": 0.4,
+      "pull": 90,
+      "pullRadius": 120,
+      "description": "小さな竜巻を生み出す。少し前に進んでその場にとどまり、まわりの敵を吸い寄せながら何度もダメージを与える。"
     },
     {
       "id": "magic_204",
-      "name": "岩槍陣",
+      "name": "ストーンキャノン",
       "category": "攻撃",
       "element": "土",
       "power": 38,
@@ -211,14 +223,16 @@
       "requiredStage": 0,
       "starter": true,
       "shape": "projectile",
-      "speed": 240,
-      "size": 20,
-      "knockback": 30,
-      "description": "土の魔法陣を展開し、重い岩の槍を撃ち出す。詠唱は長いが威力が高い。"
+      "speed": 270,
+      "size": 17,
+      "range": 380,
+      "knockback": 40,
+      "rock": true,
+      "description": "岩の弾を撃ち出す。詠唱は長いが威力が高く、敵を押し返す。"
     },
     {
       "id": "magic_205",
-      "name": "紫電陣",
+      "name": "ライトニング",
       "category": "攻撃",
       "element": "雷",
       "power": 28,
@@ -230,7 +244,7 @@
       "shape": "strike",
       "range": 380,
       "radius": 45,
-      "description": "雷の魔法陣を展開し、前方の敵に直接雷を落とす。"
+      "description": "前方の敵に直接雷を落とす。"
     }
   ]
 }

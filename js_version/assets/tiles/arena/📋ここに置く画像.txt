@@ -1,0 +1,43 @@
+闘技場（バトルモード）の素材の置き場所
+
+ここに下の名前で PNG を置いてください（名前が違っても、置いてもらえれば Kiro が合わせます）。
+置いた物は js/assets.js の AssetManager.ARENA_ART_READY に名前を足すと、その画像で描かれます。
+ない物は、コードで描いた仮の見た目のままです。
+
+【地面（1タイル分。128×128 で作って、ゲームでは 48×48 に縮小）】
+  arena_sand.png          砂地
+  arena_stone_floor.png   石畳
+  arena_stone_dark.png    観客席の下などの暗い石（ほぼ見えない）
+  arena_tunnel.png        南の入口の奥の暗いトンネル
+
+【地面の飾り】
+  arena_star_symbol.png   中央の星の紋章（正方形、透明背景。直径 約6.8タイル）
+  arena_pebbles.png       小石
+  arena_crack.png         ひび割れ
+
+【建物（キャラより奥）】
+  arena_stands.png        観客席（1タイル分）
+  arena_wall.png          北の壁の正面（横1タイル × 縦2タイル）
+  arena_wall_top.png      横・南の壁の上面（1タイル分）
+  arena_gate.png          北の鉄格子の門（横4 × 縦3タイル。格子の部分だけ。開く時に上へずらします）
+  arena_pillar.png        石の柱（横1 × 縦3.4タイル）
+  arena_statue.png        騎士の石像（横1.4 × 縦2.7タイル）
+  arena_banner.png        赤い旗（横0.8 × 縦1.7タイル）
+
+【置物（キャラと前後に並ぶ）】
+  arena_stall.png         赤い屋根の屋台（約3.2 × 3.2タイル）
+  arena_barrel.png        樽
+  arena_crate.png         木箱
+  arena_fence.png         横向きの柵（横4タイル分）
+  arena_fence_v.png       縦向きの柵（縦3タイル分）
+  arena_weapon_rack.png   武器立て
+  arena_torch.png         立て松明（火はゲームが描くので、台と棒だけ）
+
+【キャラより手前】
+  arena_entrance_arch.png 南の入口のアーチ（横6 × 縦1.4タイル）
+
+【敵】js_version/assets/enemies/<名前>/<向き>_<1〜3>.png
+  grass_wolf/      草原狼
+  corrupted_wolf/  侵蝕狼
+  forest_boar/     森の大猪（ボス）
+  置いたら js/assets.js の AssetManager.BEAST_SPRITES_READY に名前を足す

@@ -1,0 +1,159 @@
+// ボスのデータ（モンスター選択画面・ボス戦・ボスAIが使う）
+// 新しいボスを足す時は、この配列に1つ追加して、boss_ai.js に AI のクラスを作り BOSS_AI_CLASSES に登録する
+//
+// status     : 'playable'（戦える） / 'coming'（カードだけ表示。今後実装予定）
+// difficulty : ★の数（1〜3）。モンスター選択では左から difficulty の低い順に並ぶ
+// enemy      : Enemy クラスに渡すステータス（hp / attack / defense / speed など）
+// phases     : HP の割合で切り替わる3段階。hp 以下になったらそのフェーズ（一度進んだら戻らない）
+//              speedMul（移動速度の倍率）/ intervalMul（攻撃と攻撃の間の時間の倍率）/ recoverMul（攻撃後の隙の倍率）
+//              attacks：そのフェーズで使う攻撃と、選ばれやすさ（重み）
+// attacks    : 攻撃ごとの数値（damage は enemy.attack に掛ける倍率、range は使う距離 [最小, 最大]）
+// motions    : 必要なモーションと今の状態（'temp' = コードで動かしている仮アニメーション / 'done' = 画像あり）
+//              画像は assets/enemies/<look.key>/<モーション>_<向き>_<1〜3>.png に置き、
+//              assets.js の BOSS_MOTION_SPRITES_READY に足すと使われる
+
+const BOSS_DATA = [
+    {
+        id: 'giant_forest_boar',
+        name: '巨大森イノシシ',
+        difficulty: 1,
+        level: '初心者向け',
+        field: 'arena',
+        fieldName: '星の闘技場',
+        status: 'playable',
+        features: ['巨大な森のイノシシ', '強力な突進攻撃', '近距離攻撃中心', '攻撃前の予備動作が分かりやすい', '初心者向けのボス'],
+        ai: 'ForestBoarAI',
+        theme: { color: '#ff8a5a', banner: 'boss' },
+        enemy: {
+            enemyId: 'boss_001', name: '巨大森イノシシ', displayName: '巨大森イノシシ',
+            hp: 640, attack: 16, defense: 3, exp: 120,
+            size: 74, speed: 64, detectionRange: 4000, attackRange: 90,
+            isBoss: true, poiseRatio: 0.14, knockbackScale: 0.35
+        },
+        look: { key: 'giant_forest_boar', body: '#6e4a2e', dark: '#43291a', outline: '#24150b', snout: '#a88063', eye: '#ff6a3a', head: 0.5, ear: 0.24, tusks: true, bigTusks: true, mane: true },
+        attackInterval: 1.0,
+        phases: [
+            { hp: 1.0, label: '通常', speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0,
+              attacks: { tusk: 4, charge: 3 } },
+            { hp: 0.5, label: '強化', speedMul: 1.15, intervalMul: 0.9, recoverMul: 0.85, transition: 'roar',
+              banner: '怒りの咆哮！', attacks: { tusk: 3, charge: 1, doubleCharge: 3, stomp: 3 } },
+            { hp: 0.3, label: '最終強化', speedMul: 1.25, intervalMul: 0.8, recoverMul: 0.55, transition: 'roar',
+              banner: '暴走状態！', attacks: { tuskCombo: 4, tripleCharge: 3, bigStomp: 3, doubleCharge: 1 } }
+        ],
+        attacks: {
+            tusk:         { range: [0, 120],  windup: 0.55, damage: 1.0, reach: 96, recover: 0.75 },
+            tuskCombo:    { range: [0, 130],  windup: 0.4,  damage: 0.85, reach: 100, hits: 3, recover: 0.7 },
+            charge:       { range: [170, 2000], prepare: 0.9, speed: 470, duration: 1.05, count: 1, damage: 1.4, recover: 1.4 },
+            doubleCharge: { range: [150, 2000], prepare: 0.8, speed: 500, duration: 0.95, count: 2, damage: 1.4, recover: 1.2, between: 0.5 },
+            tripleCharge: { range: [130, 2000], prepare: 0.65, speed: 530, duration: 0.9, count: 3, damage: 1.5, recover: 1.0, between: 0.38 },
+            stomp:        { range: [0, 230],  windup: 0.8,  damage: 1.1, radius: 150, waves: 1, recover: 0.9 },
+            bigStomp:     { range: [0, 280],  windup: 0.85, damage: 1.5, radius: 200, waves: 2, recover: 0.8 }
+        },
+        motions: {
+            idle: 'temp', walk: 'temp', run: 'temp', turn: 'temp', detect: 'temp', tuskAttack: 'temp',
+            chargePrepare: 'temp', charge: 'temp', chargeEnd: 'temp', stomp: 'temp', roar: 'temp',
+            hit: 'temp', stun: 'temp', death: 'temp'
+        }
+    },
+    {
+        id: 'black_corrupted_wolf',
+        name: '黒蝕狼',
+        reading: 'こくしょくろう',
+        difficulty: 2,
+        level: '中級者向け',
+        field: 'arena',
+        fieldName: '星の闘技場',
+        status: 'playable',
+        features: ['星喰いに侵された狼', '素早い移動', '連続攻撃', '暗紫色の侵蝕攻撃', '中級者向けのボス'],
+        ai: 'BlackWolfAI',
+        theme: { color: '#c58bff', banner: 'corrupt', arenaTint: 'rgba(70, 15, 110, 0.2)' },
+        enemy: {
+            enemyId: 'boss_002', name: '黒蝕狼', displayName: '黒蝕狼',
+            hp: 720, attack: 14, defense: 4, exp: 200,
+            size: 56, speed: 150, detectionRange: 4000, attackRange: 70,
+            isBoss: true, poiseRatio: 0.12, knockbackScale: 0.5
+        },
+        look: { key: 'black_corrupted_wolf', body: '#2b2433', dark: '#16111c', outline: '#07050a', snout: '#3d3346', eye: '#d47bff', head: 0.42, ear: 0.44, tail: true, glowEyes: true, miasma: true, cracks: true },
+        attackInterval: 0.75,
+        phases: [
+            { hp: 1.0, label: '通常', speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0, dodgeChance: 0.2, aura: 0,
+              attacks: { bite: 3, claw: 3, leap: 3 } },
+            { hp: 0.5, label: '強化', speedMul: 1.2, intervalMul: 0.86, recoverMul: 0.85, dodgeChance: 0.3, aura: 1, transition: 'howl',
+              banner: '侵蝕の遠吠え！', attacks: { doubleBite: 3, claw: 2, leap: 2, shadowDash: 3, corruptionShot: 3 } },
+            { hp: 0.3, label: '最終強化', speedMul: 1.35, intervalMul: 0.75, recoverMul: 0.65, dodgeChance: 0.45, aura: 2, transition: 'howl',
+              banner: '星喰いの暴走！', attacks: { tripleClaw: 3, doubleBite: 2, shadowLeap: 3, corruptionShot: 2, corruptionWave: 2 } }
+        ],
+        attacks: {
+            bite:           { range: [0, 260], windup: 0.32, damage: 1.0, hits: 1, recover: 0.5 },
+            doubleBite:     { range: [0, 280], windup: 0.28, damage: 0.9, hits: 2, recover: 0.5 },
+            claw:           { range: [0, 260], windup: 0.36, damage: 1.1, hits: 1, reach: 84, recover: 0.55 },
+            tripleClaw:     { range: [0, 280], windup: 0.3,  damage: 0.9, hits: 3, reach: 88, recover: 0.55 },
+            leap:           { range: [140, 460], prepare: 0.6, time: 0.45, damage: 1.3, radius: 64, recover: 0.6 },
+            shadowDash:     { range: [0, 700], prepare: 0.32, time: 0.22, dist: 260, recover: 0.2 },
+            shadowLeap:     { range: [0, 700], prepare: 0.28, time: 0.2, dist: 240, leapPrepare: 0.32, leapTime: 0.4, damage: 1.3, radius: 66, recover: 0.55 },
+            corruptionShot: { range: [160, 900], windup: 0.6, damage: 0.9, count: 3, spread: 0.32, speed: 250, recover: 0.5 },
+            corruptionWave: { range: [0, 400], windup: 1.0, damage: 1.3, maxRadius: 320, time: 0.7, band: 34, recover: 0.7 }
+        },
+        motions: {
+            idle: 'temp', walk: 'temp', run: 'temp', detect: 'temp', bite: 'temp', claw: 'temp',
+            leapPrepare: 'temp', leap: 'temp', dodge: 'temp', shadowDash: 'temp', corruptionAttack: 'temp',
+            howl: 'temp', hit: 'temp', stun: 'temp', death: 'temp'
+        }
+    },
+    {
+        // 魔道ゴーレム：今は設計データだけ（戦闘・専用ステージは今後実装）
+        id: 'magic_golem',
+        name: '魔道ゴーレム',
+        difficulty: 3,
+        level: '上級者向け',
+        field: 'golem_stage',
+        fieldName: '魔導機械の専用ステージ（今後実装予定）',
+        status: 'coming',
+        features: ['石と金属で構成された魔導機械', '高い防御力', '強力な範囲攻撃', '魔法陣による特殊攻撃', '上級者向けのボス'],
+        ai: 'MagicGolemAI', // 未実装
+        theme: { color: '#7fd6ff', banner: 'boss' },
+        enemy: {
+            enemyId: 'boss_003', name: '魔道ゴーレム', displayName: '魔道ゴーレム',
+            hp: 1200, attack: 22, defense: 12, exp: 400, size: 96, speed: 40, isBoss: true
+        },
+        phases: [
+            { hp: 1.0, label: '通常', attacks: { punch: 3, slam: 2 }, speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0 },
+            { hp: 0.5, label: '強化', attacks: { punchCombo: 3, magicShot: 3, shockwave: 2 }, speedMul: 1.1, intervalMul: 0.9, recoverMul: 0.9, transition: 'activate' },
+            { hp: 0.3, label: '最終強化', attacks: { magicCircle: 3, bigShockwave: 3, punchCombo: 2 }, speedMul: 1.2, intervalMul: 0.8, recoverMul: 0.8, transition: 'activate' }
+        ],
+        attacks: {},
+        motions: {
+            idle: 'none', activate: 'none', walk: 'none', punch: 'none', slam: 'none', magicCharge: 'none',
+            magicShot: 'none', shockwave: 'none', shield: 'none', hit: 'none', breakdown: 'none', death: 'none'
+        }
+    },
+    {
+        // まだ決まっていないボスの枠
+        id: 'unknown',
+        name: '？？？',
+        difficulty: 4,
+        level: '',
+        field: '',
+        fieldName: '？？？',
+        status: 'coming',
+        unknown: true,
+        features: []
+    }
+];
+
+// 難易度の低い順（左から）に並べる
+BOSS_DATA.sort((a, b) => a.difficulty - b.difficulty);
+
+function getBossData(id) {
+    return BOSS_DATA.find(b => b.id === id) || null;
+}
+
+// ボスの仮の見た目（Enemy.drawBeastFallback が使う色と形）を登録
+if (typeof Enemy !== 'undefined' && Enemy.BEAST_LOOKS) {
+    for (const b of BOSS_DATA) {
+        if (b.look && b.enemy) Enemy.BEAST_LOOKS[b.enemy.name] = b.look;
+    }
+}
+
+window.BOSS_DATA = BOSS_DATA;
+window.getBossData = getBossData;
