@@ -26,6 +26,14 @@ class InputManager {
         this.stick = new Vector2(0, 0);
         this.stickDeadZone = 0.18;
         
+        // ねらう向き
+        // touchAim：スマホで攻撃・魔法ボタンを押したまま指をスライドした向き（touch_controls.js が入れる）
+        //   active：今スライドしている / source：'attack' か 'magic' / until：指を離した後も向きを覚えておく時刻（魔法の詠唱中）
+        // mouseAim：PC でマウスを使っている時は、カーソルの方向をねらう
+        //   held / since：魔法ボタンを押している間 true と、押し始めた時刻（長押しでその場系のターゲットカーソルを出す）
+        this.touchAim = InputManager.emptyAim();
+        this.mouseAim = false;
+        
         this.init();
     }
     
@@ -74,11 +82,18 @@ class InputManager {
         // UIオーバーレイがキャンバスの上に重なっていても拾えるよう window で受ける
         window.addEventListener('pointermove', (e) => {
             if (!isOnTouchControls(e)) updateMousePos(e);
+            // マウスを動かしたらカーソルでねらう。タッチで操作したらやめる（スマホはスライドでねらう）
+            if (e.pointerType === 'mouse') this.mouseAim = true;
+            else if (e.pointerType === 'touch') this.mouseAim = false;
         });
+        // マウスがウィンドウの外へ出たら、カーソルではねらわない（戻ってきたらまたねらう）
+        document.addEventListener('mouseout', (e) => { if (!e.relatedTarget) this.mouseAim = false; });
         
         window.addEventListener('pointerdown', (e) => {
+            if (e.pointerType === 'touch') this.mouseAim = false;
             if (isOnTouchControls(e)) return;
             updateMousePos(e);
+            if (e.pointerType === 'mouse') this.mouseAim = true;
             this.mouseButtons[e.button] = true;
             if (e.button === 0) {
                 this.isMouseClicked = true;
@@ -143,6 +158,53 @@ class InputManager {
         this.keys = {};
         this.mouseButtons = {};
         this.stick = new Vector2(0, 0);
+        this.touchAim = InputManager.emptyAim();
+    }
+    
+    static emptyAim() {
+        return { active: false, x: 0, y: 0, source: null, until: 0, held: false, since: 0 };
+    }
+    
+    // ---- ねらう向き ----
+    // スマホのボタンを押した（まだスライドしていない）。長押しの時間を数えはじめる
+    setTouchHold(source) {
+        this.touchAim = { ...InputManager.emptyAim(), source, held: true, since: performance.now() };
+    }
+    // スマホのボタンのスライド（touch_controls.js から）。dx, dy は押した所からの指の動き（画面上）
+    setTouchAim(source, dx, dy) {
+        const a = this.touchAim;
+        const since = a.source === source && a.held ? a.since : performance.now();
+        this.touchAim = { active: true, x: dx, y: dy, source, until: 0, held: true, since };
+    }
+    // 指を離した：攻撃はすぐ忘れる。魔法は詠唱が終わって撃つまで向き・場所を覚えておく（keepMs ミリ秒まで）
+    releaseTouchAim(source, keepMs = 0) {
+        const a = this.touchAim;
+        if (a.source !== source) return;
+        if (a.active && keepMs > 0) this.touchAim = { ...a, active: false, held: false, until: performance.now() + keepMs };
+        else this.touchAim = InputManager.emptyAim();
+    }
+    // 魔法を撃った後：覚えていたスライドの向きを忘れる（押したままなら、次の詠唱のために残す）
+    clearTouchAim(source) {
+        const a = this.touchAim;
+        if (a.source === source && !a.active && !a.held) this.touchAim = InputManager.emptyAim();
+    }
+    
+    // ねらう向き（Vector2。画面上の向き＝ワールドの向き）。playerScreen：画面上の主人公の位置（キャンバス座標）
+    // スライド中・スライドを覚えている間はその向き、PC でマウスを使っていればカーソルの方向、なければ null
+    getAimVector(playerScreen) {
+        const a = this.touchAim;
+        if ((a.active || (a.source && performance.now() < a.until)) && Math.hypot(a.x, a.y) > 0.01) return new Vector2(a.x, a.y);
+        if (this.mouseAim && playerScreen) {
+            const v = this.mousePos.sub(playerScreen);
+            if (v.length() > 8) return v; // 主人公の真上にカーソルがある時は向きを決めない
+        }
+        return null;
+    }
+    
+    // スマホ：攻撃ボタンを押したままスライドしている（その向きへ斬り続ける）
+    isAttackSliding() {
+        if (this.paletteOpen) return false;
+        return this.touchAim.active && this.touchAim.source === 'attack' && this.isKeyDown('Space');
     }
     
     // フレームの最後に呼ぶ：「押された瞬間」系の状態をクリア

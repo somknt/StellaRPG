@@ -10,6 +10,7 @@
 const TouchControls = {
     LOGICAL_W: 1280,
     LOGICAL_H: 720,
+    AIM_SLIDE_PX: 16,   // 攻撃・魔法ボタンを押したまま、これ以上指を動かしたら「その向きをねらう」
     
     init(input) {
         this.input = input;
@@ -141,19 +142,42 @@ const TouchControls = {
             const code = btn.dataset.key;
             let pointerId = null;
             
+            // 攻撃・魔法ボタン：押したまま指をスライドすると、その向きをねらう（input.touchAim）
+            //   攻撃：スライドしている間、その向きへ斬り続ける
+            //   魔法（砲弾系）：詠唱が終わった時にスライドした向きへ撃つ
+            //   魔法（その場系）：長押しでターゲットカーソルが出て、スライドで落とす場所を動かす（game.js の computeCastAim）
+            //   普通に押して離しただけなら、自動で敵をねらう
+            const aimSource = code === 'Space' ? 'attack' : code === 'KeyQ' ? 'magic' : null;
+            let start = null;
+            
             btn.addEventListener('pointerdown', (e) => {
                 pointerId = e.pointerId;
                 btn.setPointerCapture(e.pointerId);
                 btn.classList.add('pressed');
+                start = { x: e.clientX, y: e.clientY };
+                if (aimSource === 'magic') this.input.setTouchHold('magic'); // 長押しの時間を数える
                 this.input.setVirtualKey(code, true);
                 if (navigator.vibrate) navigator.vibrate(10); // 対応端末では軽く振動
+                e.preventDefault();
+            });
+            
+            btn.addEventListener('pointermove', (e) => {
+                if (e.pointerId !== pointerId || !aimSource || !start) return;
+                const dx = e.clientX - start.x, dy = e.clientY - start.y;
+                // 少し動かしただけ（押した時の指のずれ）ではねらわない
+                if (Math.hypot(dx, dy) >= this.AIM_SLIDE_PX) {
+                    if (!this.input.touchAim.active) btn.classList.add('aiming');
+                    this.input.setTouchAim(aimSource, dx, dy);
+                }
                 e.preventDefault();
             });
             
             const up = (e) => {
                 if (e.pointerId !== pointerId) return;
                 pointerId = null;
-                btn.classList.remove('pressed');
+                start = null;
+                btn.classList.remove('pressed', 'aiming');
+                if (aimSource) this.input.releaseTouchAim(aimSource, aimSource === 'magic' ? 2500 : 0);
                 this.input.setVirtualKey(code, false);
             };
             btn.addEventListener('pointerup', up);

@@ -50,6 +50,8 @@ class Player {
         this.dodgeCooldown = 0.35;
         this.dodgeCooldownTimer = 0;
         this.dodgedAttack = false;     // 回避中に攻撃を避けたか（ジャスト回避判定）
+        this.dodgeBuffer = 0;          // 回避ボタンの先行入力の残り時間
+        this.justGuardTime = 0;        // ジャスト回避のスロー中の無敵（game.js が入れる）。この間はダメージも吹き飛ばしも受けない
         this.afterImages = [];         // 残像
         
         // 装備（初期装備はナイフ）
@@ -156,8 +158,11 @@ class Player {
         this.updateMagicSelect(input);
         
         // 回避の開始（移動より先に判定。詠唱中・飛ばされている間はできない）
-        if (input.isDodgePressed() && !this.isChanting && this.knockTimer <= 0) {
-            this.tryDodge(input);
+        // 回避中・待ち時間中に押した時は少しだけ覚えておき、できるようになったらすぐ出す（連続の回避がつながるように）
+        if (input.isDodgePressed()) this.dodgeBuffer = Player.DODGE_BUFFER;
+        else if (this.dodgeBuffer > 0) this.dodgeBuffer -= deltaTime;
+        if (this.dodgeBuffer > 0 && !this.isChanting && this.knockTimer <= 0) {
+            if (this.tryDodge(input)) this.dodgeBuffer = 0;
         }
         
         // 移動処理（飛ばされている間はノックバックだけ。回避中は回避の移動を優先）
@@ -187,6 +192,9 @@ class Player {
         // 無敵時間
         if (this.invincibleTime > 0) {
             this.invincibleTime -= deltaTime;
+        }
+        if (this.justGuardTime > 0) {
+            this.justGuardTime -= deltaTime;
         }
         if (this.dodgeCooldownTimer > 0) {
             this.dodgeCooldownTimer -= deltaTime;
@@ -270,6 +278,7 @@ class Player {
     // dir の方向へ dist(px) 飛ばされる。force = true（咆哮など）は回避中・無敵中でも必ず飛ばされる
     knockback(dir, dist, duration = 0.3, force = false) {
         if (!dir || dir.length() < 0.01) dir = new Vector2(0, 1);
+        if (this.justGuardTime > 0) return false; // ジャスト回避のスロー中は咆哮でも飛ばされない
         if (!force && (this.isDodging || this.invincibleTime > 0)) return false;
         if (this.isDodging) {
             // 回避は打ち消される（無敵も消える）
@@ -324,7 +333,8 @@ class Player {
         this.dodgeTimer -= deltaTime;
         if (this.dodgeTimer <= 0) {
             this.isDodging = false;
-            this.dodgeCooldownTimer = this.dodgeCooldown;
+            // ジャスト回避が決まった後（スロー中の無敵の間）は、待たずに次の回避ができる
+            this.dodgeCooldownTimer = this.justGuardTime > 0 ? 0 : this.dodgeCooldown;
             this.velocity = new Vector2(0, 0);
         }
     }
@@ -341,6 +351,22 @@ class Player {
             return true;
         }
         return false;
+    }
+    
+    // ジャスト回避が決まった：time 秒のあいだ無敵にして、すぐ次の回避ができるようにする
+    // （回避の待ち時間をなくし、使ったスタミナを返す。タイミングが合えば何回でも続けられる）
+    onJustDodge(time) {
+        this.justGuardTime = Math.max(this.justGuardTime, time);
+        this.dodgeCooldownTimer = 0;
+        this.currentStamina = Math.min(this.maxStamina, this.currentStamina + this.dodgeStaminaCost);
+        // 完全無敵：飛ばされている途中ならそこで止める
+        this.knockTimer = 0;
+        this.knockSpeed = 0;
+    }
+    
+    // ジャスト回避の無敵中か（この間は ダメージ・吹き飛ばし・咆哮の風圧 を全部受けない。攻撃・魔法はできる）
+    isGuarded() {
+        return this.justGuardTime > 0;
     }
     
     // ---------- スタミナ ----------
@@ -381,31 +407,39 @@ class Player {
     
     // 攻撃を開始する。近くに敵がいればその方向へ向き直って斬る
     // 戻り値: 攻撃データ（クールダウン中・回避中は null）
-    startAttack(enemies = []) {
+    // aimDir：ねらう向き（スマホのスライド・PC のカーソル。Vector2）。null なら近くの敵を自動でねらう
+    startAttack(enemies = [], aimDir = null) {
         if (this.attackTimer > 0 || this.isDodging || this.isChanting) return null;
         
-        // 近くの敵を探す（向いている方向にいる敵を優先）
-        const facing = this.directionToVector(this.direction);
-        let target = null;
-        let bestScore = Infinity;
-        for (const enemy of enemies) {
-            if (!enemy.isAlive()) continue;
-            const toEnemy = enemy.position.sub(this.position);
-            const dist = toEnemy.length();
-            if (dist > this.weapon.assistRange || dist === 0) continue;
-            const dot = (toEnemy.x * facing.x + toEnemy.y * facing.y) / dist; // 1=正面, -1=背後
-            const score = dist * (2 - dot); // 正面で近いほど小さい
-            if (score < bestScore) {
-                bestScore = score;
-                target = enemy;
-            }
-        }
-        
-        if (target) {
-            this.aimVector = target.position.sub(this.position).normalize();
+        if (aimDir) {
+            // ねらった向きの近く（約30度以内）に敵がいれば、その敵に少しだけ吸いつける
+            const t = this.pickAimTarget(enemies, aimDir, this.weapon.assistRange + 40, Player.AIM_ASSIST_DOT);
+            this.aimVector = t ? t.position.sub(this.position).normalize() : aimDir.normalize();
             this.setDirectionFromVector(this.aimVector);
         } else {
-            this.aimVector = facing;
+            // 近くの敵を探す（向いている方向にいる敵を優先）
+            const facing = this.directionToVector(this.direction);
+            let target = null;
+            let bestScore = Infinity;
+            for (const enemy of enemies) {
+                if (!enemy.isAlive()) continue;
+                const toEnemy = enemy.position.sub(this.position);
+                const dist = toEnemy.length();
+                if (dist > this.weapon.assistRange || dist === 0) continue;
+                const dot = (toEnemy.x * facing.x + toEnemy.y * facing.y) / dist; // 1=正面, -1=背後
+                const score = dist * (2 - dot); // 正面で近いほど小さい
+                if (score < bestScore) {
+                    bestScore = score;
+                    target = enemy;
+                }
+            }
+            
+            if (target) {
+                this.aimVector = target.position.sub(this.position).normalize();
+                this.setDirectionFromVector(this.aimVector);
+            } else {
+                this.aimVector = facing;
+            }
         }
         
         this.isAttacking = true;
@@ -432,6 +466,23 @@ class Player {
             damage: this.attack + this.weapon.power,
             knockback: this.weapon.knockback
         };
+    }
+    
+    // ねらった向き dir の近く（dot 以上）で、range 以内にいる敵（向きが近いほど・近いほど優先）
+    pickAimTarget(enemies, dir, range, dot) {
+        const n = dir.normalize();
+        let best = null, bestScore = Infinity;
+        for (const e of enemies) {
+            if (!e.isAlive()) continue;
+            const to = e.position.sub(this.position);
+            const d = to.length();
+            if (d === 0 || d > range) continue;
+            const c = (to.x * n.x + to.y * n.y) / d;
+            if (c < dot) continue;
+            const score = d * (2 - c);
+            if (score < bestScore) { bestScore = score; best = e; }
+        }
+        return best;
     }
     
     // 互換用：旧コードから呼ばれた場合
@@ -573,20 +624,32 @@ class Player {
     
     // 詠唱が終わった魔法を受け取る（game.js が発動させる）
     // 近くの前方に敵がいればその方向へ向き直って撃つ
-    consumeReadyCast(enemies = []) {
+    // aimDir：ねらう向き（スマホのスライド・PC のカーソル）。null なら前方の近い敵を自動でねらう
+    // exact：true なら aimDir をそのまま使う（game.js の computeCastAim で、自動のねらい・吸いつきは済んでいる）
+    consumeReadyCast(enemies = [], aimDir = null, exact = false) {
         if (!this.readyCast) return null;
         const magic = this.readyCast;
         this.readyCast = null;
         
-        const facing = this.directionToVector(this.direction);
-        let aim = facing, bestDist = Infinity;
-        for (const e of enemies) {
-            if (!e.isAlive()) continue;
-            const to = e.position.sub(this.position);
-            const d = to.length();
-            if (d === 0 || d > 420) continue;
-            if ((to.x * facing.x + to.y * facing.y) / d < 0.35) continue; // 前方 約70度以内
-            if (d < bestDist) { bestDist = d; aim = to.normalize(); }
+        let aim;
+        if (aimDir && exact) {
+            aim = aimDir.normalize();
+        } else if (aimDir) {
+            // ねらった向きの近く（約30度以内）に敵がいれば、その敵の方へ（少しだけ吸いつける）
+            const t = this.pickAimTarget(enemies, aimDir, 520, Player.AIM_ASSIST_DOT);
+            aim = t ? t.position.sub(this.position).normalize() : aimDir.normalize();
+        } else {
+            const facing = this.directionToVector(this.direction);
+            let bestDist = Infinity;
+            aim = facing;
+            for (const e of enemies) {
+                if (!e.isAlive()) continue;
+                const to = e.position.sub(this.position);
+                const d = to.length();
+                if (d === 0 || d > 420) continue;
+                if ((to.x * facing.x + to.y * facing.y) / d < 0.35) continue; // 前方 約70度以内
+                if (d < bestDist) { bestDist = d; aim = to.normalize(); }
+            }
         }
         this.aimVector = aim;
         this.setDirectionFromVector(aim);
@@ -635,7 +698,7 @@ class Player {
             this.dodgedAttack = true;
             return 0;
         }
-        if (this.invincibleTime > 0) return 0;
+        if (this.invincibleTime > 0 || this.justGuardTime > 0) return 0;
         
         const actualDamage = Math.max(1, damage - this.defense);
         this.currentHP = Math.max(0, this.currentHP - actualDamage);
@@ -663,6 +726,7 @@ class Player {
     }
     
     gainExp(amount) {
+        if (this.levelLocked) return; // バトルモードのボス戦：レベルは固定（経験値でも上がらない）
         this.exp += amount;
         
         while (this.exp >= this.expToNext) {
@@ -699,8 +763,8 @@ class Player {
     // 決まったレベルの強さにする（バトルモードの推奨レベルがあるボス戦で使う）。HP・SP は満タン
     setLevel(level) {
         const statsTable = window.gameData && window.gameData.playerStatsTable;
-        const levelData = statsTable && statsTable.find(s => s.level === level);
-        if (!levelData) return;
+        // 表にないレベル（JSON を読めなかった時など）は、表と同じ式で計算する
+        const levelData = (statsTable && statsTable.find(s => s.level === level)) || Player.statsForLevel(level);
         this.level = level;
         this.exp = 0;
         this.maxHP = levelData.hp;
@@ -750,6 +814,21 @@ class Player {
                     ctx.fillRect(p.x - this.drawSize/2, p.y - this.drawSize/2, this.drawSize, this.drawSize);
                 }
             }
+            ctx.restore();
+        }
+        
+        // ジャスト回避の無敵中：足元に水色の光の輪（無敵なのが分かるように）
+        if (this.justGuardTime > 0) {
+            ctx.save();
+            const k = Math.min(1, this.justGuardTime / 0.2);
+            ctx.globalAlpha = 0.55 * k;
+            ctx.strokeStyle = '#bfefff';
+            ctx.shadowColor = '#7fdcff';
+            ctx.shadowBlur = 12;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.ellipse(screenPos.x, screenPos.y + this.drawSize * 0.36, this.drawSize * 0.42, this.drawSize * 0.15, 0, 0, Math.PI * 2);
+            ctx.stroke();
             ctx.restore();
         }
         
@@ -1049,7 +1128,17 @@ class Player {
 Player.MAGIC_SLOT_COUNT = 5;
 
 // 主人公の魔法のダメージの倍率（全部の魔法：弾・残り火・竜巻・雷など。game.js で掛ける）
-Player.MAGIC_DAMAGE_MUL = 1.6;
+// （3.2 = 前の 1.6 の2倍）。属性の相性（有利 1.5倍 / 不利 0.5倍）はこの後に掛ける
+Player.MAGIC_DAMAGE_MUL = 3.2;
+// レベルのステータス（data/player_stats_table.json と同じ式）
+Player.statsForLevel = (lv) => ({
+    level: lv, hp: 100 + 21 * (lv - 1), attack: 15 + 3 * (lv - 1), defense: 5 + (lv - 1),
+    maxSP: 50 + 6 * (lv - 1), requiredExp: 5 * lv
+});
+// 回避ボタンの先行入力（秒）：回避中・待ち時間中に押しても、この時間内ならできるようになった瞬間に回避する
+Player.DODGE_BUFFER = 0.15;
+// ねらった向きの何度以内の敵に吸いつけるか（cos。0.87 ≒ 30度）
+Player.AIM_ASSIST_DOT = 0.87;
 
 // 斬撃エフェクトの見た目
 // size：画像を描く大きさ / offset：画像の中心を斬る向きへずらす量

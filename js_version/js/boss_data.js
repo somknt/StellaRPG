@@ -16,6 +16,9 @@
 //              draw  ：画面での大きさ（enemy.size の何倍の四角に描くか。画像は 320×320、足元は上から254px）
 //              alias ：絵がないモーション → [代わりに使うモーション, 止めるコマ（null ならコマ送り）]。'walk' は歩きの絵
 //              speed ：1コマの時間（秒）。書いていないモーションは 0.15
+// playerLevel: バトルモードの主人公のレベル（このレベルのステータスで戦う。data/player_stats_table.json）
+// elements   : 属性の相性（魔法のダメージ。game.js の Game.ELEMENT_MUL）
+//              weak = 有利属性（よく効く：1.5倍） / resist = 不利属性（効きにくい：0.5倍） / 書いていない属性はふつう（1倍）
 
 const BOSS_DATA = [
     {
@@ -29,6 +32,8 @@ const BOSS_DATA = [
         features: ['巨大な森のイノシシ', '強力な突進攻撃', '近距離攻撃中心', '攻撃前の予備動作が分かりやすい', '初心者向けのボス'],
         ai: 'ForestBoarAI',
         theme: { color: '#ff8a5a', banner: 'boss' },
+        playerLevel: 5,
+        elements: { weak: ['炎', '雷', '土'], resist: [] },
         enemy: {
             enemyId: 'boss_001', name: '巨大森イノシシ', displayName: '巨大森イノシシ',
             hp: 640, attack: 16, defense: 3, exp: 120,
@@ -79,6 +84,8 @@ const BOSS_DATA = [
         features: ['星喰いに侵された狼', '素早い移動', '連続攻撃', '暗紫色の侵蝕攻撃', '中級者向けのボス'],
         ai: 'BlackWolfAI',
         theme: { color: '#c58bff', banner: 'corrupt', arenaTint: 'rgba(70, 15, 110, 0.2)' },
+        playerLevel: 10,
+        elements: { weak: ['炎', '土', '風'], resist: ['雷'] },
         enemy: {
             enemyId: 'boss_002', name: '黒蝕狼', displayName: '黒蝕狼',
             hp: 720, attack: 14, defense: 4, exp: 200,
@@ -135,6 +142,7 @@ const BOSS_DATA = [
         theme: { color: '#7fd6ff', banner: 'golem', flash: '#7fe6ff', arenaTint: 'rgba(20, 50, 120, 0.1)', vignette: 'rgba(5, 10, 40, 0.55)' },
         countdown: true,      // BATTLE START の後に 3・2・1（この間は操作も敵AIも止まる）
         playerLevel: 15,      // 推奨レベル：この戦いは主人公をこのレベルの強さで始める（data/player_stats_table.json）
+        elements: { weak: ['水'], resist: ['炎', '風', '雷'] },
         enemy: {
             enemyId: 'boss_003', name: '魔道ゴーレム', displayName: '魔道ゴーレム',
             hp: 2200, attack: 40, defense: 30, magicDefense: 12, exp: 400,

@@ -287,7 +287,17 @@ class Enemy {
     }
     
     faceTowards(v) {
-        if (Math.abs(v.x) > Math.abs(v.y)) this.direction = v.x < 0 ? 'left' : 'right';
+        const ax = Math.abs(v.x), ay = Math.abs(v.y);
+        // ボス：ななめ45度の近くで 横向き⇔上下向き の絵が毎フレーム入れかわってぶれないよう、
+        // 今の向きの軸から変わるのは、もう一方の軸がはっきり大きい時だけ（Enemy.BOSS_TURN_MARGIN 倍）
+        if (this.ai && ax + ay > 0.01) {
+            const m = Enemy.BOSS_TURN_MARGIN;
+            const side = this.direction === 'left' || this.direction === 'right';
+            if (side ? ay > ax * m : ax <= ay * m) this.direction = v.y < 0 ? 'up' : 'down';
+            else this.direction = v.x < 0 ? 'left' : 'right';
+            return;
+        }
+        if (ax > ay) this.direction = v.x < 0 ? 'left' : 'right';
         else this.direction = v.y < 0 ? 'up' : 'down';
     }
     
@@ -353,6 +363,8 @@ class Enemy {
     
     updateDirection() {
         if (this.velocity.length() < 0.1) return;
+        // ボスは向きの切りかえに余裕を持たせる（faceTowards）
+        if (this.ai) { this.faceTowards(this.velocity); return; }
         
         const angle = Math.atan2(this.velocity.y, this.velocity.x);
         const degree = angle * 180 / Math.PI;
@@ -1032,6 +1044,8 @@ class Enemy {
 Enemy.SCALE = { size: 1.6, bossSize: 2.0, range: 2.0, speed: 1.5, cooldown: 0.5, shot: 1.4, damage: 1.6 };
 // ボスの絵：止まっているモーション（下・上向きの時は正面・背中の絵を出す）
 Enemy.BOSS_STILL_MOTIONS = ['idle', 'detect', 'stun', 'hit', 'death'];
+// ボスの向きの切りかえの余裕（1.3 = 約52度を超えるまで今の向きのまま）
+Enemy.BOSS_TURN_MARGIN = 1.3;
 // 侵蝕弾の画像（assets/effects/boss/corrupt_shot.png）で、光る玉の中心がある横の位置（左から何割か）
 Enemy.SHOT_ORB_X = 0.4;
 

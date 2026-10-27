@@ -39,7 +39,33 @@ function Get-Frames($file, $rows, $cols) {
 
 # frames of one row -> 3 png (and mirrored copies)
 #   k: scale, mode 'feet' = each frame stands on the feet line, 'union' = keep the vertical motion (jumps)
-function Save-Row($sheet, $row, $k, $outDir, $names, $mode = 'feet', $mirror = $null, $order = @(0, 1, 2)) {
+# alpha mass of one frame (sum of alpha of all its parts) and the x of the body axis
+#   axis = alpha-weighted center x of the top $axisFrac of the frame (head + shoulders, the swinging tail is lower)
+function Get-FrameInfo($list, $axisFrac) {
+    $y0 = ($list | ForEach-Object { $_.Y } | Measure-Object -Minimum).Minimum
+    $y1 = ($list | ForEach-Object { $_.Y + $_.H } | Measure-Object -Maximum).Maximum
+    $band = $y0 + $axisFrac * ($y1 - $y0)
+    $mass = 0.0; $sx = 0.0; $sw = 0.0
+    foreach ($p in $list) {
+        $mass += [Axis]::Sum($p.Bmp, 0, $p.H)[2]
+        $s = [Axis]::Sum($p.Bmp, 0, [int]($band - $p.Y))
+        $sx += $s[0] + $p.X * $s[2]; $sw += $s[2]
+    }
+    $ax = if ($sw -gt 0) { $sx / $sw } else { $null }
+    return @{ mass = $mass; axis = $ax }
+}
+# average alpha mass of a row, in frame pixels when drawn at scale k (used as the size target of $fit)
+function Get-RowMass($sheet, $row, $k) {
+    $t = 0.0
+    foreach ($c in 0, 1, 2) { $t += (Get-FrameInfo $sheet.frames["$row,$c"] 0.45).mass }
+    return $t / 3 * $k * $k
+}
+
+# $fit (optional) keeps the body steady from frame to frame:
+#   @{ axis = 0.45; mass = <target mass in frame px>; lo = 0.85; hi = 1.15 }
+#   - each frame is placed so its body axis (head + shoulders) is at the frame center
+#   - each frame is scaled so its body has about the same amount of picture as the target (within k*lo .. k*hi)
+function Save-Row($sheet, $row, $k, $outDir, $names, $mode = 'feet', $mirror = $null, $order = @(0, 1, 2), $fit = $null) {
     $info = @()
     foreach ($c in $order) {
         $list = $sheet.frames["$row,$c"]
@@ -54,7 +80,14 @@ function Save-Row($sheet, $row, $k, $outDir, $names, $mode = 'feet', $mirror = $
     $bottom = (($info | ForEach-Object { $_.ry1 }) | Measure-Object -Maximum).Maximum
     for ($i = 0; $i -lt $info.Count; $i++) {
         $f = $info[$i]
+        $kf = $k
         $px = $FS / 2 + ($f.rx0 - $mid) * $k
+        if ($fit) {
+            $fi = Get-FrameInfo $f.list $fit.axis
+            if ($fit.mass) { $kf = [math]::Min($k * $fit.hi, [math]::Max($k * $fit.lo, [math]::Sqrt($fit.mass / $fi.mass))) }
+            if ($null -ne $fi.axis) { $px = $FS / 2 - ($fi.axis - $f.x0) * $kf }
+        }
+        $k0 = $k; $k = $kf
         if ($mode -eq 'feet') { $fy = $FOOT - ($f.y1 - $f.y0) * $k } else { $fy = $FOOT - ($bottom - ($f.ry1 - ($f.y1 - $f.y0))) * $k }
         $w = ($f.x1 - $f.x0) * $k; $h = ($f.y1 - $f.y0) * $k
         if ($px -lt 0 -or $fy -lt 0 -or $px + $w -gt $FS -or $fy + $h -gt $FS) { Write-Warning ("{0} row {1} frame {2}: outside the frame ({3:N0},{4:N0} {5:N0}x{6:N0})" -f $sheet.file, $row, $i, $px, $fy, $w, $h) }
@@ -63,6 +96,7 @@ function Save-Row($sheet, $row, $k, $outDir, $names, $mode = 'feet', $mirror = $
         foreach ($n in @($names)) { $fr.Save("$outDir/$($n)_$($i + 1).png", $false) }
         if ($mirror) { foreach ($n in @($mirror)) { $fr.Save("$outDir/$($n)_$($i + 1).png", $true) } }
         $fr.Dispose()
+        $k = $k0
     }
 }
 
@@ -110,16 +144,21 @@ Save-Row $side 4 $KS $out 'leap_right' 'union' 'leap_left'
 Save-Row $side 5 $KS $out 'howl_right' 'feet' 'howl_left'
 $KF = 0.28; $KB = 0.3
 $s = Get-Frames 'wolf_howl_down.png' 1 3; Save-Row $s 0 $KF $out 'howl_down'
-$s = Get-Frames 'wolf_howl_up.png' 1 3;   Save-Row $s 0 $KB $out 'howl_up'
 $s = Get-Frames 'wolf_claw_down.png' 1 3; Save-Row $s 0 $KF $out 'claw_down'
-$s = Get-Frames 'wolf_claw_up.png' 1 3;   Save-Row $s 0 $KB $out 'claw_up'
 # sheet 2 (front / back): walk, run, bite, leap prepare, leap
 $K2 = 0.66
-foreach ($d in 'down', 'up') {
-    $s = Get-Frames "wolf_sheet2_$d.png" 5 3
-    Save-Row $s 0 $K2 $out $d; Save-Row $s 1 $K2 $out "run_$d"; Save-Row $s 2 $K2 $out "bite_$d"
-    Save-Row $s 3 $K2 $out "leapPrepare_$d"; Save-Row $s 4 $K2 $out "leap_$d"
-}
+$s = Get-Frames "wolf_sheet2_down.png" 5 3
+Save-Row $s 0 $K2 $out 'down'; Save-Row $s 1 $K2 $out 'run_down'; Save-Row $s 2 $K2 $out 'bite_down'
+Save-Row $s 3 $K2 $out 'leapPrepare_down'; Save-Row $s 4 $K2 $out 'leap_down'
+# back view: the tail swings left and right a lot, so every up frame is lined up on the head + shoulders
+# and scaled to the same body size as the walk (no shaking between frames or motions)
+$s = Get-Frames "wolf_sheet2_up.png" 5 3
+$fit = @{ axis = 0.45; mass = (Get-RowMass $s 0 $K2); lo = 0.88; hi = 1.12 }
+Save-Row $s 0 $K2 $out 'up' 'feet' $null @(0, 1, 2) $fit; Save-Row $s 1 $K2 $out 'run_up' 'feet' $null @(0, 1, 2) $fit
+Save-Row $s 2 $K2 $out 'bite_up' 'feet' $null @(0, 1, 2) $fit; Save-Row $s 3 $K2 $out 'leapPrepare_up' 'feet' $null @(0, 1, 2) $fit
+Save-Row $s 4 $K2 $out 'leap_up' 'feet' $null @(0, 1, 2) $fit
+$s = Get-Frames 'wolf_howl_up.png' 1 3; Save-Row $s 0 $KB $out 'howl_up' 'feet' $null @(0, 1, 2) $fit
+$s = Get-Frames 'wolf_claw_up.png' 1 3; Save-Row $s 0 $KB $out 'claw_up' 'feet' $null @(0, 1, 2) $fit
 
 # ---------------- effects ----------------
 $fxDir = "$root/js_version/assets/effects/boss"

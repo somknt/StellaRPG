@@ -31,6 +31,7 @@ class Game {
         // ジャスト回避（成功すると0.5秒間、敵がスローになる。その間、敵は薄い水色になる）
         this.justDodgeDuration = 0.5;
         this.justDodgeSlowRate = 0.2;
+        this.justDodgeGuardExtra = 0.2; // スローが終わってからも少しだけ無敵にする秒数
         this.justDodgeTimer = 0;
         
         // システム
@@ -194,8 +195,11 @@ class Game {
         this.currentBossId = bossId;
         // ボスのフィールド：'arena'（星の闘技場。巨大森イノシシ・黒蝕狼） / 'ruins'（古代星紋遺跡。魔道ゴーレム）
         this.setupArena(gender, def.field);
-        // 推奨レベルがあるボス：主人公をそのレベルの強さで始める
-        if (def.playerLevel) this.player.setLevel(def.playerLevel);
+        // バトルモード：主人公のレベルはボスごとに固定（イノシシ Lv5・狼 Lv10・ゴーレム Lv15）。そのステータスで戦う
+        if (def.playerLevel) {
+            this.player.setLevel(def.playerLevel);
+            this.player.levelLocked = true;
+        }
         if (!this.bossBattle) this.bossBattle = new BossBattle(this);
         this.activeBattle = this.bossBattle;
         this.bossBattle.start(this.map, def);
@@ -468,15 +472,36 @@ class Game {
         if (this.input.isMagicPressed()) {
             this.player.startChant();
         }
-        const cast = this.player.consumeReadyCast(this.enemySpawner.enemies);
-        if (cast) {
-            this.magicSystem.castMagic(cast.magic, cast.position, cast.direction, cast.circlePos,
-                this.enemySpawner.enemies, cast.circleShape, cast.circleRadius);
+        // ねらう向き（スマホ：ボタンを押したままスライド / PC：マウスカーソル）。なければ近くの敵を自動でねらう
+        const aim = this.getAimDirection();
+        
+        // 魔法のねらい（詠唱中は毎フレーム決め直して、撃つ向き・落とす場所を地面に出す）
+        //   砲弾系（弾・竜巻）：向き / その場系（雷）：落とす場所
+        //   普通に押しただけ → 自動で敵をねらう / スマホで長押ししてスライド・PC のカーソル → その向き・場所
+        const chantMagic = this.player.isChanting ? this.player.chantMagic : this.player.readyCast;
+        this.castAim = chantMagic ? this.computeCastAim(chantMagic) : null;
+        if (!chantMagic) this.castAnchor = null;
+        // 詠唱中は、ねらっている方を向く（手の前の魔法陣も、その向きに出る）
+        if (this.castAim && this.player.isChanting) {
+            this.player.aimVector = this.castAim.dir.clone();
+            this.player.setDirectionFromVector(this.castAim.dir);
         }
         
-        // プレイヤーの近接攻撃（ナイフ）：近くの敵の方向へ向き直って斬る
-        if (this.input.isAttackPressed()) {
-            const attackData = this.player.startAttack(this.enemySpawner.enemies);
+        const cast = this.player.consumeReadyCast(this.enemySpawner.enemies, this.castAim ? this.castAim.dir : aim, !!this.castAim);
+        if (cast) {
+            this.magicSystem.castMagic(cast.magic, cast.position, cast.direction, cast.circlePos,
+                this.enemySpawner.enemies, cast.circleShape, cast.circleRadius, this.castAim && this.castAim.target);
+            this.input.clearTouchAim('magic');
+            this.castAim = null;
+            this.castAnchor = null;
+        } else if (!this.player.isChanting) {
+            this.input.clearTouchAim('magic'); // 詠唱していない（MP 不足などで始まらなかった）なら、覚えた向きは使わない
+        }
+        
+        // プレイヤーの近接攻撃（ナイフ）：ねらう向き（なければ近くの敵の方向）へ向き直って斬る
+        // スマホで攻撃ボタンを押したままスライドしている間は、その向きへ斬り続ける
+        if (this.input.isAttackPressed() || this.input.isAttackSliding()) {
+            const attackData = this.player.startAttack(this.enemySpawner.enemies, aim);
             if (attackData) {
                 const hits = this.enemySpawner.checkMeleeAttack(attackData);
                 for (const hit of hits) {
@@ -495,7 +520,11 @@ class Game {
         const magicHits = this.magicSystem.checkCollisions(this.enemySpawner.enemies);
         for (const hit of magicHits) {
             // 魔法のダメージ倍率（Player.MAGIC_DAMAGE_MUL）。星力段階4ならさらに1.2倍
-            const damage = Math.round(hit.damage * Player.MAGIC_DAMAGE_MUL * (this.player.starPowerStage >= 4 ? 1.2 : 1));
+            // 属性の相性：ボスの有利属性は 1.5倍、不利属性は 0.5倍（boss_data.js の elements）
+            const element = hit.projectile && hit.projectile.magic && hit.projectile.magic.element;
+            const affinity = this.getElementAffinity(hit.enemy, element);
+            const damage = Math.round(hit.damage * Player.MAGIC_DAMAGE_MUL * (this.player.starPowerStage >= 4 ? 1.2 : 1) * Game.ELEMENT_MUL[affinity]);
+            if (affinity !== 'normal') this.addAffinityText(hit.enemy, affinity);
             
             // 残り火・竜巻の継続ダメージではひるませない
             hit.enemy.takeDamage(damage, hit.direction, !hit.noStagger, 'magic');
@@ -525,8 +554,11 @@ class Game {
         this.enemySpawner.checkEnemyAttacks(this.player);
         
         // 回避中に攻撃を避けていたらジャスト回避発動
-        if (this.player.consumeJustDodge() && this.justDodgeTimer <= 0) {
+        // スロー中にもう一度ジャスト回避が決まったら、スローと無敵をそこから延ばす（連続でできる）
+        // 無敵はスローより少し長くして、スローが終わった瞬間に残っている攻撃に当たらないようにする
+        if (this.player.consumeJustDodge()) {
             this.justDodgeTimer = this.justDodgeDuration;
+            this.player.onJustDodge(this.justDodgeDuration + this.justDodgeGuardExtra);
             Enemy.slowMotion = true;
         }
         
@@ -593,6 +625,8 @@ class Game {
             const cam = this.camera.position;
             // ボスの攻撃の予告範囲・衝撃波など（地面）
             if (this.activeBattle && this.activeBattle.drawGround) this.activeBattle.drawGround(this.ctx, cam);
+            // 詠唱中の魔法のねらい（通り道・届く所・落とす場所）。地面に描く
+            this.drawCastAim(this.ctx, cam);
             const items = this.map.getDepthDrawables(this.player);
             for (const e of this.enemySpawner.enemies) {
                 items.push({ sortY: e.position.y + e.size * 0.55, draw: (ctx, c) => e.draw(ctx, c) });
@@ -604,6 +638,8 @@ class Game {
             if (this.activeBattle) this.activeBattle.drawWorld(this.ctx, cam); // 敵の出現・ボスの攻撃の演出
             this.enemySpawner.drawEffects(this.ctx, cam);       // 倒れた敵の星・敵の光弾
             this.magicSystem.draw(this.ctx, cam);               // 魔術
+            this.drawAffinityTexts(this.ctx, cam);              // 「効果ばつぐん！」など
+            this.drawAim(this.ctx, cam);                        // 攻撃ボタンのスライドの向き
             this.map.drawAbove(this.ctx, cam);                  // 入口のアーチ（キャラより手前）
             if (window.showCollision) this.map.drawCollisionDebug(this.ctx, cam);
             return;
@@ -684,4 +720,291 @@ class Game {
         this.magicSystem.clear();
         this.paused = false;
     }
+    
+    // ---------- 属性の相性 ----------
+    // 'weak'（有利属性：よく効く） / 'resist'（不利属性：効きにくい） / 'normal'
+    getElementAffinity(enemy, element) {
+        const el = enemy && enemy.ai && enemy.ai.def && enemy.ai.def.elements;
+        if (!el || !element) return 'normal';
+        if (el.weak && el.weak.includes(element)) return 'weak';
+        if (el.resist && el.resist.includes(element)) return 'resist';
+        return 'normal';
+    }
+    
+    // 敵の頭の上に「効果ばつぐん！」「いまひとつ…」を少しだけ出す（竜巻などの連続ヒットで重ならないよう、同じ敵は0.5秒に1回）
+    addAffinityText(enemy, affinity) {
+        this.affinityTexts = this.affinityTexts || [];
+        const now = performance.now();
+        if (enemy._affinityAt && now - enemy._affinityAt < 500) return;
+        enemy._affinityAt = now;
+        this.affinityTexts.push({ enemy, affinity, age: 0, x: enemy.position.x, y: enemy.position.y - enemy.size * 0.9 });
+    }
+    
+    drawAffinityTexts(ctx, cam) {
+        if (!this.affinityTexts || !this.affinityTexts.length) return;
+        const dt = Math.min(this.deltaTime || 0.016, 0.1);
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 22px sans-serif';
+        ctx.lineWidth = 4;
+        for (const t of this.affinityTexts) {
+            t.age += dt;
+            const k = t.age / Game.AFFINITY_TEXT_TIME;
+            const weak = t.affinity === 'weak';
+            ctx.globalAlpha = Math.max(0, 1 - k * k);
+            const x = t.x - cam.x, y = t.y - cam.y - k * 28;
+            const text = weak ? '効果ばつぐん！' : 'いまひとつ…';
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.strokeText(text, x, y);
+            ctx.fillStyle = weak ? '#ffd84a' : '#a9b8c8';
+            ctx.fillText(text, x, y);
+        }
+        ctx.restore();
+        this.affinityTexts = this.affinityTexts.filter(t => t.age < Game.AFFINITY_TEXT_TIME);
+    }
+    
+    // ---------- ねらう向き ----------
+    // スマホ：攻撃・魔法ボタンを押したまま指をスライドした向き / PC：マウスカーソルの方向
+    // どちらもない時は null（今までどおり近くの敵を自動でねらう）
+    getAimDirection() {
+        if (!this.player || !this.camera) return null;
+        const v = this.input.getAimVector(this.player.position.sub(this.camera.position));
+        return v && v.length() > 0.01 ? v.normalize() : null;
+    }
+    
+    // ---------- 魔法のねらい ----------
+    // 砲弾系（ファイヤーボール・ウォーターボール・ストーンキャノン・テンペスト）は「向き」、
+    // その場系（ライトニング）は「落とす場所」を決める。詠唱中は毎フレーム呼ぶ
+    //   スマホ：普通に押した → 自動 / 押したままスライド（砲弾系）→ その向き / 長押し（その場系）→ ターゲットカーソル（スライドで動かす）
+    //   PC：マウスカーソルの方向・場所（敵の近くなら敵に吸いつく）
+    // 戻り値：{ kind: 'shot'|'target', dir, target, manual, reach, end, radius, range }
+    computeCastAim(magic) {
+        const p = this.player;
+        const enemies = this.enemySpawner.enemies.filter(e => e.isAlive() && !e.dying);
+        const M = window.MAGIC_SIZE_MUL || 1;
+        const t = this.input.touchAim;
+        const now = performance.now();
+        const touchSlide = t.source === 'magic' && (t.active || now < t.until) && Math.hypot(t.x, t.y) > 0.01;
+        const touchHold = t.source === 'magic' && t.held && now - t.since >= Game.TARGET_HOLD_MS;
+        const mouse = this.input.mouseAim && !(t.source === 'magic' && (t.held || touchSlide));
+        const nearest = (range) => {
+            let best = null, bd = Infinity;
+            for (const e of enemies) { const d = e.position.distance(p.position); if (d <= range && d < bd) { bd = d; best = e; } }
+            return best;
+        };
+        const facing = p.aimVector && p.aimVector.length() > 0.01 ? p.aimVector.normalize() : p.directionToVector(p.direction);
+        
+        if (magic.shape === 'strike') {
+            // ---- その場系：落とす場所 ----
+            const range = magic.range || 380;
+            let target, manual = false, lock = null;
+            if (mouse) {
+                target = this.camera.screenToWorld(this.input.mousePos);
+                manual = true;
+            } else if (touchHold || touchSlide) {
+                // 長押しでターゲットカーソルを出す（最初は自動でねらった所）。スライドで動かす
+                if (!this.castAnchor) {
+                    const e = nearest(range);
+                    this.castAnchor = e ? e.position.clone() : p.position.add(facing.mult(range * 0.6));
+                }
+                const gain = Game.TARGET_SLIDE_GAIN / Math.max(0.3, (window.TouchControls && TouchControls.scale) || 1);
+                target = this.castAnchor.add(new Vector2(t.x, t.y).mult(gain));
+                manual = true;
+            } else {
+                const e = nearest(range);
+                lock = e;
+                target = e ? e.position.clone() : p.position.add(facing.mult(range * 0.6));
+            }
+            // 届く距離まで
+            let v = target.sub(p.position);
+            if (v.length() > range) { v = v.normalize().mult(range); target = p.position.add(v); }
+            // カーソルが敵の近くなら、その敵に吸いつける
+            if (manual) {
+                for (const e of enemies) {
+                    if (e.position.distance(target) <= e.size * 0.6 + 30 && e.position.distance(p.position) <= range + e.size * 0.5) { lock = e; target = e.position.clone(); break; }
+                }
+            }
+            const dir = target.sub(p.position);
+            return { kind: 'target', target, lock, manual, range, radius: (magic.radius || 45) * M,
+                dir: dir.length() > 0.01 ? dir.normalize() : facing };
+        }
+        
+        // ---- 砲弾系：向き ----
+        let dir = null, manual = false, lock = null;
+        if (touchSlide) { dir = new Vector2(t.x, t.y).normalize(); manual = true; }
+        else if (mouse) {
+            const v = this.input.mousePos.sub(p.position.sub(this.camera.position));
+            if (v.length() > 8) { dir = v.normalize(); manual = true; }
+        }
+        const reachMax = magic.shape === 'tornado' ? (magic.travel || 110) : (magic.range || 400);
+        if (manual) {
+            // ねらった向きの近く（約30度以内）に敵がいれば、その敵に吸いつける
+            lock = p.pickAimTarget(enemies, dir, reachMax + 140, Player.AIM_ASSIST_DOT);
+        } else {
+            // 何も指定していない：いちばん近い敵の方向へ（いなければ向いている方向）
+            lock = nearest(Game.AUTO_AIM_RANGE);
+        }
+        if (lock) dir = lock.position.sub(p.position).normalize();
+        if (!dir) dir = facing;
+        // どこまで届くか（壁・柱に当たる所で止める）
+        const from = p.position;
+        let reach = reachMax;
+        if (this.map && this.map.isShotBlocked) {
+            for (let d = 16; d <= reachMax; d += 8) {
+                if (this.map.isShotBlocked(from.add(dir.mult(d)))) { reach = Math.max(0, d - 8); break; }
+            }
+        }
+        const radius = magic.shape === 'tornado' ? (magic.radius || 30) * M : (magic.size || 16) * M;
+        return { kind: 'shot', dir, lock, manual, reach, end: from.add(dir.mult(reach)), radius, tornado: magic.shape === 'tornado' };
+    }
+    
+    // 詠唱中：撃つ向き・届く所（砲弾系）、落とす場所（その場系）を地面に出す
+    drawCastAim(ctx, cam) {
+        const a = this.castAim, p = this.player;
+        if (!a || !p || !p.isChanting || !p.chantMagic) return;
+        const info = window.getElementInfo ? window.getElementInfo(p.chantMagic.element) : { color: '#ffffff', light: '#ffffff' };
+        const time = performance.now() / 1000;
+        const prog = p.getChantProgress();
+        ctx.save();
+        if (a.kind === 'shot') {
+            const s = p.position.sub(cam), e = a.end.sub(cam);
+            const ang = Math.atan2(a.dir.y, a.dir.x);
+            const len = a.reach;
+            const w = a.radius * 1.1;
+            ctx.translate(s.x, s.y + 8);
+            ctx.rotate(ang);
+            // 通り道（うすい帯）。詠唱がたまるほど濃くなる
+            const g = ctx.createLinearGradient(0, 0, len, 0);
+            g.addColorStop(0, info.color + '00');
+            g.addColorStop(0.15, info.color + '77');
+            g.addColorStop(1, info.color + '33');
+            ctx.globalAlpha = 0.65 + 0.35 * prog;
+            ctx.fillStyle = g;
+            ctx.fillRect(24, -w, Math.max(0, len - 24), w * 2);
+            // 帯のふち（点線）。地面と同じような色でも見えるよう、下に濃い線を敷く
+            ctx.globalAlpha = 0.35;
+            ctx.strokeStyle = '#1a1020';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(24, -w); ctx.lineTo(len, -w);
+            ctx.moveTo(24, w); ctx.lineTo(len, w);
+            ctx.stroke();
+            ctx.globalAlpha = 0.9;
+            ctx.strokeStyle = info.light;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([10, 8]);
+            ctx.lineDashOffset = -time * 40;
+            ctx.beginPath();
+            ctx.moveTo(24, -w); ctx.lineTo(len, -w);
+            ctx.moveTo(24, w); ctx.lineTo(len, w);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            // 進む向きに流れる矢じり
+            ctx.fillStyle = info.light;
+            ctx.strokeStyle = 'rgba(26,16,32,0.55)';
+            ctx.lineWidth = 2;
+            for (let i = 0; i < 4; i++) {
+                const x = 40 + ((time * 160 + i * (len / 4)) % Math.max(1, len - 50));
+                ctx.globalAlpha = 0.85 * Math.min(1, (len - x) / 60);
+                ctx.beginPath();
+                ctx.moveTo(x, -w * 0.55); ctx.lineTo(x + w * 0.7, 0); ctx.lineTo(x, w * 0.55); ctx.lineTo(x + w * 0.25, 0);
+                ctx.closePath();
+                ctx.stroke();
+                ctx.fill();
+            }
+            ctx.restore();
+            // 届く所（竜巻は止まる所の大きさ、弾は弾の大きさの輪）
+            ctx.save();
+            const r = a.tornado ? a.radius : a.radius * 1.4;
+            ctx.globalAlpha = 0.4;
+            ctx.strokeStyle = '#1a1020';
+            ctx.lineWidth = 6;
+            ctx.beginPath();
+            ctx.ellipse(e.x, e.y + 8, r, r * 0.5, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.globalAlpha = 0.9;
+            ctx.strokeStyle = info.light;
+            ctx.shadowColor = info.color;
+            ctx.shadowBlur = 10;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.ellipse(e.x, e.y + 8, r, r * 0.5, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.globalAlpha = 0.25;
+            ctx.fillStyle = info.color;
+            ctx.fill();
+        } else {
+            const s = p.position.sub(cam), tp = a.target.sub(cam);
+            // 届く範囲（主人公のまわりのうすい輪）
+            ctx.beginPath();
+            ctx.ellipse(s.x, s.y + 8, a.range, a.range * 0.62, 0, 0, Math.PI * 2);
+            ctx.globalAlpha = 0.08;
+            ctx.fillStyle = info.color;
+            ctx.fill();
+            ctx.globalAlpha = 0.7;
+            ctx.strokeStyle = info.light;
+            ctx.shadowColor = info.color;
+            ctx.shadowBlur = 6;
+            ctx.lineWidth = 3;
+            ctx.setLineDash([10, 10]);
+            ctx.lineDashOffset = -time * 20;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            ctx.setLineDash([]);
+            // 落とす場所：回る魔法陣とターゲットの十字
+            if (window.drawMagicCircle) window.drawMagicCircle(ctx, tp.x, tp.y, a.radius, p.chantMagic.element, time * 2, 0.55 + 0.35 * prog, 0.55);
+            ctx.globalAlpha = 0.95;
+            ctx.strokeStyle = a.lock ? '#fff27a' : info.light;
+            ctx.shadowColor = info.color;
+            ctx.shadowBlur = 12;
+            ctx.lineWidth = 3;
+            const k = a.radius * (1.15 + 0.08 * Math.sin(time * 8));
+            ctx.beginPath();
+            ctx.ellipse(tp.x, tp.y, k, k * 0.55, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.beginPath();
+            const c = a.radius * 0.45;
+            ctx.moveTo(tp.x - k - 10, tp.y); ctx.lineTo(tp.x - c, tp.y);
+            ctx.moveTo(tp.x + c, tp.y); ctx.lineTo(tp.x + k + 10, tp.y);
+            ctx.moveTo(tp.x, tp.y - k * 0.55 - 8); ctx.lineTo(tp.x, tp.y - c * 0.55);
+            ctx.moveTo(tp.x, tp.y + c * 0.55); ctx.lineTo(tp.x, tp.y + k * 0.55 + 8);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+    
+    // 狙っている向きの矢印（スマホで攻撃ボタンをスライドしている間）
+    drawAim(ctx, cam) {
+        const p = this.player;
+        if (!p || p.isDead()) return;
+        const sliding = this.input.touchAim && this.input.touchAim.active && this.input.touchAim.source === 'attack';
+        if (!sliding) return;
+        const dir = this.getAimDirection();
+        if (!dir) return;
+        const s = p.position.sub(cam);
+        const ang = Math.atan2(dir.y, dir.x);
+        const info = p.isChanting && p.chantMagic && window.getElementInfo ? window.getElementInfo(p.chantMagic.element) : null;
+        ctx.save();
+        ctx.translate(s.x, s.y + 6);
+        ctx.rotate(ang);
+        ctx.globalAlpha = 0.75;
+        ctx.fillStyle = info ? info.light : '#ffffff';
+        ctx.strokeStyle = info ? info.color : 'rgba(255, 220, 120, 0.9)';
+        ctx.lineWidth = 2;
+        // 足元から少し離れた所に、細長い矢印
+        ctx.beginPath();
+        ctx.moveTo(34, -4); ctx.lineTo(70, -4); ctx.lineTo(70, -10); ctx.lineTo(86, 0);
+        ctx.lineTo(70, 10); ctx.lineTo(70, 4); ctx.lineTo(34, 4); ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+    }
 }
+
+// 属性の相性のダメージ倍率
+Game.ELEMENT_MUL = { weak: 1.5, resist: 0.5, normal: 1 };
+Game.AFFINITY_TEXT_TIME = 0.8;
+// 魔法のねらい
+Game.TARGET_HOLD_MS = 250;     // スマホ：魔法ボタンをこれ以上押し続けると、その場系のターゲットカーソルが出る
+Game.TARGET_SLIDE_GAIN = 1.6;  // スマホ：指を 1px 動かした時、ターゲットカーソルが動く量（画面の拡大率で割る）
+Game.AUTO_AIM_RANGE = 650;     // 何も指定しない時に、自動でねらう敵の距離

@@ -321,6 +321,12 @@ body.touch[data-state="playing"] #touch-controls {
     transform: scale(0.94);
 }
 
+/* 攻撃・魔法ボタンを押したままスライドして、向きをねらっている間 */
+.touch-btn.aiming {
+    border-color: #fff4c8;
+    box-shadow: 0 0 0 3px rgba(255, 230, 150, 0.55), 0 0 16px rgba(255, 210, 110, 0.6);
+}
+
 /* 攻撃：一番大きく、親指の真下 */
 #btn-attack {
     right: 0;
@@ -1243,6 +1249,21 @@ body.touch .title-start .touch-only { display: inline; }
 .bc-row { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; color: #b8b0d8; }
 .bc-row span { white-space: nowrap; }
 .bc-row b { font-weight: normal; color: #f2eeff; text-align: right; }
+/* 有利属性・不利属性：属性の色の小さな札 */
+.bc-elem { align-items: center; }
+.bc-elem b { display: flex; gap: 3px; flex-wrap: wrap; justify-content: flex-end; }
+.el-chip {
+    font-style: normal;
+    font-size: 12px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #fff;
+    background: var(--c, #888);
+    border: 1px solid rgba(255, 255, 255, 0.45);
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.7);
+}
+.el-chip.none { background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.25); color: #c9c2b0; }
 .bc-stars { color: #ffd76a !important; letter-spacing: 2px; }
 .bc-feat { list-style: none; font-size: 13.5px; line-height: 1.5; flex: 1; }
 .bc-feat li::before { content: '✦ '; color: #c9a24a; }

@@ -15,6 +15,9 @@ const MAGIC_ELEMENTS = {
     '無': { key: 'none',    color: '#ffb347', light: '#ffe2b8', label: '無' }
 };
 
+// 魔術の大きさの倍率（全部の魔術：弾・残り火・竜巻・雷・発動の魔法陣）。見た目と当たり判定の両方が大きくなる
+const MAGIC_SIZE_MUL = 1.5;
+
 // 最初から使える5つの魔術（data/magic_circles.json と同じ内容。JSON を読めない時の予備にも使う）
 // chantTime：詠唱にかかる秒数 / range：弾が飛ぶ最大距離(px)
 const STARTER_MAGIC = [
@@ -115,7 +118,7 @@ class MagicProjectile {
         this.magic = magic;
         this.position = position.clone();
         this.speed = magic.speed || 300;
-        this.size = magic.size || 16;
+        this.size = (magic.size || 16) * MAGIC_SIZE_MUL;
         this.direction = typeof direction === 'string' ? this.dirToVector(direction) : direction.normalize();
         this.velocity = this.direction.mult(this.speed);
         this.lifetime = 3.0;
@@ -281,7 +284,7 @@ class FirePatch {
         const b = magic.burn || {};
         this.magic = magic;
         this.position = position.clone();
-        this.radius = b.radius || 36;
+        this.radius = (b.radius || 36) * MAGIC_SIZE_MUL;
         this.duration = b.duration || 3;
         this.interval = b.interval || 0.5;
         this.damage = b.damage || 3;
@@ -293,7 +296,7 @@ class FirePatch {
         this.flames = [];
         for (let i = 0; i < 9; i++) {
             const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * this.radius * 0.8;
-            this.flames.push({ x: Math.cos(a) * d, y: Math.sin(a) * d * 0.5, phase: Math.random() * Math.PI * 2, size: 6 + Math.random() * 6 });
+            this.flames.push({ x: Math.cos(a) * d, y: Math.sin(a) * d * 0.5, phase: Math.random() * Math.PI * 2, size: (6 + Math.random() * 6) * MAGIC_SIZE_MUL });
         }
     }
     
@@ -361,11 +364,11 @@ class Tornado {
         this.start = position.clone();
         this.travel = magic.travel || 110;          // 進む距離
         this.travelTime = magic.travelTime || 0.45; // 進むのにかかる時間（そのあとはその場にとどまる）
-        this.radius = magic.radius || 30;
+        this.radius = (magic.radius || 30) * MAGIC_SIZE_MUL;
         this.duration = magic.duration || 3.0;
         this.interval = magic.interval || 0.4;
         this.pull = magic.pull || 0;
-        this.pullRadius = magic.pullRadius || this.radius * 4;
+        this.pullRadius = magic.pullRadius ? magic.pullRadius * MAGIC_SIZE_MUL : this.radius * 4;
         this.age = 0;
         this.tickTimer = this.interval; // 出た瞬間にも1回当たる
         this.pendingTick = false;
@@ -393,7 +396,7 @@ class Tornado {
         const info = getElementInfo(this.magic.element);
         const grow = Math.min(1, this.age / 0.2), fade = Math.min(1, (this.duration - this.age) / 0.3);
         const a = Math.max(0, Math.min(grow, fade));
-        const height = 64 * grow;
+        const height = 64 * MAGIC_SIZE_MUL * grow;
         ctx.save();
         // 足元の影と巻き上がる風
         ctx.globalAlpha = 0.3 * a;
@@ -407,10 +410,10 @@ class Tornado {
             const t = i / (rings - 1);                       // 0=下 1=上
             const y = s.y - height * t;
             const rw = this.radius * (0.35 + t * 0.85);
-            const wobble = Math.sin(this.age * 9 + i * 0.9) * 4 * t;
+            const wobble = Math.sin(this.age * 9 + i * 0.9) * 4 * MAGIC_SIZE_MUL * t;
             ctx.globalAlpha = (0.85 - t * 0.35) * a;
             ctx.strokeStyle = i % 2 ? info.color : info.light;
-            ctx.lineWidth = 3 - t;
+            ctx.lineWidth = (3 - t) * MAGIC_SIZE_MUL;
             ctx.beginPath();
             const start = this.age * 12 + i;                  // 回転して見えるよう欠けた円弧
             ctx.ellipse(s.x + wobble, y, rw, rw * 0.32, 0, start, start + Math.PI * 1.5);
@@ -423,7 +426,8 @@ class Tornado {
             const t = ((this.age * 0.8 + i / 6) % 1);
             const rw = this.radius * (0.35 + t * 0.85);
             ctx.globalAlpha = 0.9 * a;
-            ctx.fillRect(s.x + Math.cos(ang) * rw - 1.5, s.y - height * t + Math.sin(ang) * rw * 0.32 - 1.5, 3, 3);
+            const ps = 3 * MAGIC_SIZE_MUL;
+            ctx.fillRect(s.x + Math.cos(ang) * rw - ps / 2, s.y - height * t + Math.sin(ang) * rw * 0.32 - ps / 2, ps, ps);
         }
         ctx.restore();
     }
@@ -434,7 +438,7 @@ class LightningStrike {
     constructor(magic, targetPos) {
         this.magic = magic;
         this.position = targetPos.clone();
-        this.radius = magic.radius || 45;
+        this.radius = (magic.radius || 45) * MAGIC_SIZE_MUL;
         this.delay = 0.12;      // 落ちるまでの一瞬の溜め
         this.duration = 0.35;   // 光っている時間
         this.age = 0;
@@ -443,7 +447,7 @@ class LightningStrike {
         this.active = true;
         // 稲妻のジグザグ（毎回ちがう形）
         this.bolt = [];
-        for (let i = 0; i <= 7; i++) this.bolt.push((Math.random() - 0.5) * 22);
+        for (let i = 0; i <= 7; i++) this.bolt.push((Math.random() - 0.5) * 22 * MAGIC_SIZE_MUL);
     }
     
     update(deltaTime) {
@@ -470,16 +474,16 @@ class LightningStrike {
             ctx.strokeStyle = info.light;
             ctx.shadowColor = info.color;
             ctx.shadowBlur = 18;
-            ctx.lineWidth = 5;
+            ctx.lineWidth = 5 * MAGIC_SIZE_MUL;
             ctx.beginPath();
-            const top = s.y - 260;
+            const top = s.y - 260 * Math.min(MAGIC_SIZE_MUL, 1.3);
             for (let i = 0; i < this.bolt.length; i++) {
                 const y = top + (s.y - top) * (i / (this.bolt.length - 1));
                 const x = s.x + this.bolt[i] * (i === this.bolt.length - 1 ? 0 : 1);
                 if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
             }
             ctx.stroke();
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 2 * MAGIC_SIZE_MUL;
             ctx.strokeStyle = '#ffffff';
             ctx.stroke();
             // 着弾の光
@@ -574,15 +578,16 @@ class MagicSystem {
     
     // magic: 魔法データ / position: 発動位置 / direction: 向き（Vector2 or 'up' など）
     // circlePos: 足元の魔法陣の位置 / enemies: 雷の狙い用
-    castMagic(magic, position, direction, circlePos = null, enemies = [], circleShape = undefined, circleRadius = 46) {
+    // targetPos：その場系（雷）を落とす場所（game.js の computeCastAim で決めた所）。なければ前方の敵を探す
+    castMagic(magic, position, direction, circlePos = null, enemies = [], circleShape = undefined, circleRadius = 46, targetPos = null) {
         // 発動エフェクト（手のひらの前の魔法陣が広がって消える）
-        this.effects.push(new MagicCircleEffect(circlePos || position, circleRadius, 0.4, magic.element, circleShape));
+        this.effects.push(new MagicCircleEffect(circlePos || position, circleRadius * MAGIC_SIZE_MUL, 0.4, magic.element, circleShape));
         
         if (magic.category !== '攻撃') return;
         
         const dirVec = typeof direction === 'string' ? new MagicProjectile(magic, position, direction).direction : direction.normalize();
         if (magic.shape === 'strike') {
-            this.strikes.push(new LightningStrike(magic, this.findStrikeTarget(magic, position, dirVec, enemies)));
+            this.strikes.push(new LightningStrike(magic, targetPos ? targetPos.clone() : this.findStrikeTarget(magic, position, dirVec, enemies)));
         } else if (magic.shape === 'tornado') {
             this.tornados.push(new Tornado(magic, position, dirVec));
         } else {
@@ -702,6 +707,7 @@ class MagicSystem {
 }
 
 window.MAGIC_ELEMENTS = MAGIC_ELEMENTS;
+window.MAGIC_SIZE_MUL = MAGIC_SIZE_MUL;
 window.STARTER_MAGIC = STARTER_MAGIC;
 window.getElementInfo = getElementInfo;
 window.drawMagicCircle = drawMagicCircle;

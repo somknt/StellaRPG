@@ -93,6 +93,24 @@ public class Sheet {
     }
 }
 
+public static class Axis {
+    // alpha-weighted sums { x, y, weight } over rows [y0, y1) of the bitmap (local coords).
+    // Used to find the body axis (head / shoulders) and the center of mass
+    public static double[] Sum(Bitmap b, int y0, int y1) {
+        double sx = 0, sy = 0, sw = 0;
+        y0 = Math.Max(0, y0); y1 = Math.Min(b.Height, y1);
+        if (y1 <= y0) return new double[] { 0, 0, 0 };
+        var bd = b.LockBits(new Rectangle(0, 0, b.Width, b.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        var d = new byte[b.Width * b.Height * 4];
+        Marshal.Copy(bd.Scan0, d, 0, d.Length); b.UnlockBits(bd);
+        for (int y = y0; y < y1; y++) for (int x = 0; x < b.Width; x++) {
+            int a = d[(y * b.Width + x) * 4 + 3]; if (a < 100) continue;
+            sx += x * a; sy += y * a; sw += a;
+        }
+        return new double[] { sx, sy, sw };
+    }
+}
+
 public class Frame {
     Bitmap b; Graphics g; int F;
     // Square frame of size F. Draw parts with Put(), then Save()

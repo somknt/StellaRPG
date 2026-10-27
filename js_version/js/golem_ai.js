@@ -149,6 +149,8 @@ class MagicGolemAI extends BossAI {
             const d = Math.hypot(dx, dy);
             const hit = h.kind === 'ellipse' ? d <= h.r + pr : Math.abs(d - this.ringRadius(h)) <= h.band / 2 + pr;
             if (!hit) continue;
+            // ジャスト回避の無敵中にふれた攻撃は、使ったことにする（無敵が切れた瞬間に当たらないように）
+            if (player.isGuarded && player.isGuarded() && !player.isDodging) { h.used = true; continue; }
             const dealt = player.takeDamage(h.damage);
             if (dealt > 0) { h.used = true; this.events.push({ type: 'hit', power: h.shake || 5 }); }
         }

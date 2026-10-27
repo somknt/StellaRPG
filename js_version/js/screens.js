@@ -653,6 +653,13 @@ class ScreenManager {
         if (!wrap) return;
         wrap.innerHTML = '';
         this.monsterArts = [];
+        // 属性の小さな札（炎・水など。属性の色）。ない時は「なし」
+        const elemChips = (list) => (list && list.length)
+            ? list.map(el => {
+                const info = window.getElementInfo ? window.getElementInfo(el) : { color: '#ccc' };
+                return `<i class="el-chip" style="--c:${info.color}">${el}</i>`;
+            }).join('')
+            : '<i class="el-chip none">なし</i>';
         for (const b of BOSS_DATA) {
             const card = document.createElement('button');
             card.type = 'button';
@@ -666,6 +673,9 @@ class ScreenManager {
                 <div class="bc-name">${b.name}${b.reading ? `<small>${b.reading}</small>` : ''}</div>
                 <div class="bc-row"><span>難易度</span><b class="bc-stars">${stars}</b></div>
                 <div class="bc-row"><span>フィールド</span><b>${b.fieldName}</b></div>
+                ${b.playerLevel ? `<div class="bc-row"><span>主人公</span><b>Lv.${b.playerLevel}</b></div>` : ''}
+                ${b.elements ? `<div class="bc-row bc-elem"><span>有利属性</span><b>${elemChips(b.elements.weak)}</b></div>
+                <div class="bc-row bc-elem"><span>不利属性</span><b>${elemChips(b.elements.resist)}</b></div>` : ''}
                 <ul class="bc-feat">${feats}</ul>
                 <div class="bc-status">${b.status === 'playable' ? 'プレイ可能' : '今後実装予定'}</div>`;
             card.addEventListener('click', (e) => {

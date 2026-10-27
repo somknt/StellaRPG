@@ -290,6 +290,7 @@ class BossAI {
     }
     // 咆哮の間ずっと、近くのプレイヤーを押し返し続ける
     roarPush(dt, range = 280, power = 220) {
+        if (this.player && this.player.isGuarded && this.player.isGuarded()) return; // ジャスト回避の無敵中は押されない
         const v = this.toPlayer();
         if (v.length() < range * this.R && v.length() > 0.01 && this.player.moveBy) this.player.moveBy(v.normalize().mult(power * dt));
     }
@@ -342,6 +343,8 @@ class BossAI {
                 hit = Math.abs(d - r) <= h.band / 2 + pr;
             }
             if (!hit) continue;
+            // ジャスト回避の無敵中にふれた攻撃は、使ったことにする（無敵が切れた瞬間に当たらないように）
+            if (player.isGuarded && player.isGuarded() && !player.isDodging) { h.used = true; continue; }
             const dealt = player.takeDamage(h.damage);
             if (dealt > 0) {
                 h.used = true;
