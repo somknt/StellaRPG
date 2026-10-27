@@ -1245,6 +1245,7 @@ class EnemySpawner {
     resolveBodyCollisions(player, prevPos) {
         for (const e of this.enemies) {
             if (!e.isAlive() || e.dying) continue;
+            if (e.ai && e.ai.airborne) continue; // 宙に浮いている間（狼の飛びかかり）は、上を飛び越える
             for (let k = 0; k < 2; k++) { // 主人公 → 敵 の順に押し出す
                 const b = e.bodyShape();
                 const qx = (player.position.x - b.cx) / b.rx, qy = (player.position.y - b.cy) / b.ry;
@@ -1410,7 +1411,9 @@ class EnemySpawner {
             // （体はすり抜けられないので、だ円の少し外までを「ふれている」とする）
             const b = enemy.bodyShape();
             const touch = Math.hypot((player.position.x - b.cx) / (b.rx + 6), (player.position.y - b.cy) / (b.ry + 6)) <= 1;
-            if (!player.isDodging && touch) {
+            // 宙に浮いている間（狼の飛びかかり）は、下にいても当たらない
+            const airborne = enemy.ai && enemy.ai.airborne;
+            if (!player.isDodging && touch && !airborne) {
                 player.takeDamage(Math.max(1, Math.round(enemy.attack * Enemy.CONTACT.damage)), enemy.position);
             }
             

@@ -59,7 +59,6 @@ const GolemSound = {
 class MagicGolemAI extends BossAI {
     constructor(enemy, def) {
         super(enemy, def);
-        this.warnColor = '#4fd2ff';
         this.introMode = null;   // 'activate'：開始の演出で、その場で起動する
         this.introT = 0;
         this.stepTimer = 0;
@@ -236,7 +235,7 @@ class MagicGolemAI extends BossAI {
         for (let w = 0; w < (a.waves || 1); w++) {
             const windup = w === 0 ? a.windup : a.windup * 0.7;
             const at = this.feet();
-            this.addFx({ type: 'circleWarn', warn: true, x: at.x, y: at.y, r: a.maxRadius, life: windup, color: '#5fd8ff' });
+            this.addFx({ type: 'circleWarn', warn: true, x: at.x, y: at.y, r: a.maxRadius, life: windup });
             if (this.stage) this.stage.pulseCircle(0.6);
             yield* this.sleep(windup, (p) => { this.face(this.dirToPlayer()); this.pose.stomp = p; this.pose.core += 0.3 * p; this.jitter = p > 0.6 ? 1.5 : 0; });
             this.motion = 'shockwave';
@@ -367,7 +366,7 @@ class MagicGolemAI extends BossAI {
         this.addFx({ type: 'barrier', follow: true, life: a.time + 0.45 });
         yield* this.sleep(a.time, (p) => { this.face(this.dirToPlayer()); this.pose.shield = Math.min(1, p * 5); });
         const at = this.feet();
-        this.addFx({ type: 'circleWarn', warn: true, x: at.x, y: at.y, r: a.maxRadius, life: 0.45, color: '#5fd8ff' });
+        this.addFx({ type: 'circleWarn', warn: true, x: at.x, y: at.y, r: a.maxRadius, life: 0.45 });
         yield* this.sleep(0.45, () => { this.pose.shield = 1; this.jitter = 1.5; });
         this.invulnerable = false;
         this.addHitbox({ kind: 'ering', x: at.x, y: at.y, r0: 20, r1: a.maxRadius, band: a.band, damage: this.dmg(a.damage), life: 0.45, shake: 6 });
@@ -447,27 +446,29 @@ class MagicGolemAI extends BossAI {
             const rx = f.r, ry = f.r * 0.62;
             ctx.save();
             if (f.age < f.trigger) {
-                // 予告：魔法陣が点滅しながら、だんだん速く・明るくなる
+                // 予告：魔法陣が点滅しながら、だんだん速く・明るくなる（色は全ボス共通の攻撃範囲の色）
                 const q = f.age / f.trigger;
                 const blink = 0.5 + 0.5 * Math.sin(this.time * (8 + 16 * q));
+                const col = this.warnColor;
                 ctx.beginPath(); ctx.ellipse(p.x, p.y, rx, ry, 0, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(40, 140, 255, ${0.12 + 0.12 * q})`;
+                ctx.globalAlpha = 0.14 + 0.12 * q;
+                ctx.fillStyle = col;
                 ctx.fill();
                 ctx.save();
                 ctx.clip();
-                ctx.globalCompositeOperation = 'lighter';
-                ctx.globalAlpha = 0.35 + 0.45 * q * blink + 0.15;
+                ctx.globalAlpha = 0.3 + 0.4 * q * blink + 0.1;
                 if (img) {
+                    // 魔法陣の模様も同じ色で塗って描く
                     ctx.imageSmoothingEnabled = true;
-                    ctx.drawImage(img, p.x - rx * 1.05, p.y - ry * 1.05, rx * 2.1, ry * 2.1);
+                    ctx.drawImage(Enemy.getWhiteSilhouette(img, col), p.x - rx * 1.05, p.y - ry * 1.05, rx * 2.1, ry * 2.1);
                 }
                 ctx.restore();
                 // 中が満ちていく（あと何秒かがわかる）
                 ctx.globalAlpha = 0.35;
-                ctx.fillStyle = f.big ? '#7fe6ff' : '#5fc8ff';
+                ctx.fillStyle = col;
                 ctx.beginPath(); ctx.ellipse(p.x, p.y, rx * q, ry * q, 0, 0, Math.PI * 2); ctx.fill();
                 ctx.globalAlpha = 0.6 + 0.4 * blink;
-                ctx.strokeStyle = q > 0.75 ? '#ffffff' : '#7fe6ff';
+                ctx.strokeStyle = q > 0.75 ? '#ffffff' : col;
                 ctx.lineWidth = f.big ? 4 : 3;
                 ctx.beginPath(); ctx.ellipse(p.x, p.y, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
             } else {

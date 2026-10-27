@@ -71,7 +71,8 @@ class BossAI {
         this.scaleX = 1;
         this.scaleY = 1;
         this.jitter = 0;
-        this.warnColor = def.theme && def.theme.warn || '#ff3a2a';
+        this.warnColor = BossAI.WARN_COLOR; // 攻撃範囲の予告の色（全ボス共通の薄い赤）
+        this.airborne = false;      // true の間は宙に浮いている（狼の飛びかかり）。体当たり・体の押し出しはしない
     }
     
     // 攻撃データの距離（届く距離・範囲・攻撃を選ぶ距離）と速さに倍率をかけたコピーを作る
@@ -223,6 +224,7 @@ class BossAI {
         this.actionName = '';
         this.superArmor = false;
         this.invulnerable = false;
+        this.airborne = false;
         this.hitboxes = [];
         this.fx = this.fx.filter(f => !f.warn); // 予告は消す（演出は残す）
     }
@@ -407,8 +409,8 @@ class BossAI {
             ctx.save();
             switch (f.type) {
                 case 'circleWarn': {
-                    // 予告の円：外側の線 + 中が時間とともに満ちていく
-                    const col = f.color || this.warnColor;
+                    // 予告の円：外側の線 + 中が時間とともに満ちていく（攻撃範囲の予告は全ボス共通の色）
+                    const col = this.warnColor;
                     ctx.globalAlpha = 0.16 + 0.12 * Math.sin(this.time * 18);
                     ctx.fillStyle = col;
                     ctx.beginPath(); ctx.ellipse(p.x, p.y, f.r, f.r * 0.62, 0, 0, Math.PI * 2); ctx.fill();
@@ -421,7 +423,7 @@ class BossAI {
                 }
                 case 'laneWarn': {
                     // 突進・影の移動の予告：進む方向の帯
-                    const col = f.color || this.warnColor;
+                    const col = this.warnColor;
                     ctx.translate(p.x, p.y + (f.dy || 0));
                     ctx.rotate(f.ang);
                     ctx.globalAlpha = 0.15 + 0.3 * t;
@@ -442,7 +444,7 @@ class BossAI {
                     break;
                 }
                 case 'arcWarn': {
-                    const col = f.color || this.warnColor;
+                    const col = this.warnColor;
                     ctx.globalAlpha = 0.2 + 0.35 * t;
                     ctx.fillStyle = col;
                     ctx.beginPath();
@@ -628,6 +630,8 @@ class BossAI {
 // behindRange ：この距離（× Enemy.SCALE.range）より近くで後ろに回られたら、すぐ振り向いて攻撃
 // roarRange / roarKnock：咆哮・遠吠えでプレイヤーが必ず吹き飛ばされる範囲と距離(px)
 BossAI.TUNING = { interval: 0.35, recover: 0.55, behindRange: 300, roarRange: 330, roarKnock: 260 };
+// 攻撃範囲の予告（円・扇・突進の帯・ゴーレムの危険床）の色。全ボス共通の薄い赤
+BossAI.WARN_COLOR = '#ff7a7a';
 // フェーズごとの強化（全ボス共通。[通常, HP50%以下, HP25%以下]）
 // attack：攻撃力の倍率 / damageTaken：受けるダメージの倍率（0.85 なら 15% 減る＝防御力アップ）
 BossAI.PHASE_BUFF = [
@@ -642,7 +646,6 @@ BossAI.PHASE_BUFF = [
 class ForestBoarAI extends BossAI {
     constructor(enemy, def) {
         super(enemy, def);
-        this.warnColor = '#ff3a2a';
     }
     
     // ゆっくり向きを変えながら追いかける（急には曲がれない＝重さ）
@@ -859,7 +862,6 @@ class ForestBoarAI extends BossAI {
 class BlackWolfAI extends BossAI {
     constructor(enemy, def) {
         super(enemy, def);
-        this.warnColor = '#ff3ad0';
         this.orbitSign = Math.random() < 0.5 ? 1 : -1;
         this.orbitTimer = 2;
         this.dodgeCooldown = 0;
@@ -991,8 +993,11 @@ class BlackWolfAI extends BossAI {
         yield* this.sleep(prepare, (p) => { this.face(target.sub(start)); this.pose = Math.min(2, Math.floor(p * 3)); this.scaleY = 1 - 0.14 * p; this.scaleX = 1 + 0.06 * p; this.jitter = p > 0.5 ? 1 : 0; });
         this.motion = 'leap';
         this.superArmor = true;
+        // 宙に浮いている間は、下にプレイヤーがいても当たらない（体当たり・体の押し出しなし）。当たるのは着地の円だけ
+        this.airborne = true;
         const vel = target.sub(start).mult(1 / time);
         yield* this.sleep(time, (p) => { this.face(vel); this.pose = Math.min(2, Math.floor(p * 3)); this.e.velocity = vel; this.lift = Math.sin(p * Math.PI) * 48; this.scaleY = 1.06; });
+        this.airborne = false;
         this.superArmor = false;
         // 着地
         const at = this.feet();
@@ -1021,7 +1026,7 @@ class BlackWolfAI extends BossAI {
         if (v.length() > a.dist) dest = this.e.position.add(v.normalize().mult(a.dist));
         v = dest.sub(this.e.position);
         const ang = Math.atan2(v.y, v.x);
-        this.addFx({ type: 'laneWarn', warn: true, follow: true, ang, len: v.length(), width: 26, dy: this.e.size * 0.3, life: a.prepare, color: '#b14dff' });
+        this.addFx({ type: 'laneWarn', warn: true, follow: true, ang, len: v.length(), width: 26, dy: this.e.size * 0.3, life: a.prepare });
         this.motion = 'leapPrepare'; // 身を低くしてから走り抜ける
         yield* this.sleep(a.prepare, (p) => { this.face(v); this.pose = p < 0.5 ? 1 : 2; this.scaleY = 1 - 0.1 * p; this.jitter = 1.5; });
         this.motion = 'shadowDash';
@@ -1084,7 +1089,7 @@ class BlackWolfAI extends BossAI {
         this.motion = 'corruptionAttack';
         this.superArmor = true;
         const at = this.feet();
-        this.addFx({ type: 'circleWarn', warn: true, x: at.x, y: at.y, r: a.maxRadius, life: a.windup, color: '#b14dff' });
+        this.addFx({ type: 'circleWarn', warn: true, x: at.x, y: at.y, r: a.maxRadius, life: a.windup });
         // 絵：身を低くして力をため（leapPrepare）、放つ瞬間に吠える（howl）
         this.motion = 'leapPrepare';
         yield* this.sleep(a.windup, (p) => { this.face(this.dirToPlayer()); this.pose = Math.min(2, Math.floor(p * 3)); this.scaleY = 1 - 0.1 * p; this.jitter = p * 2.5; });
