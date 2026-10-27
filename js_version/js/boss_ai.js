@@ -42,7 +42,10 @@ class BossPhaseManager {
 class BossAI {
     constructor(enemy, def) {
         this.e = enemy;
-        this.def = def;
+        // 攻撃の範囲・速さに Enemy.SCALE をかける（元の BOSS_DATA は書きかえない）
+        const S = (typeof Enemy !== 'undefined' && Enemy.SCALE) || {};
+        this.def = { ...def, attacks: BossAI.scaleAttacks(def.attacks || {}),
+            attackInterval: (def.attackInterval || 1) * (S.cooldown || 1) };
         this.phase = new BossPhaseManager(def.phases);
         this.active = false;        // 開始の演出中は false（動かない）
         this.action = null;         // 実行中の攻撃（ジェネレーター）
@@ -68,6 +71,24 @@ class BossAI {
         this.jitter = 0;
         this.warnColor = def.theme && def.theme.warn || '#ff3a2a';
     }
+    
+    // 攻撃データの距離（届く距離・範囲・攻撃を選ぶ距離）と速さに倍率をかけたコピーを作る
+    // 時間（溜め・硬直）はそのまま：見てから避けられるように
+    static scaleAttacks(attacks) {
+        const S = (typeof Enemy !== 'undefined' && Enemy.SCALE) || { range: 1, speed: 1 };
+        const DIST = ['reach', 'radius', 'maxRadius', 'band', 'dist'];
+        const out = {};
+        for (const [name, a] of Object.entries(attacks)) {
+            const b = { ...a };
+            for (const k of DIST) if (typeof b[k] === 'number') b[k] *= S.range;
+            if (typeof b.speed === 'number') b.speed *= S.speed;
+            if (Array.isArray(b.range)) b.range = b.range.map(v => v * S.range);
+            out[name] = b;
+        }
+        return out;
+    }
+    get R() { return (typeof Enemy !== 'undefined' && Enemy.SCALE) ? Enemy.SCALE.range : 1; }  // 距離の倍率
+    get SP() { return (typeof Enemy !== 'undefined' && Enemy.SCALE) ? Enemy.SCALE.speed : 1; } // 速さの倍率
     
     get P() { return this.phase.current; }
     get player() { return this.e.target; }
@@ -111,7 +132,7 @@ class BossAI {
             return;
         }
         
-        // フェーズ移行（HP50%以下・30%以下）
+        // フェーズ移行（HP50%以下・25%以下）
         this.phase.update(e.currentHP / e.maxHP);
         const changed = this.phase.consume();
         if (changed !== null) {
@@ -498,10 +519,10 @@ class ForestBoarAI extends BossAI {
         this.e.faceTowards(this.facing);
         this.lockFacing = true;
         const d = this.dist();
-        if (d < 85) { this.motion = 'idle'; return; }
+        if (d < 85 * this.R) { this.motion = 'idle'; return; }
         let sp = this.speed;
         if (Math.abs(diff) > 1.1) { sp *= 0.3; this.motion = 'turn'; }     // 方向転換中は遅い
-        else if (d > 380) { sp *= 1.5; this.motion = 'run'; }
+        else if (d > 380 * this.R) { sp *= 1.5; this.motion = 'run'; }
         else this.motion = 'walk';
         this.e.velocity = this.facing.mult(sp);
     }
@@ -601,7 +622,7 @@ class ForestBoarAI extends BossAI {
         this.dust(this.e.position.add(dir.mult(this.e.size * 0.5)), 8);
         const stun = this.phase.index === 2 ? 1.4 : 1.9;
         this.e.crashTimer = stun;
-        yield* this.sleep(0.2, (p) => { this.e.velocity = dir.mult(-160 * (1 - p)); }); // 跳ね返る
+        yield* this.sleep(0.2, (p) => { this.e.velocity = dir.mult(-160 * this.SP * (1 - p)); }); // 跳ね返る
         yield* this.sleep(stun, (p) => { this.scaleY = 0.96 + Math.sin(p * 30) * 0.02; });
     }
     
@@ -675,7 +696,7 @@ class BlackWolfAI extends BossAI {
             const started = atk && !this.playerWasAttacking;
             this.playerWasAttacking = atk;
             const canDodge = !this.action; // 攻撃中は避けない（攻撃後の隙を狙える）
-            if (started && canDodge && this.dodgeCooldown <= 0 && this.dist() < 140 && Math.random() < (this.P.dodgeChance || 0)) {
+            if (started && canDodge && this.dodgeCooldown <= 0 && this.dist() < 140 * this.R && Math.random() < (this.P.dodgeChance || 0)) {
                 this.dodgeCooldown = 1.2;
                 this.cancel();
                 this.startAction('dodge', this.act_dodge());
@@ -692,12 +713,12 @@ class BlackWolfAI extends BossAI {
         const d = to.length();
         const n = to.normalize();
         const tangent = new Vector2(-n.y * this.orbitSign, n.x * this.orbitSign);
-        const radial = n.mult(Math.max(-1, Math.min(1, (d - 200) / 80)));
+        const radial = n.mult(Math.max(-1, Math.min(1, (d - 200 * this.R) / (80 * this.R))));
         const v = tangent.mult(0.85).add(radial).normalize();
         this.e.velocity = v.mult(this.speed * 0.8);
         if (this.blocked) this.orbitSign *= -1;
         this.face(n);
-        this.motion = this.speed > 160 ? 'run' : 'walk';
+        this.motion = this.speed > 160 * this.SP ? 'run' : 'walk';
     }
     
     // 近づく（max 秒まで）
@@ -731,7 +752,7 @@ class BlackWolfAI extends BossAI {
     
     // ---- 噛みつき ----
     *act_bite(a) {
-        yield* this.approach(80);
+        yield* this.approach(80 * this.R);
         for (let i = 0; i < a.hits; i++) {
             this.motion = 'bite';
             const dir = this.dirToPlayer();
@@ -739,9 +760,9 @@ class BlackWolfAI extends BossAI {
             const windup = i === 0 ? a.windup : a.windup * 0.75;
             this.addFx({ type: 'flash', warn: true, follow: true, life: windup });
             yield* this.sleep(windup, (p) => { this.face(dir); this.scaleY = 1 - 0.1 * p; this.scaleX = 1 + 0.05 * p; });
-            this.addHitbox({ kind: 'circle', follow: true, ang, fwd: this.e.size * 0.7, r: 40, damage: this.dmg(a.damage), life: 0.14 });
-            this.addFx({ type: 'slash', follow: true, ang, fwd: this.e.size * 0.55, r: 22, spread: 2.4, life: 0.2 });
-            yield* this.sleep(0.14, () => { this.face(dir); this.e.velocity = dir.mult(380); });
+            this.addHitbox({ kind: 'circle', follow: true, ang, fwd: this.e.size * 0.7, r: 40 * this.R, damage: this.dmg(a.damage), life: 0.14 });
+            this.addFx({ type: 'slash', follow: true, ang, fwd: this.e.size * 0.55, r: 22 * this.R, spread: 2.4, life: 0.2 });
+            yield* this.sleep(0.14, () => { this.face(dir); this.e.velocity = dir.mult(380 * this.SP); });
             yield* this.sleep(0.08);
         }
         this.motion = 'idle';
@@ -752,7 +773,7 @@ class BlackWolfAI extends BossAI {
     
     // ---- 爪攻撃（フェーズ3は3連続） ----
     *act_claw(a) {
-        yield* this.approach(90);
+        yield* this.approach(90 * this.R);
         for (let i = 0; i < a.hits; i++) {
             this.motion = 'claw';
             const dir = this.dirToPlayer();
@@ -778,7 +799,8 @@ class BlackWolfAI extends BossAI {
         // 着地点：プレイヤーの少し先（最大 380px）
         let target = this.player.position.add((this.player.velocity || new Vector2(0, 0)).mult(0.25));
         let v = target.sub(start);
-        if (v.length() > 380) target = start.add(v.normalize().mult(380));
+        const maxLeap = 380 * this.R;
+        if (v.length() > maxLeap) target = start.add(v.normalize().mult(maxLeap));
         const land = new Vector2(target.x, target.y + this.e.size * 0.45);
         this.addFx({ type: 'circleWarn', warn: true, x: land.x, y: land.y, r: a.radius, life: prepare + time });
         // 身をかがめる
@@ -810,7 +832,7 @@ class BlackWolfAI extends BossAI {
         const side = Math.random() < 0.5 ? 1 : -1;
         // プレイヤーの横（斜め前）に回り込む
         const perp = new Vector2(-n.y * side, n.x * side);
-        let dest = this.player.position.add(perp.mult(150)).add(n.mult(-40));
+        let dest = this.player.position.add(perp.mult(150 * this.R)).add(n.mult(-40 * this.R));
         let v = dest.sub(this.e.position);
         if (v.length() > a.dist) dest = this.e.position.add(v.normalize().mult(a.dist));
         v = dest.sub(this.e.position);
@@ -861,7 +883,7 @@ class BlackWolfAI extends BossAI {
             const aa = ang + k * a.spread * (count - 1);
             this.pendingProjectiles.push({
                 position: mouth.clone(), velocity: new Vector2(Math.cos(aa), Math.sin(aa)).mult(a.speed),
-                damage: this.dmg(a.damage), radius: 10, life: 3.0, age: 0, kind: 'corrupt'
+                damage: this.dmg(a.damage), radius: 10 * ((typeof Enemy !== 'undefined' && Enemy.SCALE.shot) || 1), life: 3.0, age: 0, kind: 'corrupt'
             });
         }
         this.addFx({ type: 'shock', follow: true, ang, fwd: this.e.size * 0.5, r0: 6, r1: 40, life: 0.25, width: 5, color: '#c77dff' });
@@ -896,7 +918,7 @@ class BlackWolfAI extends BossAI {
         let next = 0;
         yield* this.sleep(0.2, (p, dt) => {
             this.face(n);
-            this.e.velocity = away.mult(560 * (1 - p * 0.5));
+            this.e.velocity = away.mult(560 * this.SP * (1 - p * 0.5));
             this.lift = Math.sin(p * Math.PI) * 14;
             next -= dt;
             if (next <= 0) { next = 0.05; this.afterImage(); }

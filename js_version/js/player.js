@@ -56,10 +56,10 @@ class Player {
         this.weapon = {
             name: 'ナイフ',
             power: 5,          // 攻撃力に加算
-            range: 70,         // 攻撃が届く距離
-            arc: Math.PI * 0.6, // 斬撃の扇の角度（約108度）
+            range: 100,        // 攻撃が届く距離（斬撃エフェクトの三日月の外側まで）
+            arc: Math.PI * 0.8, // 斬撃の扇の角度（約144度。三日月の両端まで）
             cooldown: 0.35,    // 連続攻撃の間隔
-            assistRange: 110,  // この距離内の敵には自動で向き直る
+            assistRange: 140,  // この距離内の敵には自動で向き直る
             knockback: 20      // 1回ごとの小さな押し出し（ダメージがたまると敵は大きくひるむ）
         };
         
@@ -77,6 +77,7 @@ class Player {
         this.attackAnimDuration = 0.24; // 斬撃モーションの長さ（4コマ × 0.06秒）
         this.attackAnimTimer = 0;
         this.aimVector = new Vector2(0, 1); // 攻撃する向き
+        this.slashFx = null;                // 斬撃エフェクト（{ t, angle }。t は経過時間）
         
         // 魔法（最初から 炎・水・風・土・雷 の5つが使える）
         this.learnedMagic = ['magic_201', 'magic_202', 'magic_203', 'magic_204', 'magic_205'];
@@ -330,6 +331,10 @@ class Player {
             this.attackAnimTimer -= deltaTime;
             if (this.attackAnimTimer <= 0) this.isAttacking = false;
         }
+        if (this.slashFx) {
+            this.slashFx.t += deltaTime;
+            if (this.slashFx.t >= Player.SLASH_FX.duration) this.slashFx = null;
+        }
     }
     
     // 攻撃を開始する。近くに敵がいればその方向へ向き直って斬る
@@ -367,6 +372,13 @@ class Player {
         
         // 少しだけ踏み込む
         this.moveBy(this.aimVector.mult(8));
+        
+        // 斬撃エフェクト（向きは斬った瞬間の向きで固定。位置は主人公についていく）
+        // 続けて斬った時（前の斬撃から0.6秒以内）は、払う向きを逆にする
+        const combo = this.lastSlashTime !== undefined && performance.now() - this.lastSlashTime < 600;
+        this.slashFlip = combo ? !this.slashFlip : false;
+        this.lastSlashTime = performance.now();
+        this.slashFx = { t: 0, angle: Math.atan2(this.aimVector.y, this.aimVector.x), flip: this.slashFlip };
         
         if (window.soundManager) window.soundManager.playSFX('attack');
         
@@ -748,8 +760,9 @@ class Player {
         
         ctx.restore();
         
-        // ナイフの斬撃モーション（攻撃画像に斬撃が描いてあるので、画像がない時だけ）
-        if (this.isAttacking && !this.hasActionSprite('attack')) {
+        // ナイフの斬撃：斬撃エフェクトの画像があればそれを出す
+        // （画像がない時は、攻撃画像もなければ線で描いた斬撃）
+        if (!this.drawSlashEffect(ctx, screenPos) && this.isAttacking && !this.hasActionSprite('attack')) {
             this.drawKnifeSlash(ctx, screenPos);
         }
         
@@ -794,6 +807,72 @@ class Player {
         ctx.lineWidth = 1;
         ctx.strokeRect(x - 1.5, y - 1.5, w + 3, h + 3);
         ctx.restore();
+    }
+    
+    // 斬撃エフェクトの画像（4コマ）を斬った向きに回して描く。描けたら true
+    // 画像は三日月のふくらんだ側（左）が斬る向きなので、左が攻撃方向を向くように回す
+    //
+    // 自然に見せるための工夫
+    //   ・振り抜く動き：三日月を斬る向きのまわりで回しながら出す（右→左に払う感じ）
+    //   ・連続で斬ると、払う向きが交互に入れかわる（上下を反転）
+    //   ・時間の進み方：最初に速く、最後はゆっくり（イーズアウト）
+    //   ・コマのつなぎ：となりのコマと重ねて少しずつ入れかえる（パッと切りかわらない）
+    //   ・出だしは小さめから広がり、最後は前へ流れながら薄くなって消える
+    //   ・うっすら光を重ねて、地面の上で「光の筋」に見えるようにする
+    drawSlashEffect(ctx, screenPos) {
+        if (!this.slashFx || !window.assetManager) return false;
+        const fx = Player.SLASH_FX;
+        const raw = Math.min(1, this.slashFx.t / fx.duration);   // 0→1（そのままの時間）
+        const p = 1 - Math.pow(1 - raw, 2.2);                    // 0→1（最初に速く、最後ゆっくり）
+        
+        // 今のコマと次のコマ、その間の割合
+        const pos = p * (fx.frames - 1);
+        const i0 = Math.min(fx.frames - 1, Math.floor(pos));
+        const i1 = Math.min(fx.frames - 1, i0 + 1);
+        // 重ねるのは切りかわる直前だけ（ずっと重ねると、形のちがう三日月が二重に見える）
+        const frac = pos - i0;
+        const mix = Math.max(0, Math.min(1, (frac - 0.65) / 0.35));
+        const img0 = window.assetManager.get(`effect_slash_${i0 + 1}`);
+        const img1 = window.assetManager.get(`effect_slash_${i1 + 1}`);
+        if (!img0) return false;
+        
+        // 振り抜き：-sweep → +sweep まで回す。連続攻撃では向きが逆
+        const flip = this.slashFx.flip ? -1 : 1;
+        const swing = (p - 0.5) * 2 * fx.sweep * flip;
+        // 大きさ：0.8 → 1.0 にすぐ広がる
+        const scale = 0.8 + 0.2 * Math.min(1, p / 0.45);
+        // 最後は前へ少し流れる
+        const drift = fx.drift * Math.max(0, (p - 0.6) / 0.4);
+        // 濃さ：出だしはすぐ濃く、後半はゆっくり消える
+        const alpha = Math.min(1, raw / 0.12) * (raw < 0.5 ? 1 : 1 - Math.pow((raw - 0.5) / 0.5, 1.5));
+        if (alpha <= 0.01) return true;
+        
+        const s = fx.size * scale;
+        const x = -s / 2 - (fx.offset + drift);
+        const y = -s / 2;
+        
+        ctx.save();
+        ctx.translate(screenPos.x, screenPos.y);
+        ctx.rotate(this.slashFx.angle + Math.PI + swing);
+        if (flip < 0) ctx.scale(1, -1);
+        
+        const draw = (a) => {
+            if (img1 && i1 !== i0 && mix > 0) {
+                ctx.globalAlpha = a * (1 - mix);
+                ctx.drawImage(img0, x, y, s, s);
+                ctx.globalAlpha = a * mix;
+                ctx.drawImage(img1, x, y, s, s);
+            } else {
+                ctx.globalAlpha = a;
+                ctx.drawImage(img0, x, y, s, s);
+            }
+        };
+        draw(alpha * 0.92);
+        // うっすら光（加算）。後半ほど弱く
+        ctx.globalCompositeOperation = 'lighter';
+        draw(alpha * 0.25 * (1 - p * 0.6));
+        ctx.restore();
+        return true;
     }
     
     // ナイフの斬撃：攻撃方向に扇形の軌跡を描き、刃が振り抜かれていく
@@ -910,4 +989,10 @@ class Player {
 
 // 魔法パレットのスロット数と、最初にセットされている5つの魔法（炎・水・風・土・雷）
 Player.MAGIC_SLOT_COUNT = 5;
+
+// 斬撃エフェクトの見た目
+// size：画像を描く大きさ / offset：画像の中心を斬る向きへずらす量
+// （三日月の外側は画像の中心から約 0.43×size。offset 40・size 140 で、外側が約 100px 先＝攻撃が届く距離 weapon.range）
+// sweep：振り抜く時に回す角度（片側） / drift：消える時に前へ流れる量 / duration：出てから消えるまでの秒数
+Player.SLASH_FX = { frames: 4, duration: 0.3, size: 140, offset: 40, sweep: 0.42, drift: 10 };
 Player.DEFAULT_MAGIC_SLOTS = ['magic_201', 'magic_202', 'magic_203', 'magic_204', 'magic_205'];

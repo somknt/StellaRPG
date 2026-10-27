@@ -101,6 +101,23 @@ class Enemy {
         // ドロップ
         this.dropExp = enemyData.dropExp ?? enemyData.exp ?? 1;
         this.dropItems = enemyData.dropItems || [];
+        
+        // 全部の敵の大きさ・攻撃範囲・速さの倍率（Enemy.SCALE）。どの出し方（草原・闘技場・ボス戦）でもここを通る
+        this.applyScale(Enemy.SCALE);
+    }
+    
+    applyScale(S) {
+        if (!S) return;
+        this.size = Math.round(this.size * (this.isBoss ? S.bossSize : S.size));
+        this.attackRange *= S.range;
+        this.speed *= S.speed;
+        this.chargeSpeed *= S.speed;
+        this.attackCooldown *= S.cooldown;
+        if (this.isSlime) {
+            this.hopSpeed *= S.speed;
+            this.shootRange *= S.range;
+            this.shootCooldown *= S.cooldown;
+        }
     }
     
     update(deltaTime, player) {
@@ -225,9 +242,10 @@ class Enemy {
         if (this.restTimer <= 0) {
             let dir;
             if (this.provoked) {
-                if (dist < 150) {
+                const R = Enemy.SCALE.range;
+                if (dist < 150 * R) {
                     dir = toPlayer.normalize().mult(-1);              // 近すぎる → 離れる
-                } else if (dist > 280) {
+                } else if (dist > 280 * R) {
                     dir = toPlayer.normalize();                       // 遠すぎる → 近づく
                 } else {
                     const side = Math.random() < 0.5 ? 1 : -1;        // ちょうどいい → 横に回り込む
@@ -956,6 +974,16 @@ class Enemy {
     }
 }
 
+// ---------- 全部の敵の大きさ・攻撃範囲・速さ（ここを変えると全員に効く） ----------
+// size     ：ふつうの敵の体の大きさ（見た目と当たり判定の両方）
+// bossSize ：ボス（巨大森イノシシ・黒蝕狼・闘技場の大猪）の体の大きさ
+// range    ：攻撃が届く距離・攻撃の範囲（かみつき・牙・爪・踏みつけ・飛びかかり・波動など）
+// speed    ：動く速さ（歩く・走る・突進・跳ねる・弾）
+// cooldown ：次の攻撃までの間隔（小さいほど攻撃が多い）。攻撃前の「溜め」は変えない（見てから避けられるように）
+// shot     ：弾の当たる大きさ
+// （ボスの cooldown は「攻撃と攻撃の間の待ち時間」attackInterval にかかる）
+Enemy.SCALE = { size: 1.6, bossSize: 2.0, range: 2.0, speed: 1.5, cooldown: 0.5, shot: 1.4 };
+
 // 狼・猪の仮の見た目の色と形。key は画像を置いた時の名前（assets/enemies/<key>/<向き>_<1〜3>.png）
 Enemy.BEAST_LOOKS = {
     '草原狼':   { key: 'grass_wolf',     body: '#9a9a9a', dark: '#6b6b70', outline: '#3a3a40', snout: '#c9c3b8', eye: '#ffcf4a', head: 0.42, ear: 0.38, tail: true },
@@ -1022,9 +1050,9 @@ class EnemySpawner {
             if (enemy.pendingShot) {
                 this.projectiles.push({
                     position: enemy.position.add(new Vector2(0, -enemy.size * 0.5)),
-                    velocity: enemy.pendingShot.mult(190), // ゆっくりめ：見てから避けられる速さ
+                    velocity: enemy.pendingShot.mult(190 * Enemy.SCALE.speed), // 見てから避けられる速さ
                     damage: enemy.attack,
-                    radius: 9,
+                    radius: 9 * Enemy.SCALE.shot,
                     life: 2.5,
                     age: 0
                 });
@@ -1345,7 +1373,7 @@ class EnemyDeathEffect {
             while (i < C.FRAME_TIMES.length - 1 && ft >= C.FRAME_TIMES[i]) { ft -= C.FRAME_TIMES[i]; i++; }
             const img = window.assetManager.get(`effect_enemy_death_${i + 1}`);
             if (img) {
-                const k = C.DRAW_SCALE * (this.size / 32);  // 大きい敵ほど少し大きく
+                const k = C.DRAW_SCALE * Math.sqrt(this.size / 32);  // 大きい敵ほど少し大きく（大きくなりすぎないよう平方根）
                 const w = C.FRAME_W * k, h = C.FRAME_H * k;
                 let alpha = 1;
                 if (i === 0) alpha = Math.min(1, ft / 0.05);                          // ふわっと出る

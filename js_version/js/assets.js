@@ -40,6 +40,11 @@ class AssetManager {
             list[`effect_enemy_death_${f}`] = `assets/effects/enemy_death_${f}.png`;
         }
         
+        // 主人公のナイフの斬撃（男女共通・4コマ）：青白い三日月。画像の左側（ふくらんだ側）が斬る向き
+        for (let f = 1; f <= 4; f++) {
+            list[`effect_slash_${f}`] = `assets/effects/slash_${f}.png`;
+        }
+        
         // 敵のノックバック（ひるみ）：4方向 × 2コマ（1=当たった瞬間 / 2=飛ばされている途中）
         for (const d of directions) {
             for (let f = 1; f <= 2; f++) {

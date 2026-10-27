@@ -37,7 +37,7 @@ const BOSS_DATA = [
               attacks: { tusk: 4, charge: 3 } },
             { hp: 0.5, label: '強化', speedMul: 1.15, intervalMul: 0.9, recoverMul: 0.85, transition: 'roar',
               banner: '怒りの咆哮！', attacks: { tusk: 3, charge: 1, doubleCharge: 3, stomp: 3 } },
-            { hp: 0.3, label: '最終強化', speedMul: 1.25, intervalMul: 0.8, recoverMul: 0.55, transition: 'roar',
+            { hp: 0.25, label: '最終強化', speedMul: 1.25, intervalMul: 0.8, recoverMul: 0.55, transition: 'roar',
               banner: '暴走状態！', attacks: { tuskCombo: 4, tripleCharge: 3, bigStomp: 3, doubleCharge: 1 } }
         ],
         attacks: {
@@ -80,7 +80,7 @@ const BOSS_DATA = [
               attacks: { bite: 3, claw: 3, leap: 3 } },
             { hp: 0.5, label: '強化', speedMul: 1.2, intervalMul: 0.86, recoverMul: 0.85, dodgeChance: 0.3, aura: 1, transition: 'howl',
               banner: '侵蝕の遠吠え！', attacks: { doubleBite: 3, claw: 2, leap: 2, shadowDash: 3, corruptionShot: 3 } },
-            { hp: 0.3, label: '最終強化', speedMul: 1.35, intervalMul: 0.75, recoverMul: 0.65, dodgeChance: 0.45, aura: 2, transition: 'howl',
+            { hp: 0.25, label: '最終強化', speedMul: 1.35, intervalMul: 0.75, recoverMul: 0.65, dodgeChance: 0.45, aura: 2, transition: 'howl',
               banner: '星喰いの暴走！', attacks: { tripleClaw: 3, doubleBite: 2, shadowLeap: 3, corruptionShot: 2, corruptionWave: 2 } }
         ],
         attacks: {
@@ -119,7 +119,7 @@ const BOSS_DATA = [
         phases: [
             { hp: 1.0, label: '通常', attacks: { punch: 3, slam: 2 }, speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0 },
             { hp: 0.5, label: '強化', attacks: { punchCombo: 3, magicShot: 3, shockwave: 2 }, speedMul: 1.1, intervalMul: 0.9, recoverMul: 0.9, transition: 'activate' },
-            { hp: 0.3, label: '最終強化', attacks: { magicCircle: 3, bigShockwave: 3, punchCombo: 2 }, speedMul: 1.2, intervalMul: 0.8, recoverMul: 0.8, transition: 'activate' }
+            { hp: 0.25, label: '最終強化', attacks: { magicCircle: 3, bigShockwave: 3, punchCombo: 2 }, speedMul: 1.2, intervalMul: 0.8, recoverMul: 0.8, transition: 'activate' }
         ],
         attacks: {},
         motions: {

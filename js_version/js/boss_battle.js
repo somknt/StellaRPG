@@ -1,7 +1,7 @@
 // ボス戦の進行（バトルモード → ソロプレイ → モンスター選択 → 主人公選択 のあと）
 //
 // 1. 闘技場を読み込み、主人公を南、ボスを北の門に置く（game.startBossBattle）
-// 2. 開始演出：門が開いてボスが出てくる → ボス名 → BATTLE START → 3・2・1（この間はだれも動かない）
+// 2. 開始演出：門が開いてボスが出てくる → ボス名 → BATTLE START と同時に戦闘開始
 // 3. 戦闘：ボスの HP バー（なめらかに減る・フェーズ表示）。フェーズ移行の演出はボスAIが1回だけ知らせてくる
 // 4. 勝利（ボスの HP 0）/ 敗北（主人公の HP 0）→ 結果画面（もう一度・モンスター選択・メインメニュー）
 //
@@ -156,18 +156,10 @@ class BossBattle {
             game.camera.follow(game.player);
             if (this.ui.hud) this.ui.hud.classList.add('show');
         }
+        // BATTLE START が出たら、そのまま戦闘開始（3・2・1 のカウントダウンはなし）
         if (this.step < 4 && t >= 4.0) {
             this.step = 4;
             this.showBanner('BATTLE START', '', 'start');
-        }
-        // カウントダウン 3・2・1
-        const c0 = 5.2, per = 0.7;
-        if (t >= c0 && t < c0 + per * 3) {
-            const n = 3 - Math.floor((t - c0) / per);
-            this.showCount(String(n));
-        }
-        if (t >= c0 + per * 3) {
-            this.showCount('GO!', true);
             this.state = 'fight';
             this.ai.startFight();
         }
@@ -176,8 +168,7 @@ class BossBattle {
     onPhaseChange(index) {
         const n = index + 1;
         this.maxPhase = Math.max(this.maxPhase, n);
-        const P = this.def.phases[index];
-        this.showBanner(`PHASE ${n}`, P.banner || P.label, this.def.theme && this.def.theme.banner || 'boss');
+        // 形態が変わった時は文字を出さない（画面の光と揺れ、ボスの咆哮・遠吠えだけ）
         this.flash = 0.5;
         this.game.addShake(8, 0.5);
     }
@@ -214,7 +205,7 @@ class BossBattle {
             u.phase.dataset.phase = String(n);
             u.hud.dataset.phase = String(n);
             for (const pip of u.phase.querySelectorAll('i')) pip.classList.toggle('on', Number(pip.dataset.n) <= n);
-            u.phaseLabel.textContent = `PHASE ${n}　${this.def.phases[n - 1].label}`;
+
         }
     }
     
