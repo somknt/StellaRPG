@@ -239,7 +239,7 @@ class ArenaMap extends Map {
         for (let y = 0; y < this.height; y++) {
             for (let x = 0; x < this.width; x++) {
                 const cx = (x + 0.5) * this.tileSize, cy = (y + 0.5) * this.tileSize;
-                const inSand = cx > g.sand.x && cx < g.sand.x + g.sand.w && cy > g.sand.y && cy < g.sand.y + g.sand.h;
+                const inSand = !!g.sand && cx > g.sand.x && cx < g.sand.x + g.sand.w && cy > g.sand.y && cy < g.sand.y + g.sand.h;
                 this.tiles[y][x] = { type: inSand ? 'sand' : 'stone', walkable: true, color: '#000' };
             }
         }

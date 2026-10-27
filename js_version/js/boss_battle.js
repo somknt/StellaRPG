@@ -1,7 +1,9 @@
 // ボス戦の進行（バトルモード → ソロプレイ → モンスター選択 → 主人公選択 のあと）
 //
-// 1. 闘技場を読み込み、主人公を南、ボスを北の門に置く（game.startBossBattle）
-// 2. 開始演出：門が開いてボスが出てくる → ボス名 → BATTLE START と同時に戦闘開始
+// 1. ボスのフィールドを読み込み、主人公を南、ボスを北に置く（game.startBossBattle）
+//    星の闘技場（巨大森イノシシ・黒蝕狼）/ 古代星紋遺跡（魔道ゴーレム。map.getBossStage がある）
+// 2. 開始演出：門が開いてボスが出てくる（遺跡はその場で起動）→ ボス名 → BATTLE START と同時に戦闘開始
+//    def.countdown のボス（魔道ゴーレム）は BATTLE START の後に 3・2・1・GO!（その間は操作も敵AIも止まる）
 // 3. 戦闘：ボスの HP バー（なめらかに減る・フェーズ表示）。フェーズ移行の演出はボスAIが1回だけ知らせてくる
 // 4. 勝利（ボスの HP 0）/ 敗北（主人公の HP 0）→ 結果画面（もう一度・モンスター選択・メインメニュー）
 //
@@ -60,19 +62,32 @@ class BossBattle {
         this.lastHP = null;
         this.maxPhase = 1;
         
-        // ボスは北の門の中から出てくる
-        const gate = map.getEnemySpawnPoints().north[0].position;
-        this.boss = game.enemySpawner.spawnEnemyAt({ ...def.enemy }, gate);
         const AIClass = BOSS_AI_CLASSES[def.ai];
-        this.ai = new AIClass(this.boss, def);
+        const stage = map.getBossStage ? map.getBossStage() : null;
+        if (stage) {
+            // 専用ステージ（古代星紋遺跡）：ボスは中央北側でその場で起動する。主人公は南側
+            this.boss = game.enemySpawner.spawnEnemyAt({ ...def.enemy }, stage.boss);
+            this.ai = new AIClass(this.boss, def);
+            this.ai.introMode = stage.intro;
+            game.player.position = stage.player.clone();
+        } else {
+            // 星の闘技場：ボスは北の門の中から出てくる
+            const gate = map.getEnemySpawnPoints().north[0].position;
+            this.boss = game.enemySpawner.spawnEnemyAt({ ...def.enemy }, gate);
+            this.ai = new AIClass(this.boss, def);
+            this.ai.introTarget = new Vector2(gate.x, 560);
+            // 主人公は南側（入口の少し内側）
+            game.player.position = new Vector2(map.getPlayerSpawn().x, 900);
+            map.setGateOpen(true);
+        }
         this.boss.ai = this.ai;
         this.boss.target = game.player;
         this.boss.direction = 'down';
-        this.ai.introTarget = new Vector2(gate.x, 560);
-        // 主人公は南側（入口の少し内側）
-        game.player.position = new Vector2(map.getPlayerSpawn().x, 900);
         game.camera.snapToTarget();
-        map.setGateOpen(true);
+        this.countStep = 0;
+        // HP バーの目印を、そのボスのフェーズが変わる所（HP50%・30% など）に置く
+        const ticks = this.ui.hud ? this.ui.hud.querySelectorAll('.bh2-tick') : [];
+        def.phases.slice(1).forEach((ph, i) => { if (ticks[i]) ticks[i].style.left = (ph.hp * 100) + '%'; });
         
         // カメラ：最初はボスの方を映す
         this.camProxy = { position: game.player.position.clone() };
@@ -97,6 +112,7 @@ class BossBattle {
         this.step = 3;
         this.boss.position = this.ai.introTarget ? this.ai.introTarget.clone() : this.boss.position;
         this.ai.introTarget = null;
+        if (this.ai.introMode) this.ai.introT = Math.max(this.ai.introT || 0, 2.2); // 起動の演出も終わらせる
         this.map.setGateOpen(false);
         this.game.camera.follow(this.game.player);
         this.clearBanner();
@@ -156,13 +172,26 @@ class BossBattle {
             game.camera.follow(game.player);
             if (this.ui.hud) this.ui.hud.classList.add('show');
         }
-        // BATTLE START が出たら、そのまま戦闘開始（3・2・1 のカウントダウンはなし）
+        // BATTLE START が出たら戦闘開始。カウントダウンのあるボス（def.countdown）は 3・2・1 の後
         if (this.step < 4 && t >= 4.0) {
             this.step = 4;
             this.showBanner('BATTLE START', '', 'start');
-            this.state = 'fight';
-            this.ai.startFight();
+            if (!this.def.countdown) this.beginFight();
         }
+        if (this.step === 4 && this.def.countdown) {
+            // カウントダウン中は操作もボスAIも止まったまま（isFrozen）
+            const marks = [[4.7, '3'], [5.4, '2'], [6.1, '1'], [6.8, 'GO!']];
+            while (this.countStep < marks.length && t >= marks[this.countStep][0]) {
+                const [, text] = marks[this.countStep++];
+                this.showCount(text, text === 'GO!');
+                if (text === 'GO!') this.beginFight();
+            }
+        }
+    }
+    
+    beginFight() {
+        this.state = 'fight';
+        this.ai.startFight();
     }
     
     onPhaseChange(index) {
@@ -226,9 +255,10 @@ class BossBattle {
             ctx.save();
             ctx.fillStyle = tint;
             ctx.fillRect(0, 0, W, H);
+            const vig = this.def.theme.vignette || 'rgba(40, 0, 60, 0.6)';
             const g = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 0.95);
-            g.addColorStop(0, 'rgba(40, 0, 60, 0)');
-            g.addColorStop(1, 'rgba(40, 0, 60, 0.6)');
+            g.addColorStop(0, vig.replace(/[\d.]+\)$/, '0)')); // 同じ色の透明から
+            g.addColorStop(1, vig);
             ctx.fillStyle = g;
             ctx.fillRect(0, 0, W, H);
             ctx.restore();
@@ -236,7 +266,8 @@ class BossBattle {
         if (this.flash > 0) {
             ctx.save();
             ctx.globalAlpha = this.flash / 0.5 * 0.45;
-            ctx.fillStyle = this.def.theme && this.def.theme.banner === 'corrupt' ? '#b45cff' : '#ff9a6a';
+            const th = this.def.theme || {};
+            ctx.fillStyle = th.flash || (th.banner === 'corrupt' ? '#b45cff' : '#ff9a6a');
             ctx.fillRect(0, 0, W, H);
             ctx.restore();
         }

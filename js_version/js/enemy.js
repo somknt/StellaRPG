@@ -51,6 +51,7 @@ class Enemy {
         if (enemyData.chargePreparationTime) this.chargePreparationTime = enemyData.chargePreparationTime;
         if (enemyData.size) this.size = enemyData.size;
         this.isBoss = !!enemyData.isBoss;
+        this.magicDefense = typeof enemyData.magicDefense === 'number' ? enemyData.magicDefense : null; // 魔法防御（ない敵は防御力のまま）
         this.displayName = enemyData.displayName || enemyData.name;
         this.crashTimer = 0;   // ボスが壁に激突して目を回している時間（見た目用）
         // かみつき（狼など）：溜め → 当たり判定
@@ -550,13 +551,15 @@ class Enemy {
     
     // direction: 攻撃の向き（ひるんだ時に飛ばされる方向）
     // canStagger: false にすると、ひるみ値をためない（残り火・竜巻の継続ダメージ）
-    takeDamage(damage, direction = null, canStagger = true) {
+    // kind：'magic' の時は魔法防御（magicDefense。敵データにある時だけ。魔道ゴーレムなど）で減らす
+    takeDamage(damage, direction = null, canStagger = true, kind = '') {
         // ボスの影の高速移動・回避・咆哮の間はダメージを受けない
         if (this.ai && this.ai.invulnerable && this.isAlive()) {
             return { damage: 0, position: this.position.clone(), staggered: true };
         }
         if (this.ai && this.ai.superArmor) canStagger = false;
-        const actualDamage = Math.max(1, damage - this.defense);
+        const def = kind === 'magic' && this.magicDefense !== null ? this.magicDefense : this.defense;
+        const actualDamage = Math.max(1, damage - def);
         this.currentHP = Math.max(0, this.currentHP - actualDamage);
         this.hitFlashTimer = 0.1;
         if (this.isSlime) this.provoked = true; // 攻撃されたら怒る
@@ -640,21 +643,23 @@ class Enemy {
         if (this.ai) {
             const fy = screenPos.y + this.size * 0.55;
             const jx = this.ai.jitter ? (Math.random() - 0.5) * this.ai.jitter * 2 : 0;
+            // 絵にポーズがある時は、伸び縮みを半分にする（絵の動きと重なりすぎないように）
+            const k = enemyImage ? 0.5 : 1;
             ctx.translate(screenPos.x + jx, fy);
-            ctx.scale(this.ai.scaleX, this.ai.scaleY);
+            ctx.scale(1 + (this.ai.scaleX - 1) * k, 1 + (this.ai.scaleY - 1) * k);
             ctx.translate(-screenPos.x, -fy);
         }
         
         if (enemyImage) {
             // 画像がある場合は画像を描画（飛ばされている時は少し浮かせる）
-            const imageSize = this.size * 1.5; // 画像は少し大きめに
+            const imageSize = this.size * (this._drawMul || 1.5); // 画像は少し大きめに（ボスの絵は look.sprite.draw）
             const ix = Math.floor(screenPos.x - imageSize/2);
             const iy = Math.floor(screenPos.y - imageSize/2 - hop);
             ctx.drawImage(enemyImage, ix, iy, imageSize, imageSize);
-            // 被弾した瞬間は、体の形のまま白く光らせる
-            if (this.hitFlashTimer > 0) {
-                ctx.globalAlpha = 0.75;
-                ctx.drawImage(Enemy.getWhiteSilhouette(enemyImage), ix, iy, imageSize, imageSize);
+            // 被弾した瞬間は、体の形のまま白く光らせる。ジャスト回避のスロー中は薄い水色
+            if (this.hitFlashTimer > 0 || Enemy.slowMotion) {
+                ctx.globalAlpha = Enemy.slowMotion ? 0.6 : 0.75;
+                ctx.drawImage(Enemy.getWhiteSilhouette(enemyImage, Enemy.slowMotion ? Enemy.SLOW_TINT : '#ffffff'), ix, iy, imageSize, imageSize);
                 ctx.globalAlpha = 1;
             }
         } else if (Enemy.BEAST_LOOKS[this.data.name]) {
@@ -699,7 +704,7 @@ class Enemy {
         // 画像がない敵：被弾した瞬間は白い丸で光らせる
         if (this.hitFlashTimer > 0 && !enemyImage) {
             ctx.globalAlpha = 0.7;
-            ctx.fillStyle = '#ffffff';
+            ctx.fillStyle = Enemy.slowMotion ? Enemy.SLOW_TINT : '#ffffff';
             ctx.beginPath();
             ctx.arc(screenPos.x, screenPos.y, this.size * 0.6, 0, Math.PI * 2);
             ctx.fill();
@@ -791,9 +796,13 @@ class Enemy {
         
         // 狼・猪：画像（assets/enemies/<名前>/<向き>_<1〜3>.png）が置かれたらそちらを使う
         const look = Enemy.BEAST_LOOKS[this.data.name];
+        this._drawMul = (look && look.sprite && look.sprite.draw) || 1.5; // 画面に描く大きさ（size の何倍か）
         if (look) {
-            // ボス：今のモーション（突進・咆哮など）の画像があればそれを使う
-            if (this.ai) {
+            // ボス：今のモーション（突進・咆哮など）の画像
+            if (this.ai && look.sprite) {
+                const b = this.getBossSprite(look);
+                if (b) return b;
+            } else if (this.ai) {
                 const m = window.assetManager.get(`${look.key}_${this.ai.motion}_${this.direction}_${this.animationFrame + 1}`);
                 if (m) return m;
             }
@@ -807,17 +816,46 @@ class Enemy {
         return null;
     }
     
+    // ボスの絵：AI のモーション（look.sprite.alias で代わりの絵に置きかえ）と、コマ（ai.pose か時間でくり返し）から選ぶ
+    // 下・上向きの絵がないモーションは、攻撃なら横向き（左右は向いている方）、歩き・待機なら下・上向きの歩きの絵
+    getBossSprite(look) {
+        const A = window.assetManager, sp = look.sprite, ai = this.ai;
+        const motion = ai.motion || 'idle';
+        const [name, fixed] = (sp.alias && sp.alias[motion]) || [motion, null];
+        const speed = (sp.speed && (sp.speed[motion] || sp.speed[name])) || 0.15;
+        const frame = fixed != null ? fixed : ai.pose != null ? ai.pose : Math.floor(ai.motionTime / speed) % 3;
+        const file = (n, d, f) => A.get(n === 'walk' ? `${look.key}_${d}_${f + 1}` : `${look.key}_${n}_${d}_${f + 1}`);
+        const dir = this.direction;
+        const vertical = dir === 'up' || dir === 'down';
+        const still = Enemy.BOSS_STILL_MOTIONS.includes(motion);
+        // 下・上向きの歩きの絵は1枚（止まった絵）なので、動いている間は横向きの歩きの絵を使う
+        let img = (name === 'walk' && vertical && !still) ? null : file(name, dir, frame);
+        if (!img && vertical) {
+            if (still) img = file('walk', dir, 0);
+            else {
+                // 左右どちらを向くか（真上・真下に近い時は前の向きのまま）
+                if (Math.abs(ai.facing.x) > 0.05) this._side = ai.facing.x < 0 ? 'left' : 'right';
+                img = file(name, this._side || 'right', frame);
+            }
+        }
+        return img || file('walk', dir, 0);
+    }
+    
     // 狼・猪の仮の見た目（画像が届くまで）。見下ろしで、向きに合わせて頭の位置を変える
     drawBeastFallback(ctx, s, hop) {
         const look = Enemy.BEAST_LOOKS[this.data.name];
+        // 魔道ゴーレム：石と金属の人型（golem_ai.js の Enemy.drawGolem）
+        if (look.golem && typeof Enemy.drawGolem === 'function') { Enemy.drawGolem(this, ctx, s, hop); return; }
         const r = this.size * 0.5;
         const dir = this.direction;
         const side = dir === 'left' ? -1 : 1;
         const bob = (this.animationFrame === 1 ? -1.5 : 0) * (this.velocity.length() > 1 ? 1 : 0);
         const cx = s.x, cy = s.y - hop + bob;
-        const flash = this.hitFlashTimer > 0;
-        const body = flash ? '#ffffff' : look.body;
-        const dark = flash ? '#e8e8e8' : look.dark;
+        // 被弾した瞬間は白く、ジャスト回避のスロー中は薄い水色にする
+        const slow = Enemy.slowMotion;
+        const flash = this.hitFlashTimer > 0 || slow;
+        const body = !flash ? look.body : slow ? Enemy.SLOW_TINT : '#ffffff';
+        const dark = !flash ? look.dark : slow ? '#9fd8ee' : '#e8e8e8';
         ctx.save();
         ctx.lineWidth = 2;
         ctx.strokeStyle = look.outline;
@@ -944,11 +982,13 @@ class Enemy {
         ctx.restore();
     }
     
-    // 画像を白く塗りつぶしたもの（被弾の点滅用）。画像ごとに1回だけ作って使い回す
-    static getWhiteSilhouette(img) {
+    // 画像を1色で塗りつぶしたもの（被弾の白い点滅・ジャスト回避の水色）。画像と色ごとに1回だけ作って使い回す
+    static getWhiteSilhouette(img, color = '#ffffff') {
         // ※ゲームに Map クラス（マップ）があるので、標準の Map ではなく WeakMap を使う
         if (!Enemy._whiteCache) Enemy._whiteCache = new WeakMap();
-        let c = Enemy._whiteCache.get(img);
+        let byColor = Enemy._whiteCache.get(img);
+        if (!byColor) { byColor = {}; Enemy._whiteCache.set(img, byColor); }
+        let c = byColor[color];
         if (!c) {
             c = document.createElement('canvas');
             c.width = img.naturalWidth || img.width;
@@ -956,9 +996,9 @@ class Enemy {
             const g = c.getContext('2d');
             g.drawImage(img, 0, 0);
             g.globalCompositeOperation = 'source-in';
-            g.fillStyle = '#ffffff';
+            g.fillStyle = color;
             g.fillRect(0, 0, c.width, c.height);
-            Enemy._whiteCache.set(img, c);
+            byColor[color] = c;
         }
         return c;
     }
@@ -983,6 +1023,18 @@ class Enemy {
 // shot     ：弾の当たる大きさ
 // （ボスの cooldown は「攻撃と攻撃の間の待ち時間」attackInterval にかかる）
 Enemy.SCALE = { size: 1.6, bossSize: 2.0, range: 2.0, speed: 1.5, cooldown: 0.5, shot: 1.4 };
+// ボスの絵：止まっているモーション（下・上向きの時は正面・背中の絵を出す）
+Enemy.BOSS_STILL_MOTIONS = ['idle', 'detect', 'stun', 'hit', 'death'];
+// 侵蝕弾の画像（assets/effects/boss/corrupt_shot.png）で、光る玉の中心がある横の位置（左から何割か）
+Enemy.SHOT_ORB_X = 0.4;
+
+// 体当たりのダメージ（全員の敵・ボス）
+// reach：敵の体の大きさのどこまでを「体」とするか / player：主人公の体の半径(px) / damage：敵の攻撃力に掛ける倍率
+Enemy.CONTACT = { reach: 0.42, player: 16, damage: 0.6 };
+
+// ジャスト回避で敵がスローになっている間（game.js が毎フレーム入れる）。敵を薄い水色にして知らせる
+Enemy.slowMotion = false;
+Enemy.SLOW_TINT = '#bfefff';
 
 // 狼・猪の仮の見た目の色と形。key は画像を置いた時の名前（assets/enemies/<key>/<向き>_<1〜3>.png）
 Enemy.BEAST_LOOKS = {
@@ -1174,8 +1226,31 @@ class EnemySpawner {
             const pulse = 1 + Math.sin(p.age * 20) * 0.15;
             const r = p.radius * pulse;
             ctx.save();
+            // 侵蝕弾の画像：進む向きに回して描く（光る玉が当たり判定の位置に来るように）
+            const shot = p.kind === 'corrupt' && window.assetManager && window.assetManager.get('bossfx_corrupt_shot');
+            if (shot) {
+                const w = p.radius * 9;
+                const h = w * shot.height / shot.width;
+                ctx.translate(s.x, s.y);
+                ctx.rotate(Math.atan2(p.velocity.y, p.velocity.x));
+                // 外側のうすい光
+                const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 2.2);
+                glow.addColorStop(0, 'rgba(230, 170, 255, 0.55)');
+                glow.addColorStop(1, 'rgba(90, 10, 140, 0)');
+                ctx.fillStyle = glow;
+                ctx.beginPath(); ctx.arc(0, 0, r * 2.2, 0, Math.PI * 2); ctx.fill();
+                ctx.drawImage(shot, -w * Enemy.SHOT_ORB_X, -h / 2, w, h);
+                ctx.restore();
+                continue;
+            }
             const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, r * 2.2);
-            if (p.kind === 'corrupt') {
+            if (p.kind === 'star') {
+                // 星力弾（魔道ゴーレム）：青白い光の玉
+                g.addColorStop(0, '#ffffff');
+                g.addColorStop(0.3, '#9fe9ff');
+                g.addColorStop(0.65, 'rgba(60, 150, 255, 0.55)');
+                g.addColorStop(1, 'rgba(40, 90, 220, 0)');
+            } else if (p.kind === 'corrupt') {
                 // 侵蝕弾：暗紫色の玉
                 g.addColorStop(0, '#f3d6ff');
                 g.addColorStop(0.3, '#b44dff');
@@ -1258,6 +1333,12 @@ class EnemySpawner {
         for (const enemy of this.enemies) {
             if (!enemy.isAlive()) continue;
             
+            // 体当たり：敵（ボスも）の体にふれてもダメージ。回避中はすり抜ける（ジャスト回避にはしない）
+            // ダメージの後の無敵時間があるので、ふれ続けても毎フレームは減らない
+            if (!player.isDodging && enemy.position.distance(player.position) <= enemy.size * Enemy.CONTACT.reach + Enemy.CONTACT.player) {
+                player.takeDamage(Math.max(1, Math.round(enemy.attack * Enemy.CONTACT.damage)));
+            }
+            
             // ボス：AI が出した当たり判定（牙・突進・踏みつけ・噛みつき・侵蝕波動など）
             if (enemy.ai) {
                 enemy.ai.checkHits(player);
@@ -1301,17 +1382,19 @@ class EnemyDeathEffect {
     constructor(enemy) {
         this.position = enemy.position.clone();
         this.sprite = enemy.getEnemyImage();   // 倒れた瞬間の見た目
-        this.spriteSize = enemy.size * 1.5;     // Enemy.draw と同じ大きさ
+        this.spriteSize = enemy.size * (this.sprite && enemy._drawMul || 1.5); // Enemy.draw と同じ大きさ
         // 画像がない狼・猪・ボス：コードで描いた仮の見た目を1枚の絵にして使う
         if (!this.sprite && Enemy.BEAST_LOOKS[enemy.data.name] && typeof document !== 'undefined') {
             const c = document.createElement('canvas');
             c.width = c.height = Math.ceil(this.spriteSize);
             const g = c.getContext('2d');
             if (g) {
-                const flash = enemy.hitFlashTimer;
+                const flash = enemy.hitFlashTimer, slow = Enemy.slowMotion;
                 enemy.hitFlashTimer = 0;
+                Enemy.slowMotion = false; // 倒れた時の絵は元の色で
                 enemy.drawBeastFallback(g, new Vector2(c.width / 2, c.height / 2), 0);
                 enemy.hitFlashTimer = flash;
+                Enemy.slowMotion = slow;
                 this.sprite = c;
             }
         }

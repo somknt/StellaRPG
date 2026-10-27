@@ -8,9 +8,14 @@
 //              speedMul（移動速度の倍率）/ intervalMul（攻撃と攻撃の間の時間の倍率）/ recoverMul（攻撃後の隙の倍率）
 //              attacks：そのフェーズで使う攻撃と、選ばれやすさ（重み）
 // attacks    : 攻撃ごとの数値（damage は enemy.attack に掛ける倍率、range は使う距離 [最小, 最大]）
-// motions    : 必要なモーションと今の状態（'temp' = コードで動かしている仮アニメーション / 'done' = 画像あり）
+// motions    : 必要なモーションと今の状態（'temp' = コードで動かしている仮アニメーション / 'done' = 画像あり /
+//              'alt' = 別のモーションの絵で代用）
 //              画像は assets/enemies/<look.key>/<モーション>_<向き>_<1〜3>.png に置き、
 //              assets.js の BOSS_MOTION_SPRITES_READY に足すと使われる
+// look.sprite: 画像の出し方（Enemy.getBossSprite が使う）
+//              draw  ：画面での大きさ（enemy.size の何倍の四角に描くか。画像は 320×320、足元は上から254px）
+//              alias ：絵がないモーション → [代わりに使うモーション, 止めるコマ（null ならコマ送り）]。'walk' は歩きの絵
+//              speed ：1コマの時間（秒）。書いていないモーションは 0.15
 
 const BOSS_DATA = [
     {
@@ -30,7 +35,13 @@ const BOSS_DATA = [
             size: 74, speed: 64, detectionRange: 4000, attackRange: 90,
             isBoss: true, poiseRatio: 0.14, knockbackScale: 0.35
         },
-        look: { key: 'giant_forest_boar', body: '#6e4a2e', dark: '#43291a', outline: '#24150b', snout: '#a88063', eye: '#ff6a3a', head: 0.5, ear: 0.24, tusks: true, bigTusks: true, mane: true },
+        look: { key: 'giant_forest_boar', body: '#6e4a2e', dark: '#43291a', outline: '#24150b', snout: '#a88063', eye: '#ff6a3a', head: 0.5, ear: 0.24, tusks: true, bigTusks: true, mane: true,
+            sprite: {
+                draw: 1.875,
+                alias: { idle: ['walk', 0], detect: ['walk', 0], turn: ['walk', null], run: ['charge', null], chargeEnd: ['chargePrepare', 0],
+                         stun: ['walk', 0], hit: ['walk', 0], death: ['walk', 0] },
+                speed: { walk: 0.2, turn: 0.3, run: 0.1, charge: 0.075, chargePrepare: 0.12, roar: 0.16 }
+            } },
         attackInterval: 1.0,
         phases: [
             { hp: 1.0, label: '通常', speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0,
@@ -50,9 +61,10 @@ const BOSS_DATA = [
             bigStomp:     { range: [0, 280],  windup: 0.85, damage: 1.5, radius: 200, waves: 2, recover: 0.8 }
         },
         motions: {
-            idle: 'temp', walk: 'temp', run: 'temp', turn: 'temp', detect: 'temp', tuskAttack: 'temp',
-            chargePrepare: 'temp', charge: 'temp', chargeEnd: 'temp', stomp: 'temp', roar: 'temp',
-            hit: 'temp', stun: 'temp', death: 'temp'
+            // 下・上向きは 咆哮・踏みつけ だけ絵がある（歩きは1枚の絵で、ほかは横向きの絵を使う）
+            idle: 'alt', walk: 'done', run: 'alt', turn: 'alt', detect: 'alt', tuskAttack: 'done',
+            chargePrepare: 'done', charge: 'done', chargeEnd: 'alt', stomp: 'done', roar: 'done',
+            hit: 'temp', stun: 'alt', death: 'temp'
         }
     },
     {
@@ -73,7 +85,13 @@ const BOSS_DATA = [
             size: 56, speed: 150, detectionRange: 4000, attackRange: 70,
             isBoss: true, poiseRatio: 0.12, knockbackScale: 0.5
         },
-        look: { key: 'black_corrupted_wolf', body: '#2b2433', dark: '#16111c', outline: '#07050a', snout: '#3d3346', eye: '#d47bff', head: 0.42, ear: 0.44, tail: true, glowEyes: true, miasma: true, cracks: true },
+        look: { key: 'black_corrupted_wolf', body: '#2b2433', dark: '#16111c', outline: '#07050a', snout: '#3d3346', eye: '#d47bff', head: 0.42, ear: 0.44, tail: true, glowEyes: true, miasma: true, cracks: true,
+            sprite: {
+                draw: 1.875,
+                alias: { idle: ['leapPrepare', 0], detect: ['leapPrepare', 0], walk: ['run', null], dodge: ['leap', 1], shadowDash: ['run', null],
+                         corruptionAttack: ['bite', null], stun: ['leapPrepare', 2], hit: ['leapPrepare', 0], death: ['leapPrepare', 0] },
+                speed: { walk: 0.15, run: 0.09, shadowDash: 0.05, howl: 0.16 }
+            } },
         attackInterval: 0.75,
         phases: [
             { hp: 1.0, label: '通常', speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0, dodgeChance: 0.2, aura: 0,
@@ -95,36 +113,62 @@ const BOSS_DATA = [
             corruptionWave: { range: [0, 400], windup: 1.0, damage: 1.3, maxRadius: 320, time: 0.7, band: 34, recover: 0.7 }
         },
         motions: {
-            idle: 'temp', walk: 'temp', run: 'temp', detect: 'temp', bite: 'temp', claw: 'temp',
-            leapPrepare: 'temp', leap: 'temp', dodge: 'temp', shadowDash: 'temp', corruptionAttack: 'temp',
-            howl: 'temp', hit: 'temp', stun: 'temp', death: 'temp'
+            // 下・上向きは 遠吠え・ひっかき だけ絵がある（歩きは1枚の絵で、ほかは横向きの絵を使う）
+            idle: 'alt', walk: 'alt', run: 'done', detect: 'alt', bite: 'done', claw: 'done',
+            leapPrepare: 'done', leap: 'done', dodge: 'alt', shadowDash: 'alt', corruptionAttack: 'alt',
+            howl: 'done', hit: 'temp', stun: 'alt', death: 'temp'
         }
     },
     {
-        // 魔道ゴーレム：今は設計データだけ（戦闘・専用ステージは今後実装）
+        // 魔道ゴーレム：古代星紋遺跡の防衛装置（バトルモード用の暫定設定。ストーリーの歴史とは別）
+        // AI は golem_ai.js（MagicGolemAI）、ステージは ruins_map.js（RuinsMap）
         id: 'magic_golem',
         name: '魔道ゴーレム',
         difficulty: 3,
         level: '上級者向け',
-        field: 'golem_stage',
-        fieldName: '魔導機械の専用ステージ（今後実装予定）',
-        status: 'coming',
-        features: ['石と金属で構成された魔導機械', '高い防御力', '強力な範囲攻撃', '魔法陣による特殊攻撃', '上級者向けのボス'],
-        ai: 'MagicGolemAI', // 未実装
-        theme: { color: '#7fd6ff', banner: 'boss' },
+        field: 'ruins',
+        fieldName: '古代星紋遺跡',
+        status: 'playable',
+        features: ['古代遺跡を守る魔導機械', '高い防御力', '強力な範囲攻撃', '魔法陣による特殊攻撃', '上級者向けのボス'],
+        ai: 'MagicGolemAI',
+        theme: { color: '#7fd6ff', banner: 'golem', flash: '#7fe6ff', arenaTint: 'rgba(20, 50, 120, 0.1)', vignette: 'rgba(5, 10, 40, 0.55)' },
+        countdown: true,      // BATTLE START の後に 3・2・1（この間は操作も敵AIも止まる）
+        playerLevel: 15,      // 推奨レベル：この戦いは主人公をこのレベルの強さで始める（data/player_stats_table.json）
         enemy: {
             enemyId: 'boss_003', name: '魔道ゴーレム', displayName: '魔道ゴーレム',
-            hp: 1200, attack: 22, defense: 12, exp: 400, size: 96, speed: 40, isBoss: true
+            hp: 2200, attack: 40, defense: 30, magicDefense: 12, exp: 400,
+            size: 80, speed: 40, detectionRange: 4000, attackRange: 110,
+            isBoss: true, poiseRatio: 0.1, knockbackScale: 0.15
         },
+        look: { key: 'magic_golem', golem: true },
+        attackInterval: 1.6,
+        // フェーズ：HP50%以下で2、30%以下で3
         phases: [
-            { hp: 1.0, label: '通常', attacks: { punch: 3, slam: 2 }, speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0 },
-            { hp: 0.5, label: '強化', attacks: { punchCombo: 3, magicShot: 3, shockwave: 2 }, speedMul: 1.1, intervalMul: 0.9, recoverMul: 0.9, transition: 'activate' },
-            { hp: 0.25, label: '最終強化', attacks: { magicCircle: 3, bigShockwave: 3, punchCombo: 2 }, speedMul: 1.2, intervalMul: 0.8, recoverMul: 0.8, transition: 'activate' }
+            { hp: 1.0, label: '通常', speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0,
+              attacks: { punch: 4, slam: 3 } },
+            { hp: 0.5, label: '強化', speedMul: 1.15, intervalMul: 0.9, recoverMul: 0.9, transition: 'activate',
+              attacks: { punch: 1, punchCombo: 3, slam: 2, magicShot: 3, shockwave: 3, hazardFloor: 3, shield: 1 } },
+            { hp: 0.3, label: '最終強化', speedMul: 1.25, intervalMul: 0.8, recoverMul: 0.8, transition: 'activate',
+              attacks: { punchTriple: 3, slam: 1, magicCannon: 3, bigShockwave: 3, hazardBarrage: 3, magicShot: 2, shield: 1 } }
         ],
-        attacks: {},
+        // 距離（range・reach・radius・maxRadius・band）は Enemy.SCALE.range 倍、弾の速さは Enemy.SCALE.speed 倍される
+        attacks: {
+            punch:         { range: [0, 130],  windup: 0.7,  damage: 1.0, reach: 90, recover: 1.1 },
+            punchCombo:    { range: [0, 140],  windup: 0.6,  damage: 0.9, reach: 92, hits: 2, recover: 0.9 },
+            punchTriple:   { range: [0, 150],  windup: 0.55, damage: 0.9, reach: 95, hits: 3, recover: 0.8 },
+            slam:          { range: [0, 200],  windup: 1.0,  damage: 1.3, reach: 60, radius: 75, stuck: 0.7, recover: 1.0 },
+            shockwave:     { range: [0, 240],  windup: 1.0,  damage: 1.2, maxRadius: 170, band: 26, time: 0.85, waves: 1, recover: 0.9 },
+            bigShockwave:  { range: [0, 280],  windup: 0.95, damage: 1.3, maxRadius: 210, band: 28, time: 0.9, waves: 2, recover: 0.8 },
+            magicShot:     { range: [110, 1200], windup: 0.8, damage: 0.9, count: 5, spread: 0.24, speed: 160, recover: 0.8 },
+            hazardFloor:   { range: [0, 1200], windup: 1.0, damage: 1.1, count: 3, radius: 52, waves: 1, recover: 0.8 },
+            hazardBarrage: { range: [0, 1200], windup: 1.0, damage: 1.1, count: 4, radius: 52, waves: 3, between: 0.65, recover: 0.7 },
+            magicCannon:   { range: [0, 1200], windup: 1.2, damage: 1.6, count: 3, radius: 70, between: 0.5, breakdown: 1.8, recover: 0.6 },
+            shield:        { range: [0, 200],  time: 1.3, damage: 0.8, maxRadius: 115, band: 24, recover: 0.7 }
+        },
         motions: {
-            idle: 'none', activate: 'none', walk: 'none', punch: 'none', slam: 'none', magicCharge: 'none',
-            magicShot: 'none', shockwave: 'none', shield: 'none', hit: 'none', breakdown: 'none', death: 'none'
+            idle: 'temp', activate: 'temp', walk: 'temp', turn: 'temp', punch: 'temp', slam: 'temp', stomp: 'temp',
+            magicCharge: 'temp', magicShot: 'temp', shockwave: 'temp', shield: 'temp', phaseChange: 'temp',
+            hit: 'temp', stun: 'temp', breakdown: 'temp', death: 'temp'
         }
     },
     {

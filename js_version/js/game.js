@@ -28,8 +28,8 @@ class Game {
         this.shakeDuration = 0;
         this.shakePower = 0;
         
-        // ジャスト回避（成功すると約1秒間、敵がスローになる）
-        this.justDodgeDuration = 1.0;
+        // ジャスト回避（成功すると0.5秒間、敵がスローになる。その間、敵は薄い水色になる）
+        this.justDodgeDuration = 0.5;
         this.justDodgeSlowRate = 0.2;
         this.justDodgeTimer = 0;
         
@@ -192,8 +192,10 @@ class Game {
         document.body.dataset.hero = gender;
         this.stopBattles();
         this.currentBossId = bossId;
-        // 今はどのボスも「星の闘技場」（def.field === 'arena'）。専用ステージは今後ここで分ける
-        this.setupArena(gender);
+        // ボスのフィールド：'arena'（星の闘技場。巨大森イノシシ・黒蝕狼） / 'ruins'（古代星紋遺跡。魔道ゴーレム）
+        this.setupArena(gender, def.field);
+        // 推奨レベルがあるボス：主人公をそのレベルの強さで始める
+        if (def.playerLevel) this.player.setLevel(def.playerLevel);
         if (!this.bossBattle) this.bossBattle = new BossBattle(this);
         this.activeBattle = this.bossBattle;
         this.bossBattle.start(this.map, def);
@@ -203,6 +205,8 @@ class Game {
     
     // 前のバトルの表示・状態を片付ける
     stopBattles() {
+        this.justDodgeTimer = 0;
+        Enemy.slowMotion = false;
         if (this.battleMode) this.battleMode.stop();
         if (this.bossBattle) this.bossBattle.stop();
         this.activeBattle = null;
@@ -213,12 +217,16 @@ class Game {
     
     // 闘技場・主人公・カメラの準備（フリーバトルとボス戦で共通）
     // 主人公は毎回作り直すので、HP・スタミナ・MP・クールダウン・状態はすべて最初に戻る
-    setupArena(gender) {
+    // field：'arena'（星の闘技場） / 'ruins'（古代星紋遺跡）
+    setupArena(gender, field = 'arena') {
         this.selectedGender = gender;
         this.paused = false;
         document.body.classList.remove('paused');
         
-        this.map = new ArenaMap(createArenaMapData());
+        this.map = field === 'ruins' && typeof RuinsMap === 'function'
+            ? new RuinsMap(createRuinsMapData())
+            : new ArenaMap(createArenaMapData());
+        document.body.dataset.field = field;
         const spawn = this.map.getPlayerSpawn();
         this.player = new Player(spawn.x, spawn.y, gender);
         this.player.map = this.map;          // 壁をすり抜けない
@@ -443,6 +451,8 @@ class Game {
         
         // 闘技場で勝敗が決まった後：操作は止めて、残りの演出（倒れた敵の星など）だけ動かす
         if (arena && battle && battle.isOver) {
+            this.justDodgeTimer = 0;
+            Enemy.slowMotion = false;
             this.magicSystem.update(deltaTime);
             this.enemySpawner.update(deltaTime, this.player, window.gameData.enemies);
             battle.update(deltaTime);
@@ -489,7 +499,7 @@ class Game {
                 : hit.damage;
             
             // 残り火・竜巻の継続ダメージではひるませない
-            hit.enemy.takeDamage(damage, hit.direction, !hit.noStagger);
+            hit.enemy.takeDamage(damage, hit.direction, !hit.noStagger, 'magic');
             if (hit.knockback > 0 && hit.enemy.isAlive()) {
                 hit.enemy.applyKnockback(hit.direction, hit.knockback, true); // 水・土は敵を大きく押し出す
             }
@@ -499,10 +509,11 @@ class Game {
             }
         }
         
-        // ジャスト回避の時間：敵の動きが約1秒スローになる
+        // ジャスト回避の時間：敵の動きが0.5秒スローになる
         if (this.justDodgeTimer > 0) {
             this.justDodgeTimer -= deltaTime;
         }
+        Enemy.slowMotion = this.justDodgeTimer > 0;
         const enemyDeltaTime = this.justDodgeTimer > 0 ? deltaTime * this.justDodgeSlowRate : deltaTime;
         
         // 敵更新
@@ -514,6 +525,7 @@ class Game {
         // 回避中に攻撃を避けていたらジャスト回避発動
         if (this.player.consumeJustDodge() && this.justDodgeTimer <= 0) {
             this.justDodgeTimer = this.justDodgeDuration;
+            Enemy.slowMotion = true;
         }
         
         // カメラ更新

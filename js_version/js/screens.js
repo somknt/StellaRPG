@@ -725,7 +725,8 @@ class ScreenManager {
                 g.fillStyle = 'rgba(0, 0, 0, 0.35)';
                 g.beginPath(); g.ellipse(0, e.size * 0.55, e.size * 0.5, e.size * 0.15, 0, 0, Math.PI * 2); g.fill();
                 const img = e.getEnemyImage();
-                if (img) g.drawImage(img, -e.size * 0.75, -e.size * 0.75, e.size * 1.5, e.size * 1.5);
+                const m = e._drawMul || 1.5; // ボスの絵は大きめの四角（look.sprite.draw）
+                if (img) g.drawImage(img, -e.size * m / 2, -e.size * m / 2, e.size * m, e.size * m);
                 else e.drawBeastFallback(g, new Vector2(0, 0), 0);
                 g.restore();
                 if (a.def.id === 'black_corrupted_wolf') {

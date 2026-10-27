@@ -1440,6 +1440,10 @@ body.touch #boss-hud { left: calc(50% + 140px); width: 500px; }
 body[data-boss="black_corrupted_wolf"] #bh2-fill { background: linear-gradient(180deg, #c58bff, #6a22b0 60%, #3a0c66); }
 body[data-boss="black_corrupted_wolf"] #boss-hud[data-phase="3"] #bh2-fill { background: linear-gradient(180deg, #e07bff, #8a10a8 60%, #4a0660); }
 body[data-boss="black_corrupted_wolf"] #bh2-name { color: #d9b0ff; }
+body[data-boss="magic_golem"] #bh2-fill { background: linear-gradient(180deg, #9fe9ff, #2a8ad8 60%, #12407a); }
+body[data-boss="magic_golem"] #boss-hud[data-phase="3"] #bh2-fill { background: linear-gradient(180deg, #d4f6ff, #3fb0f0 55%, #1a4a9a); }
+body[data-boss="magic_golem"] #bh2-name { color: #c8f4ff; }
+#battle-banner.golem #battle-banner-main { color: #d4f6ff; text-shadow: 0 0 18px rgba(80, 200, 255, 0.9), 0 3px 0 #0a2444, 0 5px 8px #000; }
 .bh2-tick { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(255, 255, 255, 0.55); }
 #bh2-hp {
     position: absolute;

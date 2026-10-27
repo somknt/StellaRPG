@@ -52,6 +52,8 @@ class BossAI {
         this.actionName = '';
         this.lastAttack = '';
         this.wait = 0.8;            // 次の攻撃までの時間
+        this.motionTime = 0;        // 今のモーションになってからの時間（画像のコマ送りに使う）
+        this.pose = null;           // 画像のコマ（0〜2）を攻撃側で決める時に入れる。null なら時間でくり返す
         this.motion = 'idle';
         this.superArmor = false;    // true の間はひるまない（突進・踏みつけ・咆哮など）
         this.invulnerable = false;  // true の間はダメージを受けない（影の高速移動・回避）
@@ -87,6 +89,17 @@ class BossAI {
         }
         return out;
     }
+    // モーションが変わったら、コマ送りの時間を0に戻す
+    get motion() { return this._motion; }
+    set motion(v) { if (v !== this._motion) { this._motion = v; this.motionTime = 0; } }
+    // ボスの絵（画像）が読み込まれているか。仮の見た目用の動き（浮く・のびる）を控えめにする
+    get hasArt() {
+        const key = this.def.look && this.def.look.key;
+        return !!(key && window.assetManager && window.assetManager.get(`${key}_right_1`));
+    }
+    // エフェクト画像（assets/effects/boss/<名前>.png）
+    static fxImage(name) { return window.assetManager ? window.assetManager.get(`bossfx_${name}`) : null; }
+    
     get R() { return (typeof Enemy !== 'undefined' && Enemy.SCALE) ? Enemy.SCALE.range : 1; }  // 距離の倍率
     get SP() { return (typeof Enemy !== 'undefined' && Enemy.SCALE) ? Enemy.SCALE.speed : 1; } // 速さの倍率
     
@@ -110,8 +123,9 @@ class BossAI {
     // ---------- 毎フレーム ----------
     update(dt) {
         this.time += dt;
+        this.motionTime += dt;
         this.updateFx(dt);
-        this.lift = 0; this.scaleX = 1; this.scaleY = 1; this.jitter = 0;
+        this.lift = 0; this.scaleX = 1; this.scaleY = 1; this.jitter = 0; this.pose = null;
         this.lockFacing = false;
         const e = this.e;
         e.velocity = new Vector2(0, 0);
@@ -383,12 +397,23 @@ class BossAI {
                 case 'shock': {
                     // 衝撃波の輪
                     const r = f.r0 + (f.r1 - f.r0) * (1 - (1 - t) * (1 - t));
-                    ctx.globalAlpha = (1 - t) * 0.9;
+                    // ring：輪の画像（'boar' = 土と岩 / 'corrupt' = 紫の侵蝕）を地面に寝かせて広げる
+                    const ring = f.ring && [1, 2, 3].map(i => BossAI.fxImage(`${f.ring}_ring_${i}`));
+                    if (ring && ring[0]) {
+                        const img = ring[Math.min(2, Math.floor(t * 3))] || ring[0];
+                        const w = r * 2.2; // 画像の輪（明るい所）が当たり判定の輪に重なる大きさ
+                        ctx.save();
+                        ctx.globalAlpha = (f.ringAlpha || 1) * (t < 0.45 ? 1 : 1 - (t - 0.45) / 0.55);
+                        ctx.drawImage(img, p.x - w / 2, p.y - w * 0.31, w, w * 0.62);
+                        ctx.restore();
+                    }
+                    ctx.globalAlpha = (1 - t) * (ring && ring[0] ? 0.55 : 0.9);
                     ctx.strokeStyle = f.color || '#fff1c8';
-                    ctx.lineWidth = (f.width || 10) * (1 - t * 0.6);
+                    ctx.lineWidth = (f.width || 10) * (1 - t * 0.6) * (ring && ring[0] ? 0.6 : 1);
                     ctx.beginPath(); ctx.ellipse(p.x, p.y, r, r * 0.62, 0, 0, Math.PI * 2); ctx.stroke();
                     break;
                 }
+                case 'img': if (f.ground) this.drawFxImage(ctx, f, p, t); break;
                 case 'crack': {
                     ctx.globalAlpha = t < 0.7 ? 0.6 : 0.6 * (1 - (t - 0.7) / 0.3);
                     ctx.strokeStyle = f.color || 'rgba(70, 45, 25, 1)';
@@ -406,6 +431,15 @@ class BossAI {
                 case 'after': {
                     // 残像（影の高速移動）
                     ctx.globalAlpha = 0.45 * (1 - t);
+                    // 画像があれば、その時の絵を紫の影にして残す
+                    if (f.img) {
+                        const size = this.e.size * (f.mul || 1.5);
+                        ctx.globalAlpha = 0.55 * (1 - t);
+                        ctx.drawImage(Enemy.getWhiteSilhouette(f.img, '#4a1f73'), p.x - size / 2, p.y - size / 2, size, size);
+                        ctx.globalAlpha = 0.3 * (1 - t);
+                        ctx.drawImage(f.img, p.x - size / 2, p.y - size / 2, size, size);
+                        break;
+                    }
                     const saveP = this.e.position, saveD = this.e.direction, saveF = this.e.hitFlashTimer;
                     this.e.position = new Vector2(f.x, f.y);
                     this.e.direction = f.dir;
@@ -485,15 +519,47 @@ class BossAI {
                     break;
                 }
                 case 'flash': {
-                    // 攻撃直前の体の光（予告）
+                    // 攻撃直前の体の光（予告）。画像があれば体の形のまま光らせる
+                    const img = this.hasArt && this.e.getEnemyImage();
+                    if (img) {
+                        const size = this.e.size * (this.e._drawMul || 1.5);
+                        const s = this.e.position.sub(cam);
+                        ctx.globalAlpha = 0.2 + 0.4 * t;
+                        ctx.drawImage(Enemy.getWhiteSilhouette(img, f.color || this.warnColor), s.x - size / 2, s.y - size / 2 - this.lift, size, size);
+                        break;
+                    }
                     ctx.globalAlpha = 0.25 + 0.35 * t;
                     ctx.fillStyle = f.color || this.warnColor;
                     ctx.beginPath(); ctx.ellipse(p.x, p.y, this.e.size * 0.62, this.e.size * 0.48, 0, 0, Math.PI * 2); ctx.fill();
                     break;
                 }
+                case 'img': if (!f.ground) this.drawFxImage(ctx, f, p, t); break;
             }
             ctx.restore();
         }
+    }
+    
+    // エフェクト画像を出す。keys：画像の名前（複数ならコマ送り） / w：横幅 / s0→s1：大きさの変化
+    // rot：回転 / flip：左右反転 / flat：縦につぶす（地面に寝かせる） / hold：この割合まで濃いまま、その後消える
+    fxImg(keys, opt) {
+        const list = Array.isArray(keys) ? keys : [keys];
+        if (!BossAI.fxImage(list[0])) return null;
+        // ground：true（ふつう）= 体より下に描く / false = 体より手前（牙・爪・口の光など）
+        return this.addFx({ type: 'img', keys: list, w: 100, s0: 1, s1: 1, hold: 0.5, ground: true, ...opt });
+    }
+    
+    drawFxImage(ctx, f, p, t) {
+        const imgs = f.keys.map(k => BossAI.fxImage(k)).filter(Boolean);
+        if (!imgs.length) return;
+        const img = imgs[Math.min(imgs.length - 1, Math.floor(t * imgs.length))];
+        const s = f.s0 + (f.s1 - f.s0) * (1 - (1 - t) * (1 - t));
+        const w = f.w * s, h = w * img.height / img.width * (f.flat || 1);
+        ctx.globalAlpha = (f.alpha || 1) * (t < f.hold ? 1 : 1 - (t - f.hold) / (1 - f.hold));
+        if (f.add) ctx.globalCompositeOperation = 'lighter';
+        ctx.translate(p.x + (f.vx || 0) * f.age, p.y + (f.dy || 0) + (f.vy || 0) * f.age);
+        if (f.rot) ctx.rotate(f.rot);
+        if (f.flip) ctx.scale(-1, 1);
+        ctx.drawImage(img, -w / 2, -h / 2, w, h);
     }
 }
 
@@ -536,12 +602,15 @@ class ForestBoarAI extends BossAI {
         const r = a.reach + this.e.size * 0.3;
         this.addFx({ type: 'arcWarn', warn: true, follow: true, ang, r, spread: 1.7, life: windup });
         // 頭を下げて力をためる
-        yield* this.sleep(windup, (p) => { this.face(dir); this.scaleX = 1 + 0.05 * p; this.scaleY = 1 - 0.07 * p; this.jitter = p > 0.6 ? 1.5 : 0; });
+        yield* this.sleep(windup, (p) => { this.face(dir); this.pose = 0; this.scaleX = 1 + 0.05 * p; this.scaleY = 1 - 0.07 * p; this.jitter = p > 0.6 ? 1.5 : 0; });
         // 突き上げる
         this.e.moveBy(dir.mult(24));
         this.addHitbox({ kind: 'arc', follow: true, ang, r, spread: 1.7, damage: this.dmg(a.damage), life: 0.12 });
         this.addFx({ type: 'slash', follow: true, ang, r: r * 0.85, spread: 1.5, life: 0.25, reverse: k % 2 === 1 });
-        yield* this.sleep(0.14, () => { this.face(dir); this.scaleY = 1.08; });
+        // 前足でふんばった所に土煙
+        const f = this.feet().add(dir.mult(this.e.size * 0.35));
+        this.fxImg('dust_cloud', { x: f.x, y: f.y - 6, w: this.e.size * 0.9, s0: 0.5, s1: 1.1, life: 0.45, hold: 0.3, alpha: 0.8 });
+        yield* this.sleep(0.2, (p) => { this.face(dir); this.pose = p < 0.45 ? 1 : 2; this.scaleY = 1.04; });
     }
     
     *act_tusk(a) {
@@ -582,6 +651,11 @@ class ForestBoarAI extends BossAI {
             this.jitter = 1 + p * 2.5;
             this.scaleX = 1 - 0.05 * p; this.scaleY = 1 + 0.05 * p;
             if (Math.random() < dt * 10) this.dust(this.feet().sub(dir.mult(this.e.size * 0.4)));
+            // 前足で地面をかいた土煙（後ろへ飛ぶ）
+            if (Math.random() < dt * 4) {
+                const f = this.feet().sub(dir.mult(this.e.size * 0.3));
+                this.fxImg('dust_cloud', { x: f.x, y: f.y - 4, vx: -dir.x * 50, vy: -12, w: this.e.size * 0.55, s0: 0.5, s1: 1.1, life: 0.5, hold: 0.25, alpha: 0.75 });
+            }
         });
         this.motion = 'charge';
         this.superArmor = true;
@@ -595,6 +669,11 @@ class ForestBoarAI extends BossAI {
             this.e.velocity = dir.mult(a.speed);
             this.scaleX = 1.04; this.scaleY = 0.97;
             if (Math.random() < dt * 25) this.dust(this.feet(), 1);
+            // 走った後ろに土煙が残る
+            if (Math.random() < dt * 9) {
+                const f = this.feet().sub(dir.mult(this.e.size * 0.45));
+                this.fxImg('dust_cloud', { ground: true, x: f.x, y: f.y - 6, w: this.e.size * 0.8, s0: 0.6, s1: 1.3, life: 0.6, hold: 0.2, alpha: 0.7 });
+            }
             if (this.blocked) {
                 body.life = 0;
                 yield* this.wallCrash(dir);
@@ -609,6 +688,10 @@ class ForestBoarAI extends BossAI {
             this.face(dir);
             this.e.velocity = dir.mult(a.speed * 0.45 * (1 - p));
             if (Math.random() < dt * 20) this.dust(this.feet(), 1);
+            if (Math.random() < dt * 8) {
+                const f = this.feet().add(dir.mult(this.e.size * 0.3));
+                this.fxImg('dust_cloud', { x: f.x, y: f.y - 4, w: this.e.size * 0.8, s0: 0.6, s1: 1.2, life: 0.5, hold: 0.25, alpha: 0.8 });
+            }
         });
     }
     
@@ -620,6 +703,10 @@ class ForestBoarAI extends BossAI {
         this.events.push({ type: 'shake', power: 9, time: 0.35 });
         this.addFx({ type: 'shock', follow: true, fwd: this.e.size * 0.5, ang: Math.atan2(dir.y, dir.x), r0: 10, r1: 80, life: 0.35, width: 8 });
         this.dust(this.e.position.add(dir.mult(this.e.size * 0.5)), 8);
+        // 壁にぶつかった所：岩がくだけて土煙
+        const hit = this.e.position.add(dir.mult(this.e.size * 0.55));
+        this.fxImg('rock_burst', { ground: false, x: hit.x, y: hit.y, w: this.e.size * 1.0, s0: 0.5, s1: 1.15, life: 0.55, hold: 0.45 });
+        this.fxImg('dust_cloud', { x: hit.x, y: hit.y + this.e.size * 0.3, w: this.e.size * 1.4, s0: 0.6, s1: 1.3, life: 0.8, hold: 0.3, alpha: 0.85 });
         const stun = this.phase.index === 2 ? 1.4 : 1.9;
         this.e.crashTimer = stun;
         yield* this.sleep(0.2, (p) => { this.e.velocity = dir.mult(-160 * this.SP * (1 - p)); }); // 跳ね返る
@@ -635,14 +722,26 @@ class ForestBoarAI extends BossAI {
             const at = this.feet();
             this.addFx({ type: 'circleWarn', warn: true, x: at.x, y: at.y, r: a.radius, life: windup });
             // 前脚を上げる（体が浮いて縦にのびる）
-            yield* this.sleep(windup, (p) => { this.face(this.dirToPlayer()); this.lift = Math.sin(p * Math.PI / 2) * 20; this.scaleY = 1 + 0.08 * p; });
+            // 画像があるときは「後ろ足で立ち上がる絵」なので体は浮かせない
+            const art = this.hasArt;
+            yield* this.sleep(windup, (p) => {
+                this.face(this.dirToPlayer());
+                this.pose = p < 0.8 ? 0 : 1;
+                this.lift = art ? 0 : Math.sin(p * Math.PI / 2) * 20;
+                this.scaleY = 1 + (art ? 0.03 : 0.08) * p;
+            });
             // 着地
             this.addHitbox({ kind: 'circle', x: at.x, y: at.y, r: a.radius * 0.95, damage: this.dmg(a.damage), life: 0.1, shake: 8 });
-            this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 20, r1: a.radius * 1.1, life: 0.45, width: 12 });
+            this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 20, r1: a.radius * 1.1, life: 0.5, width: 12, ring: 'boar', ringAlpha: 0.8 });
             this.addFx({ type: 'crack', x: at.x, y: at.y, r: a.radius * 0.7, life: 1.4, seed: Math.random() * 6 });
+            // 前足の下で地面がくだけ、土煙が広がる
+            const front = at.add(this.facing.mult(this.e.size * 0.3));
+            // 地面の物なのでボスの体より下に描く（顔を隠さないように）
+            this.fxImg('rock_burst', { ground: true, x: front.x, y: front.y - this.e.size * 0.1, w: this.e.size * 0.95, s0: 0.5, s1: 1.05, life: 0.55, hold: 0.45 });
+            this.fxImg('dust_cloud', { ground: true, x: at.x, y: at.y - 4, w: a.radius * 1.3, s0: 0.5, s1: 1.2, life: 0.8, hold: 0.3, alpha: 0.75 });
             this.dust(at, 10);
             this.events.push({ type: 'shake', power: 6 + w * 2, time: 0.3 });
-            yield* this.sleep(0.18, () => { this.scaleY = 0.92; this.scaleX = 1.06; });
+            yield* this.sleep(0.18, () => { this.pose = 2; this.scaleY = 0.95; this.scaleX = 1.04; });
         }
         this.superArmor = false;
         yield* this.recover(a.recover);
@@ -664,7 +763,9 @@ class ForestBoarAI extends BossAI {
             next -= dt;
             if (next <= 0) {
                 next = 0.3;
-                this.addFx({ type: 'shock', follow: true, feet: true, r0: 30, r1: 230, life: 0.6, width: 6, color: '#ffd9a0' });
+                this.addFx({ type: 'shock', follow: true, feet: true, r0: 30, r1: 230, life: 0.6, width: 6, color: '#ffd9a0', ring: 'boar', ringAlpha: 0.45 });
+                const f = this.feet();
+                this.fxImg('dust_cloud', { ground: true, x: f.x + (Math.random() - 0.5) * this.e.size, y: f.y, w: this.e.size * 1.1, s0: 0.6, s1: 1.4, life: 0.7, hold: 0.2, alpha: 0.6 });
                 this.addFx({ type: 'roar', follow: true, life: 0.4, seed: Math.random() });
             }
             // 咆哮の風圧で、近くのプレイヤーを少し押し返す（ダメージなし）
@@ -747,7 +848,8 @@ class BlackWolfAI extends BossAI {
     }
     
     afterImage() {
-        this.addFx({ type: 'after', x: this.e.position.x, y: this.e.position.y, dir: this.e.direction, life: 0.32 });
+        const img = this.hasArt ? this.e.getEnemyImage() : null;
+        this.addFx({ type: 'after', x: this.e.position.x, y: this.e.position.y - this.lift, dir: this.e.direction, life: 0.32, img, mul: this.e._drawMul });
     }
     
     // ---- 噛みつき ----
@@ -759,11 +861,14 @@ class BlackWolfAI extends BossAI {
             const ang = Math.atan2(dir.y, dir.x);
             const windup = i === 0 ? a.windup : a.windup * 0.75;
             this.addFx({ type: 'flash', warn: true, follow: true, life: windup });
-            yield* this.sleep(windup, (p) => { this.face(dir); this.scaleY = 1 - 0.1 * p; this.scaleX = 1 + 0.05 * p; });
+            yield* this.sleep(windup, (p) => { this.face(dir); this.pose = 0; this.scaleY = 1 - 0.1 * p; this.scaleX = 1 + 0.05 * p; });
             this.addHitbox({ kind: 'circle', follow: true, ang, fwd: this.e.size * 0.7, r: 40 * this.R, damage: this.dmg(a.damage), life: 0.14 });
-            this.addFx({ type: 'slash', follow: true, ang, fwd: this.e.size * 0.55, r: 22 * this.R, spread: 2.4, life: 0.2 });
-            yield* this.sleep(0.14, () => { this.face(dir); this.e.velocity = dir.mult(380 * this.SP); });
-            yield* this.sleep(0.08);
+            // かみついた所に紫の牙（画像がなければ白い線）
+            if (!this.fxImg('bite_fangs', { ground: false, follow: true, ang, fwd: this.e.size * 0.85, dy: -this.e.size * 0.15, w: 50 * this.R, s0: 1.35, s1: 0.9, life: 0.26, hold: 0.45 })) {
+                this.addFx({ type: 'slash', follow: true, ang, fwd: this.e.size * 0.55, r: 22 * this.R, spread: 2.4, life: 0.2 });
+            }
+            yield* this.sleep(0.14, () => { this.face(dir); this.pose = 1; this.e.velocity = dir.mult(380 * this.SP); });
+            yield* this.sleep(0.08, () => { this.pose = 2; });
         }
         this.motion = 'idle';
         yield* this.sleep(a.recover * this.P.recoverMul * 0.6);
@@ -780,11 +885,15 @@ class BlackWolfAI extends BossAI {
             const ang = Math.atan2(dir.y, dir.x) + (i % 2 ? 0.25 : -0.25);
             const windup = i === 0 ? a.windup : a.windup * 0.6;
             this.addFx({ type: 'arcWarn', warn: true, follow: true, ang, r: a.reach, spread: 1.9, life: windup });
-            yield* this.sleep(windup, (p) => { this.face(dir); this.scaleX = 1 - 0.06 * p; this.jitter = p > 0.5 ? 1 : 0; });
+            yield* this.sleep(windup, (p) => { this.face(dir); this.pose = 0; this.scaleX = 1 - 0.06 * p; this.jitter = p > 0.5 ? 1 : 0; });
             this.e.moveBy(dir.mult(18));
             this.addHitbox({ kind: 'arc', follow: true, ang, r: a.reach, spread: 1.9, damage: this.dmg(a.damage), life: 0.12 });
             this.addFx({ type: 'slash', follow: true, ang, r: a.reach * 0.8, spread: 1.8, life: 0.24, color: '#e9c6ff', reverse: i % 2 === 1 });
-            yield* this.sleep(0.12, () => this.face(dir));
+            // 爪の跡（3本の紫の光）。連続攻撃は交互に向きを変える
+            this.fxImg('claw_slash', { ground: false, follow: true, ang, fwd: a.reach * 0.55, dy: -this.e.size * 0.2, w: a.reach * 0.95, s0: 0.8, s1: 1.1,
+                // 画像の爪あとは右上がり（約60度）。攻撃の向きと直角になるように回す
+                rot: ang - 0.52 + (i % 2 ? 0.35 : -0.35), life: 0.3, hold: 0.4, add: true });
+            yield* this.sleep(0.12, (p) => { this.face(dir); this.pose = p < 0.5 ? 1 : 2; });
         }
         this.motion = 'idle';
         yield* this.sleep(a.recover * this.P.recoverMul * 0.6);
@@ -804,16 +913,16 @@ class BlackWolfAI extends BossAI {
         const land = new Vector2(target.x, target.y + this.e.size * 0.45);
         this.addFx({ type: 'circleWarn', warn: true, x: land.x, y: land.y, r: a.radius, life: prepare + time });
         // 身をかがめる
-        yield* this.sleep(prepare, (p) => { this.face(target.sub(start)); this.scaleY = 1 - 0.14 * p; this.scaleX = 1 + 0.06 * p; this.jitter = p > 0.5 ? 1 : 0; });
+        yield* this.sleep(prepare, (p) => { this.face(target.sub(start)); this.pose = Math.min(2, Math.floor(p * 3)); this.scaleY = 1 - 0.14 * p; this.scaleX = 1 + 0.06 * p; this.jitter = p > 0.5 ? 1 : 0; });
         this.motion = 'leap';
         this.superArmor = true;
         const vel = target.sub(start).mult(1 / time);
-        yield* this.sleep(time, (p) => { this.face(vel); this.e.velocity = vel; this.lift = Math.sin(p * Math.PI) * 48; this.scaleY = 1.06; });
+        yield* this.sleep(time, (p) => { this.face(vel); this.pose = Math.min(2, Math.floor(p * 3)); this.e.velocity = vel; this.lift = Math.sin(p * Math.PI) * 48; this.scaleY = 1.06; });
         this.superArmor = false;
         // 着地
         const at = this.feet();
         this.addHitbox({ kind: 'circle', x: at.x, y: at.y, r: a.radius, damage: this.dmg(a.damage), life: 0.12, shake: 6 });
-        this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 16, r1: a.radius * 1.2, life: 0.35, width: 8, color: '#d59cff' });
+        this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 16, r1: a.radius * 1.2, life: 0.4, width: 8, color: '#d59cff', ring: 'corrupt', ringAlpha: 0.85 });
         this.dust(at, 6, 'rgba(120, 70, 150, 0.6)');
         this.events.push({ type: 'shake', power: 4, time: 0.2 });
         yield* this.sleep(0.12, () => { this.scaleY = 0.9; });
@@ -838,7 +947,9 @@ class BlackWolfAI extends BossAI {
         v = dest.sub(this.e.position);
         const ang = Math.atan2(v.y, v.x);
         this.addFx({ type: 'laneWarn', warn: true, follow: true, ang, len: v.length(), width: 26, dy: this.e.size * 0.3, life: a.prepare, color: '#b14dff' });
-        yield* this.sleep(a.prepare, (p) => { this.face(v); this.scaleY = 1 - 0.1 * p; this.jitter = 1.5; });
+        this.motion = 'leapPrepare'; // 身を低くしてから走り抜ける
+        yield* this.sleep(a.prepare, (p) => { this.face(v); this.pose = p < 0.5 ? 1 : 2; this.scaleY = 1 - 0.1 * p; this.jitter = 1.5; });
+        this.motion = 'shadowDash';
         this.invulnerable = true;
         const vel = v.mult(1 / a.time);
         let next = 0;
@@ -874,7 +985,7 @@ class BlackWolfAI extends BossAI {
         const dir0 = this.dirToPlayer();
         const ang0 = Math.atan2(dir0.y, dir0.x);
         this.addFx({ type: 'orb', warn: true, follow: true, ang: ang0, fwd: this.e.size * 0.5, life: a.windup });
-        yield* this.sleep(a.windup, (p) => { this.face(this.dirToPlayer()); this.jitter = p * 1.5; this.scaleY = 1 + 0.05 * p; });
+        yield* this.sleep(a.windup, (p) => { this.face(this.dirToPlayer()); this.pose = 0; this.jitter = p * 1.5; this.scaleY = 1 + 0.05 * p; });
         const dir = this.dirToPlayer();
         const ang = Math.atan2(dir.y, dir.x);
         const mouth = this.e.position.add(dir.mult(this.e.size * 0.5));
@@ -887,6 +998,7 @@ class BlackWolfAI extends BossAI {
             });
         }
         this.addFx({ type: 'shock', follow: true, ang, fwd: this.e.size * 0.5, r0: 6, r1: 40, life: 0.25, width: 5, color: '#c77dff' });
+        this.fxImg(['corrupt_ring_1', 'corrupt_ring_2', 'corrupt_ring_3'], { ground: false, x: mouth.x, y: mouth.y, w: 50 * this.R, s0: 0.5, s1: 1.2, life: 0.3, hold: 0.3, add: true });
         yield* this.sleep(0.2);
         yield* this.recover(a.recover);
         yield* this.backOff(0.25);
@@ -898,12 +1010,15 @@ class BlackWolfAI extends BossAI {
         this.superArmor = true;
         const at = this.feet();
         this.addFx({ type: 'circleWarn', warn: true, x: at.x, y: at.y, r: a.maxRadius, life: a.windup, color: '#b14dff' });
-        yield* this.sleep(a.windup, (p) => { this.face(this.dirToPlayer()); this.scaleY = 1 - 0.1 * p; this.jitter = p * 2.5; });
+        // 絵：身を低くして力をため（leapPrepare）、放つ瞬間に吠える（howl）
+        this.motion = 'leapPrepare';
+        yield* this.sleep(a.windup, (p) => { this.face(this.dirToPlayer()); this.pose = Math.min(2, Math.floor(p * 3)); this.scaleY = 1 - 0.1 * p; this.jitter = p * 2.5; });
+        this.motion = 'howl';
         this.addHitbox({ kind: 'ring', x: at.x, y: at.y, r0: 20, r1: a.maxRadius, band: a.band, damage: this.dmg(a.damage), life: a.time, shake: 6 });
-        this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 20, r1: a.maxRadius, life: a.time, width: a.band, color: 'rgba(170, 60, 255, 0.85)' });
+        this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 20, r1: a.maxRadius, life: a.time, width: a.band, color: 'rgba(170, 60, 255, 0.85)', ring: 'corrupt', ringAlpha: 0.3 });
         this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 10, r1: a.maxRadius * 0.8, life: a.time * 1.1, width: 6, color: '#f0c8ff' });
         this.events.push({ type: 'shake', power: 6, time: 0.4 });
-        yield* this.sleep(a.time, () => { this.scaleY = 1.06; });
+        yield* this.sleep(a.time, () => { this.pose = 1; this.scaleY = 1.03; });
         this.superArmor = false;
         yield* this.recover(a.recover);
     }
@@ -942,7 +1057,7 @@ class BlackWolfAI extends BossAI {
             next -= dt;
             if (next <= 0) {
                 next = 0.28;
-                this.addFx({ type: 'shock', follow: true, feet: true, r0: 30, r1: 260, life: 0.7, width: 7, color: '#b46bff' });
+                this.addFx({ type: 'shock', follow: true, feet: true, r0: 30, r1: 260, life: 0.7, width: 7, color: '#b46bff', ring: 'corrupt', ringAlpha: 0.5 });
                 this.addFx({ type: 'roar', follow: true, life: 0.45, seed: Math.random(), color: '#e2b8ff' });
             }
         });

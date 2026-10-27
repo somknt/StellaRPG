@@ -77,6 +77,11 @@ class AssetManager {
             list[name] = `assets/tiles/arena/${name}.png`;
         }
         
+        // 古代星紋遺跡の素材（assets/tiles/ruins/<名前>.png）
+        for (const name of AssetManager.RUINS_ART_READY) {
+            list[name] = `assets/tiles/ruins/${name}.png`;
+        }
+        
         // 狼・猪の画像（assets/enemies/<名前>/<向き>_<1〜3>.png）。置いた物だけ BEAST_SPRITES_READY に足す
         for (const key of AssetManager.BEAST_SPRITES_READY) {
             for (const d of directions) {
@@ -85,12 +90,19 @@ class AssetManager {
         }
         
         // ボスのモーション画像（assets/enemies/<名前>/<モーション>_<向き>_<1〜3>.png）。置いたモーションだけ足す
+        // 書き方：{ ボス: ['モーション', ...] }（4方向すべて） または { ボス: { モーション: ['right', 'left'] } }（置いた向きだけ）
         for (const [key, motions] of Object.entries(AssetManager.BOSS_MOTION_SPRITES_READY)) {
-            for (const m of motions) {
-                for (const d of directions) {
+            const entries = Array.isArray(motions) ? motions.map(m => [m, directions]) : Object.entries(motions);
+            for (const [m, dirs] of entries) {
+                for (const d of dirs) {
                     for (let f = 1; f <= 3; f++) list[`${key}_${m}_${d}_${f}`] = `assets/enemies/${key}/${m}_${d}_${f}.png`;
                 }
             }
+        }
+        
+        // ボス戦のエフェクト（assets/effects/boss/<名前>.png）
+        for (const name of AssetManager.BOSS_FX_READY) {
+            list[`bossfx_${name}`] = `assets/effects/boss/${name}.png`;
         }
         return list;
     }
@@ -230,9 +242,35 @@ AssetManager.ARENA_ART_READY = [
     'arena_statue', 'arena_banner_pole', 'arena_fence', 'arena_fence_vines', 'arena_stall', 'arena_barrel', 'arena_barrel_b',
     'arena_crate', 'arena_weapon_rack', 'arena_spear_rack', 'arena_flower_bush', 'arena_rubble'
 ];
-AssetManager.BEAST_SPRITES_READY = [];  // 例: ['grass_wolf', 'corrupted_wolf', 'forest_boar', 'giant_forest_boar', 'black_corrupted_wolf']
-// ボスのモーション画像。例: { giant_forest_boar: ['charge', 'stomp', 'roar'], black_corrupted_wolf: ['leap', 'howl'] }
-AssetManager.BOSS_MOTION_SPRITES_READY = {};
+// 古代星紋遺跡の素材（art_source/ruins/ruins_parts_sheet.png から切り出した物。ruins_map.js が使う）
+AssetManager.RUINS_ART_READY = [
+    'ruins_floor', 'ruins_floor_crack', 'ruins_floor_moss', 'ruins_floor_rune', 'ruins_magic_circle', 'ruins_floor_diamond',
+    'ruins_wall_tower', 'ruins_wall', 'ruins_wall_b', 'ruins_arch_vines', 'ruins_gate', 'ruins_banner', 'ruins_banner_b',
+    'ruins_pillar_rune', 'ruins_pillar_rune_b', 'ruins_pillar_rune_c', 'ruins_pillar_broken', 'ruins_pillar_broken_vines',
+    'ruins_stairs', 'ruins_stairs_wide', 'ruins_wall_stairs', 'ruins_wall_corner', 'ruins_wall_low_vines_b', 'ruins_wall_vines',
+    'ruins_wall_arch_vines', 'ruins_wall_stub', 'ruins_wall_stub_b', 'ruins_wall_stub_vines',
+    'ruins_crystal', 'ruins_crystal_small', 'ruins_brazier', 'ruins_brazier_b', 'ruins_pedestal_rune',
+    'ruins_rubble', 'ruins_rubble_b', 'ruins_rubble_c', 'ruins_block', 'ruins_block_small',
+    'ruins_waterfall', 'ruins_waterfall_small', 'ruins_sparkles'
+];
+AssetManager.BEAST_SPRITES_READY = ['giant_forest_boar', 'black_corrupted_wolf'];  // 例: ['grass_wolf', 'corrupted_wolf', 'forest_boar']
+// ボスのモーション画像（art_source/bosses/tools/cut.ps1 で切り出した物）。
+// モーション名: 画像がある向き（ない向きは Enemy.getEnemyImage が横向きか歩きの絵で代わりに出す）
+AssetManager.BOSS_MOTION_SPRITES_READY = {
+    giant_forest_boar: {
+        tuskAttack: ['right', 'left'], chargePrepare: ['right', 'left'], charge: ['right', 'left'],
+        stomp: ['right', 'left', 'down', 'up'], roar: ['right', 'left', 'down', 'up']
+    },
+    black_corrupted_wolf: {
+        run: ['right', 'left'], bite: ['right', 'left'], claw: ['right', 'left', 'down', 'up'],
+        leapPrepare: ['right', 'left'], leap: ['right', 'left'], howl: ['right', 'left', 'down', 'up']
+    }
+};
+// ボス戦のエフェクト画像（assets/effects/boss/<名前>.png）。_1〜_3 は3コマの物
+AssetManager.BOSS_FX_READY = [
+    'dust_cloud', 'rock_burst', 'corrupt_shot', 'claw_slash', 'bite_fangs',
+    'boar_ring_1', 'boar_ring_2', 'boar_ring_3', 'corrupt_ring_1', 'corrupt_ring_2', 'corrupt_ring_3'
+];
 
 // グローバルインスタンス
 window.assetManager = new AssetManager();

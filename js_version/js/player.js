@@ -35,7 +35,7 @@ class Player {
         this.maxStamina = 100;
         this.currentStamina = 100;
         this.dodgeStaminaCost = 25;    // 回避1回の消費 → パッと減る（走るのは消費なし）
-        this.staminaRegenRate = 30;    // 回復量（毎秒）
+        this.staminaRegenRate = 40;    // 回復量（毎秒）
         this.staminaRegenDelay = 0.8;  // 使ってから回復が始まるまでの秒数
         this.timeSinceStaminaUse = 0;
         this.isExhausted = false;      // 0になったら一定量回復するまでダッシュ不可
@@ -65,7 +65,7 @@ class Player {
         
         // 星力システム
         this.starPowerStage = 0; // 0:未解放, 1:感知, 2:操作, 3:展開, 4:熟練
-        this.spRegenRate = 1; // 1SP/秒
+        this.spRegenRate = 0.7; // 0.7SP（MP）/秒
         this.spRegenDelay = 5; // 5秒後に回復開始
         this.timeSinceLastSpUse = 0;
         
@@ -652,6 +652,22 @@ class Player {
         }
         
         console.log(`レベルアップ！Lv.${this.level}`);
+    }
+    
+    // 決まったレベルの強さにする（バトルモードの推奨レベルがあるボス戦で使う）。HP・SP は満タン
+    setLevel(level) {
+        const statsTable = window.gameData && window.gameData.playerStatsTable;
+        const levelData = statsTable && statsTable.find(s => s.level === level);
+        if (!levelData) return;
+        this.level = level;
+        this.exp = 0;
+        this.maxHP = levelData.hp;
+        this.currentHP = this.maxHP;
+        this.attack = levelData.attack;
+        this.defense = levelData.defense;
+        this.maxSP = levelData.maxSP;
+        this.currentSP = this.maxSP;
+        this.expToNext = levelData.requiredExp;
     }
     
     unlockStarPower(stage) {
