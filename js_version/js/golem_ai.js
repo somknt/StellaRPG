@@ -74,6 +74,8 @@ class MagicGolemAI extends BossAI {
     
     get map() { return this.e.map; }
     get stage() { return this.map && this.map.setStagePhase ? this.map : null; }
+    // pose は update の最初に resetPose で戻している（BossAI に null にさせない）
+    clearFramePose() {}
     
     update(dt) {
         this.resetPose();
@@ -129,10 +131,10 @@ class MagicGolemAI extends BossAI {
     }
     
     // 拳が届かない時は、半分くらいの確率でもう少し歩いて近づく（遠くから叩きつけばかりにならないように）
-    chooseAttack() {
+    chooseAttack(force = false) {
         const punch = this.atk('punch');
-        if (punch && this.dist() > punch.range[1] && Math.random() < 0.5) { this.wait = 0.6; return; }
-        super.chooseAttack();
+        if (!force && punch && this.dist() > punch.range[1] && Math.random() < 0.5) { this.wait = 0.6; return; }
+        super.chooseAttack(force);
     }
     
     // ---------- 当たり判定（地面の楕円・楕円の輪） ----------
@@ -193,7 +195,7 @@ class MagicGolemAI extends BossAI {
         }
         yield* this.recover(a.recover);
     }
-    *act_punch(a) { yield* this.punches(a, 1); }
+    *act_punch(a) { yield* this.punches(a, a.hits || 1); }
     *act_punchCombo(a) { yield* this.punches(a, a.hits || 2); }
     *act_punchTriple(a) { yield* this.punches(a, a.hits || 3); }
     
@@ -380,6 +382,7 @@ class MagicGolemAI extends BossAI {
         yield* this.sleep(0.55, (p) => { this.face(this.dirToPlayer()); this.pose.core = 0.6 + 0.4 * p; this.pose.armsUp = p * 0.3; this.jitter = p; });
         GolemSound.play('roar');
         this.events.push({ type: 'shake', power: 10, time: 1.0 });
+        this.roarBlast(); // 咆哮の衝撃で、必ず吹き飛ばされる
         if (this.stage) { this.stage.setStagePhase(index + 1); this.stage.pulseCircle(1); this.stage.flashPillars(1); }
         let next = 0;
         yield* this.sleep(1.4, (p, dt) => {
@@ -394,8 +397,7 @@ class MagicGolemAI extends BossAI {
                 this.addFx({ type: 'roar', follow: true, life: 0.4, seed: Math.random(), color: '#d8f8ff' });
             }
             // 起動の衝撃で、近くのプレイヤーを少し押し返す（ダメージなし）
-            const v = this.toPlayer();
-            if (v.length() < 240 && this.player.moveBy) this.player.moveBy(v.normalize().mult(150 * dt));
+            this.roarPush(dt);
         });
         // フェーズ3：床の複数箇所に危険な魔法陣（プレイヤーの近くには出さない）
         if (index >= 2) {

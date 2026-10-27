@@ -107,9 +107,16 @@ class Enemy {
         this.applyScale(Enemy.SCALE);
     }
     
+    // 体の当たりのだ円（Enemy.BODY）。主人公の体の半径の分だけ広げてある
+    bodyShape() {
+        const B = Enemy.BODY, s = this.size;
+        return { cx: this.position.x, cy: this.position.y + s * B.oy, rx: s * B.rx + B.player, ry: s * B.ry + B.player * 0.75 };
+    }
+    
     applyScale(S) {
         if (!S) return;
         this.size = Math.round(this.size * (this.isBoss ? S.bossSize : S.size));
+        if (S.damage) this.attack = Math.round(this.attack * S.damage);
         this.attackRange *= S.range;
         this.speed *= S.speed;
         this.chargeSpeed *= S.speed;
@@ -817,7 +824,7 @@ class Enemy {
     }
     
     // ボスの絵：AI のモーション（look.sprite.alias で代わりの絵に置きかえ）と、コマ（ai.pose か時間でくり返し）から選ぶ
-    // 下・上向きの絵がないモーションは、攻撃なら横向き（左右は向いている方）、歩き・待機なら下・上向きの歩きの絵
+    // 下・上向きの絵がないモーションは、攻撃なら横向き（左右は向いている方）、待機などは下・上向きの歩きの絵
     getBossSprite(look) {
         const A = window.assetManager, sp = look.sprite, ai = this.ai;
         const motion = ai.motion || 'idle';
@@ -828,8 +835,7 @@ class Enemy {
         const dir = this.direction;
         const vertical = dir === 'up' || dir === 'down';
         const still = Enemy.BOSS_STILL_MOTIONS.includes(motion);
-        // 下・上向きの歩きの絵は1枚（止まった絵）なので、動いている間は横向きの歩きの絵を使う
-        let img = (name === 'walk' && vertical && !still) ? null : file(name, dir, frame);
+        let img = file(name, dir, frame);
         if (!img && vertical) {
             if (still) img = file('walk', dir, 0);
             else {
@@ -1022,7 +1028,8 @@ class Enemy {
 // cooldown ：次の攻撃までの間隔（小さいほど攻撃が多い）。攻撃前の「溜め」は変えない（見てから避けられるように）
 // shot     ：弾の当たる大きさ
 // （ボスの cooldown は「攻撃と攻撃の間の待ち時間」attackInterval にかかる）
-Enemy.SCALE = { size: 1.6, bossSize: 2.0, range: 2.0, speed: 1.5, cooldown: 0.5, shot: 1.4 };
+// damage   ：攻撃力（かみつき・突進・弾・体当たり・ボスの全部の攻撃）
+Enemy.SCALE = { size: 1.6, bossSize: 2.0, range: 2.0, speed: 1.5, cooldown: 0.5, shot: 1.4, damage: 1.6 };
 // ボスの絵：止まっているモーション（下・上向きの時は正面・背中の絵を出す）
 Enemy.BOSS_STILL_MOTIONS = ['idle', 'detect', 'stun', 'hit', 'death'];
 // 侵蝕弾の画像（assets/effects/boss/corrupt_shot.png）で、光る玉の中心がある横の位置（左から何割か）
@@ -1031,6 +1038,10 @@ Enemy.SHOT_ORB_X = 0.4;
 // 体当たりのダメージ（全員の敵・ボス）
 // reach：敵の体の大きさのどこまでを「体」とするか / player：主人公の体の半径(px) / damage：敵の攻撃力に掛ける倍率
 Enemy.CONTACT = { reach: 0.42, player: 16, damage: 0.6 };
+
+// 体の当たり（すり抜けられない範囲）。地面に寝かせただ円
+// rx・ry：敵の体の大きさに掛ける横・縦の半径 / oy：中心を下へずらす割合 / player：主人公の体の半径(px)
+Enemy.BODY = { rx: 0.42, ry: 0.28, oy: 0.12, player: 16 };
 
 // ジャスト回避で敵がスローになっている間（game.js が毎フレーム入れる）。敵を薄い水色にして知らせる
 Enemy.slowMotion = false;
@@ -1203,6 +1214,40 @@ class EnemySpawner {
         }
     }
     
+    // 敵の体は「すり抜けられない物」：主人公と重なったら、主人公が来た側へ押し出す
+    // prevPos（このフレームで動く前の主人公の位置）の側へ出すので、回避で体の真ん前から飛びこんでも後ろへ抜けない
+    // 主人公が壁で押し出せない時は、残りの分だけ敵を押し返す
+    resolveBodyCollisions(player, prevPos) {
+        for (const e of this.enemies) {
+            if (!e.isAlive() || e.dying) continue;
+            for (let k = 0; k < 2; k++) { // 主人公 → 敵 の順に押し出す
+                const b = e.bodyShape();
+                const qx = (player.position.x - b.cx) / b.rx, qy = (player.position.y - b.cy) / b.ry;
+                const q = Math.hypot(qx, qy);
+                if (q >= 1) break;
+                // 押し出す向き（だ円をまるにした空間で）。体の中心を越えていたら、来た側（前の位置）へ戻す
+                let nx = qx, ny = qy;
+                if (prevPos) {
+                    const px = (prevPos.x - b.cx) / b.rx, py = (prevPos.y - b.cy) / b.ry;
+                    if (Math.hypot(px, py) > 0.01 && (px * qx + py * qy <= 0 || q < 0.6)) { nx = px; ny = py; }
+                }
+                let nl = Math.hypot(nx, ny);
+                if (nl < 0.01) { nx = 0; ny = 1; nl = 1; }
+                nx /= nl; ny /= nl;
+                const target = new Vector2(b.cx + nx * b.rx, b.cy + ny * b.ry);
+                const delta = target.sub(player.position);
+                if (k === 0) {
+                    // 回避で体にぶつかった：そこで止まる（体のふちをすべって後ろへ回りこまない）。回避の無敵は残る
+                    if (player.isDodging && player.stopDodgeMove) player.stopDodgeMove();
+                    player.moveBy(delta);
+                } else {
+                    // 主人公が壁に挟まれて動けない：敵の方を押し返す
+                    e.moveBy(delta.mult(-1));
+                }
+            }
+        }
+    }
+    
     draw(ctx, camera) {
         this.drawEnemies(ctx, camera);
         this.drawEffects(ctx, camera);
@@ -1335,7 +1380,10 @@ class EnemySpawner {
             
             // 体当たり：敵（ボスも）の体にふれてもダメージ。回避中はすり抜ける（ジャスト回避にはしない）
             // ダメージの後の無敵時間があるので、ふれ続けても毎フレームは減らない
-            if (!player.isDodging && enemy.position.distance(player.position) <= enemy.size * Enemy.CONTACT.reach + Enemy.CONTACT.player) {
+            // （体はすり抜けられないので、だ円の少し外までを「ふれている」とする）
+            const b = enemy.bodyShape();
+            const touch = Math.hypot((player.position.x - b.cx) / (b.rx + 6), (player.position.y - b.cy) / (b.ry + 6)) <= 1;
+            if (!player.isDodging && touch) {
                 player.takeDamage(Math.max(1, Math.round(enemy.attack * Enemy.CONTACT.damage)));
             }
             

@@ -52,16 +52,16 @@ const BOSS_DATA = [
               banner: '暴走状態！', attacks: { tuskCombo: 4, tripleCharge: 3, bigStomp: 3, doubleCharge: 1 } }
         ],
         attacks: {
-            tusk:         { range: [0, 120],  windup: 0.55, damage: 1.0, reach: 96, recover: 0.75 },
-            tuskCombo:    { range: [0, 130],  windup: 0.4,  damage: 0.85, reach: 100, hits: 3, recover: 0.7 },
+            tusk:         { range: [0, 120],  windup: 0.55, damage: 1.0, reach: 96, hits: 2, recover: 0.75 },
+            tuskCombo:    { range: [0, 130],  windup: 0.4,  damage: 0.85, reach: 100, hits: 5, recover: 0.7 },
             charge:       { range: [170, 2000], prepare: 0.9, speed: 470, duration: 1.05, count: 1, damage: 1.4, recover: 1.4 },
-            doubleCharge: { range: [150, 2000], prepare: 0.8, speed: 500, duration: 0.95, count: 2, damage: 1.4, recover: 1.2, between: 0.5 },
-            tripleCharge: { range: [130, 2000], prepare: 0.65, speed: 530, duration: 0.9, count: 3, damage: 1.5, recover: 1.0, between: 0.38 },
-            stomp:        { range: [0, 230],  windup: 0.8,  damage: 1.1, radius: 150, waves: 1, recover: 0.9 },
-            bigStomp:     { range: [0, 280],  windup: 0.85, damage: 1.5, radius: 200, waves: 2, recover: 0.8 }
+            doubleCharge: { range: [150, 2000], prepare: 0.8, speed: 500, duration: 0.95, count: 3, damage: 1.4, recover: 1.2, between: 0.5 },
+            tripleCharge: { range: [130, 2000], prepare: 0.65, speed: 530, duration: 0.9, count: 4, damage: 1.5, recover: 1.0, between: 0.38 },
+            stomp:        { range: [0, 230],  windup: 0.8,  damage: 1.1, radius: 150, waves: 2, recover: 0.9 },
+            bigStomp:     { range: [0, 280],  windup: 0.85, damage: 1.5, radius: 200, waves: 3, recover: 0.8 }
         },
         motions: {
-            // 下・上向きは 咆哮・踏みつけ だけ絵がある（歩きは1枚の絵で、ほかは横向きの絵を使う）
+            // 下・上向き：歩き・牙・突進の溜め・突進・咆哮・踏みつけ の絵がある（ほかは横向きの絵を使う）
             idle: 'alt', walk: 'done', run: 'alt', turn: 'alt', detect: 'alt', tuskAttack: 'done',
             chargePrepare: 'done', charge: 'done', chargeEnd: 'alt', stomp: 'done', roar: 'done',
             hit: 'temp', stun: 'alt', death: 'temp'
@@ -88,7 +88,7 @@ const BOSS_DATA = [
         look: { key: 'black_corrupted_wolf', body: '#2b2433', dark: '#16111c', outline: '#07050a', snout: '#3d3346', eye: '#d47bff', head: 0.42, ear: 0.44, tail: true, glowEyes: true, miasma: true, cracks: true,
             sprite: {
                 draw: 1.875,
-                alias: { idle: ['leapPrepare', 0], detect: ['leapPrepare', 0], walk: ['run', null], dodge: ['leap', 1], shadowDash: ['run', null],
+                alias: { idle: ['leapPrepare', 0], detect: ['leapPrepare', 0], dodge: ['leap', 1], shadowDash: ['run', null],
                          corruptionAttack: ['bite', null], stun: ['leapPrepare', 2], hit: ['leapPrepare', 0], death: ['leapPrepare', 0] },
                 speed: { walk: 0.15, run: 0.09, shadowDash: 0.05, howl: 0.16 }
             } },
@@ -102,19 +102,20 @@ const BOSS_DATA = [
               banner: '星喰いの暴走！', attacks: { tripleClaw: 3, doubleBite: 2, shadowLeap: 3, corruptionShot: 2, corruptionWave: 2 } }
         ],
         attacks: {
-            bite:           { range: [0, 260], windup: 0.32, damage: 1.0, hits: 1, recover: 0.5 },
-            doubleBite:     { range: [0, 280], windup: 0.28, damage: 0.9, hits: 2, recover: 0.5 },
-            claw:           { range: [0, 260], windup: 0.36, damage: 1.1, hits: 1, reach: 84, recover: 0.55 },
-            tripleClaw:     { range: [0, 280], windup: 0.3,  damage: 0.9, hits: 3, reach: 88, recover: 0.55 },
+            bite:           { range: [0, 260], windup: 0.32, damage: 1.0, hits: 2, recover: 0.5 },
+            doubleBite:     { range: [0, 280], windup: 0.28, damage: 0.9, hits: 3, recover: 0.5 },
+            claw:           { range: [0, 260], windup: 0.36, damage: 1.1, hits: 2, reach: 84, recover: 0.55 },
+            tripleClaw:     { range: [0, 280], windup: 0.3,  damage: 0.9, hits: 5, reach: 88, recover: 0.55 },
             leap:           { range: [140, 460], prepare: 0.6, time: 0.45, damage: 1.3, radius: 64, recover: 0.6 },
             shadowDash:     { range: [0, 700], prepare: 0.32, time: 0.22, dist: 260, recover: 0.2 },
             shadowLeap:     { range: [0, 700], prepare: 0.28, time: 0.2, dist: 240, leapPrepare: 0.32, leapTime: 0.4, damage: 1.3, radius: 66, recover: 0.55 },
-            corruptionShot: { range: [160, 900], windup: 0.6, damage: 0.9, count: 3, spread: 0.32, speed: 250, recover: 0.5 },
+            corruptionShot: { range: [160, 900], windup: 0.6, damage: 0.9, count: 5, spread: 0.32, speed: 250, recover: 0.5 },
             corruptionWave: { range: [0, 400], windup: 1.0, damage: 1.3, maxRadius: 320, time: 0.7, band: 34, recover: 0.7 }
         },
         motions: {
-            // 下・上向きは 遠吠え・ひっかき だけ絵がある（歩きは1枚の絵で、ほかは横向きの絵を使う）
-            idle: 'alt', walk: 'alt', run: 'done', detect: 'alt', bite: 'done', claw: 'done',
+            // 下・上向き：歩き・走り・噛みつき・跳びかかりの溜め・跳びかかり・遠吠え・ひっかき の絵がある（ほかは横向きの絵を使う）
+            // 横向きの歩きは走りの絵と同じ
+            idle: 'alt', walk: 'done', run: 'done', detect: 'alt', bite: 'done', claw: 'done',
             leapPrepare: 'done', leap: 'done', dodge: 'alt', shadowDash: 'alt', corruptionAttack: 'alt',
             howl: 'done', hit: 'temp', stun: 'alt', death: 'temp'
         }
@@ -153,16 +154,16 @@ const BOSS_DATA = [
         ],
         // 距離（range・reach・radius・maxRadius・band）は Enemy.SCALE.range 倍、弾の速さは Enemy.SCALE.speed 倍される
         attacks: {
-            punch:         { range: [0, 130],  windup: 0.7,  damage: 1.0, reach: 90, recover: 1.1 },
-            punchCombo:    { range: [0, 140],  windup: 0.6,  damage: 0.9, reach: 92, hits: 2, recover: 0.9 },
-            punchTriple:   { range: [0, 150],  windup: 0.55, damage: 0.9, reach: 95, hits: 3, recover: 0.8 },
+            punch:         { range: [0, 130],  windup: 0.7,  damage: 1.0, reach: 90, hits: 2, recover: 1.1 },
+            punchCombo:    { range: [0, 140],  windup: 0.6,  damage: 0.9, reach: 92, hits: 3, recover: 0.9 },
+            punchTriple:   { range: [0, 150],  windup: 0.55, damage: 0.9, reach: 95, hits: 5, recover: 0.8 },
             slam:          { range: [0, 200],  windup: 1.0,  damage: 1.3, reach: 60, radius: 75, stuck: 0.7, recover: 1.0 },
             shockwave:     { range: [0, 240],  windup: 1.0,  damage: 1.2, maxRadius: 170, band: 26, time: 0.85, waves: 1, recover: 0.9 },
-            bigShockwave:  { range: [0, 280],  windup: 0.95, damage: 1.3, maxRadius: 210, band: 28, time: 0.9, waves: 2, recover: 0.8 },
+            bigShockwave:  { range: [0, 280],  windup: 0.95, damage: 1.3, maxRadius: 210, band: 28, time: 0.9, waves: 3, recover: 0.8 },
             magicShot:     { range: [110, 1200], windup: 0.8, damage: 0.9, count: 5, spread: 0.24, speed: 160, recover: 0.8 },
             hazardFloor:   { range: [0, 1200], windup: 1.0, damage: 1.1, count: 3, radius: 52, waves: 1, recover: 0.8 },
-            hazardBarrage: { range: [0, 1200], windup: 1.0, damage: 1.1, count: 4, radius: 52, waves: 3, between: 0.65, recover: 0.7 },
-            magicCannon:   { range: [0, 1200], windup: 1.2, damage: 1.6, count: 3, radius: 70, between: 0.5, breakdown: 1.8, recover: 0.6 },
+            hazardBarrage: { range: [0, 1200], windup: 1.0, damage: 1.1, count: 4, radius: 52, waves: 4, between: 0.65, recover: 0.7 },
+            magicCannon:   { range: [0, 1200], windup: 1.2, damage: 1.6, count: 4, radius: 70, between: 0.5, breakdown: 1.8, recover: 0.6 },
             shield:        { range: [0, 200],  time: 1.3, damage: 0.8, maxRadius: 115, band: 24, recover: 0.7 }
         },
         motions: {

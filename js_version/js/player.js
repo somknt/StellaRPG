@@ -137,7 +137,13 @@ class Player {
         
         // 無敵時間
         this.invincibleTime = 0;
-        this.maxInvincibleTime = 1.0;
+        this.maxInvincibleTime = 1.0;  // 攻撃を受けた後の無敵時間（1秒）
+        
+        // ノックバック（敵の咆哮などで飛ばされる）。飛ばされている間は動けない
+        this.knockDir = new Vector2(0, 0);
+        this.knockSpeed = 0;
+        this.knockTimer = 0;
+        this.knockDuration = 0;
         
         // 色（星の民の特徴）
         this.hairColor = '#3d2817'; // 黒に近い茶色
@@ -149,13 +155,15 @@ class Player {
         // 魔法の切り替え（詠唱中はできない）
         this.updateMagicSelect(input);
         
-        // 回避の開始（移動より先に判定。詠唱中はできない）
-        if (input.isDodgePressed() && !this.isChanting) {
+        // 回避の開始（移動より先に判定。詠唱中・飛ばされている間はできない）
+        if (input.isDodgePressed() && !this.isChanting && this.knockTimer <= 0) {
             this.tryDodge(input);
         }
         
-        // 移動処理（回避中は回避の移動を優先）
-        if (this.isDodging) {
+        // 移動処理（飛ばされている間はノックバックだけ。回避中は回避の移動を優先）
+        if (this.knockTimer > 0) {
+            this.updateKnockback(deltaTime);
+        } else if (this.isDodging) {
             this.updateDodge(deltaTime);
         } else {
             this.updateMovement(deltaTime, input);
@@ -258,6 +266,35 @@ class Player {
         }
     }
     
+    // ---------- ノックバック ----------
+    // dir の方向へ dist(px) 飛ばされる。force = true（咆哮など）は回避中・無敵中でも必ず飛ばされる
+    knockback(dir, dist, duration = 0.3, force = false) {
+        if (!dir || dir.length() < 0.01) dir = new Vector2(0, 1);
+        if (!force && (this.isDodging || this.invincibleTime > 0)) return false;
+        if (this.isDodging) {
+            // 回避は打ち消される（無敵も消える）
+            this.isDodging = false;
+            this.dodgeTimer = 0;
+            this.dodgeCooldownTimer = this.dodgeCooldown;
+        }
+        this.knockDir = dir.normalize();
+        this.knockDuration = duration;
+        this.knockTimer = duration;
+        this.knockSpeed = dist * 2 / duration; // だんだん遅くなって、ちょうど dist 進む
+        this.velocity = new Vector2(0, 0);
+        return true;
+    }
+    
+    updateKnockback(deltaTime) {
+        const k = Math.max(0, this.knockTimer / this.knockDuration); // 1→0
+        this.moveBy(this.knockDir.mult(this.knockSpeed * k * deltaTime));
+        this.isMoving = false;
+        this.isDashing = false;
+        this.velocity = new Vector2(0, 0);
+        this.knockTimer -= deltaTime;
+        if (this.knockTimer <= 0) { this.knockTimer = 0; this.knockSpeed = 0; }
+    }
+    
     // ---------- 回避 ----------
     tryDodge(input) {
         if (this.isDodging || this.dodgeCooldownTimer > 0) return false;
@@ -290,6 +327,11 @@ class Player {
             this.dodgeCooldownTimer = this.dodgeCooldown;
             this.velocity = new Vector2(0, 0);
         }
+    }
+    
+    // 回避の途中で敵の体にぶつかった：その場で止まる（回避の時間と無敵はそのまま）
+    stopDodgeMove() {
+        this.dodgeDirection = new Vector2(0, 0);
     }
     
     // ジャスト回避が起きたら true を返して状態をリセット（game.js が使う）
@@ -1005,6 +1047,9 @@ class Player {
 
 // 魔法パレットのスロット数と、最初にセットされている5つの魔法（炎・水・風・土・雷）
 Player.MAGIC_SLOT_COUNT = 5;
+
+// 主人公の魔法のダメージの倍率（全部の魔法：弾・残り火・竜巻・雷など。game.js で掛ける）
+Player.MAGIC_DAMAGE_MUL = 1.6;
 
 // 斬撃エフェクトの見た目
 // size：画像を描く大きさ / offset：画像の中心を斬る向きへずらす量

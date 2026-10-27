@@ -120,12 +120,16 @@ class BossAI {
         this.lockFacing = true;
     }
     
+    // 画像のコマ（pose）を毎フレーム戻す。ゴーレムは pose が体の形の値なので自分で戻す（上書き）
+    clearFramePose() { this.pose = null; }
+    
     // ---------- 毎フレーム ----------
     update(dt) {
         this.time += dt;
         this.motionTime += dt;
         this.updateFx(dt);
-        this.lift = 0; this.scaleX = 1; this.scaleY = 1; this.jitter = 0; this.pose = null;
+        this.lift = 0; this.scaleX = 1; this.scaleY = 1; this.jitter = 0;
+        this.clearFramePose();
         this.lockFacing = false;
         const e = this.e;
         e.velocity = new Vector2(0, 0);
@@ -160,9 +164,24 @@ class BossAI {
             if (r.done) this.endAction();
         } else {
             this.wait -= dt;
+            // 後ろに回りこまれた：すぐに振り向いて、待たずに攻撃する
+            if (this.playerBehind()) {
+                this.face(this.dirToPlayer());
+                this.motion = 'turn';
+                this.wait = 0;
+                this.chooseAttack(true);
+                return;
+            }
             this.idleMove(dt);
             if (this.wait <= 0) this.chooseAttack();
         }
+    }
+    
+    // プレイヤーがボスの後ろ（向いている方向から 100度以上うしろ）の近くにいるか
+    playerBehind() {
+        if (!this.player || this.dist() > BossAI.TUNING.behindRange * this.R) return false;
+        const n = this.dirToPlayer();
+        return this.facing.x * n.x + this.facing.y * n.y < -0.17;
     }
     
     // 戦闘開始（カウントダウンの後）
@@ -185,7 +204,7 @@ class BossAI {
         this.superArmor = false;
         this.invulnerable = false;
         this.motion = 'idle';
-        this.wait = this.def.attackInterval * this.P.intervalMul * (0.75 + Math.random() * 0.5);
+        this.wait = this.def.attackInterval * this.P.intervalMul * BossAI.TUNING.interval * (0.75 + Math.random() * 0.5);
     }
     
     cancel() {
@@ -212,18 +231,25 @@ class BossAI {
     }
     
     // フェーズで使える攻撃から、距離が合う物を重みで選ぶ（同じ攻撃が続きにくいように）
-    chooseAttack() {
+    // force = true（後ろに回られた時）：距離が合う攻撃がなくても、いちばん距離が近い攻撃を出す
+    chooseAttack(force = false) {
         const d = this.dist();
         const list = [];
+        let near = null, nearGap = Infinity;
         for (const [name, w] of Object.entries(this.P.attacks)) {
             const a = this.atk(name);
             if (!a || !this['act_' + name]) {
                 if (!this._warned) { this._warned = true; console.warn('ボスAIに攻撃がありません:', name); }
                 continue;
             }
-            if (d < a.range[0] || d > a.range[1]) continue;
+            if (d < a.range[0] || d > a.range[1]) {
+                const gap = d < a.range[0] ? a.range[0] - d : d - a.range[1];
+                if (w > 0 && gap < nearGap) { nearGap = gap; near = name; }
+                continue;
+            }
             list.push([name, name === this.lastAttack ? w * 0.4 : w]);
         }
+        if (!list.length && force && near) list.push([near, 1]);
         if (!list.length) { this.wait = 0.15; return; }
         const total = list.reduce((s, x) => s + x[1], 0);
         let roll = Math.random() * total, pick = list[0][0];
@@ -248,7 +274,24 @@ class BossAI {
     
     *recover(t) {
         this.motion = 'idle';
-        yield* this.sleep(t * this.P.recoverMul, () => this.face(this.dirToPlayer()));
+        yield* this.sleep(t * this.P.recoverMul * BossAI.TUNING.recover, () => this.face(this.dirToPlayer()));
+    }
+    
+    // 咆哮・遠吠えの風圧：範囲の中のプレイヤーを必ず吹き飛ばす（回避中・無敵中でも飛ばされる。ダメージはない）
+    roarBlast(dist = BossAI.TUNING.roarKnock) {
+        const p = this.player;
+        if (!p || !p.knockback) return;
+        const v = this.toPlayer();
+        const d = v.length();
+        if (d > BossAI.TUNING.roarRange * this.R) return;
+        const dir = d > 0.01 ? v : this.facing;
+        p.knockback(dir, dist * (1 - 0.4 * d / (BossAI.TUNING.roarRange * this.R)), 0.35, true);
+        this.events.push({ type: 'shake', power: 6, time: 0.25 });
+    }
+    // 咆哮の間ずっと、近くのプレイヤーを押し返し続ける
+    roarPush(dt, range = 280, power = 220) {
+        const v = this.toPlayer();
+        if (v.length() < range * this.R && v.length() > 0.01 && this.player.moveBy) this.player.moveBy(v.normalize().mult(power * dt));
     }
     
     *act_detect() {
@@ -303,6 +346,8 @@ class BossAI {
             if (dealt > 0) {
                 h.used = true;
                 this.events.push({ type: 'hit', power: h.shake || 4 });
+                // knock：当たったらプレイヤーを外へ飛ばす（侵蝕波動など）
+                if (h.knock && player.knockback) player.knockback(d > 0.01 ? v : this.facing, h.knock, 0.28, true);
             }
         }
     }
@@ -563,6 +608,13 @@ class BossAI {
     }
 }
 
+// 全部のボス（イノシシ・黒蝕狼・ゴーレム）の共通の調整
+// interval    ：攻撃と攻撃の間の待ち時間の倍率（小さいほど、すぐ次の攻撃へ）
+// recover     ：攻撃の後の硬直の倍率（溜め＝予告の時間は変えない。見てから避けられるように）
+// behindRange ：この距離（× Enemy.SCALE.range）より近くで後ろに回られたら、すぐ振り向いて攻撃
+// roarRange / roarKnock：咆哮・遠吠えでプレイヤーが必ず吹き飛ばされる範囲と距離(px)
+BossAI.TUNING = { interval: 0.35, recover: 0.55, behindRange: 300, roarRange: 330, roarKnock: 260 };
+
 // ==========================================================
 // 巨大森イノシシ：重い動き・牙・突進（壁に当たると目を回す）・踏みつけ
 // ==========================================================
@@ -614,7 +666,11 @@ class ForestBoarAI extends BossAI {
     }
     
     *act_tusk(a) {
-        yield* this.tuskStrike(a, a.windup);
+        // hits 回まで続けて突き上げる（2回目からは溜めが短い）
+        for (let i = 0; i < (a.hits || 1); i++) {
+            yield* this.tuskStrike(a, i === 0 ? a.windup : a.windup * 0.6, i);
+            yield* this.sleep(0.05);
+        }
         yield* this.recover(a.recover);
     }
     
@@ -756,6 +812,7 @@ class ForestBoarAI extends BossAI {
         this.invulnerable = true;
         yield* this.sleep(0.35, (p) => { this.face(this.dirToPlayer()); this.scaleY = 1 - 0.06 * p; });
         this.events.push({ type: 'shake', power: 10, time: 0.9 });
+        this.roarBlast(); // 吠えた瞬間の風圧で、必ず吹き飛ばされる
         let next = 0;
         yield* this.sleep(1.2, (p, dt) => {
             this.face(this.dirToPlayer());
@@ -768,9 +825,8 @@ class ForestBoarAI extends BossAI {
                 this.fxImg('dust_cloud', { ground: true, x: f.x + (Math.random() - 0.5) * this.e.size, y: f.y, w: this.e.size * 1.1, s0: 0.6, s1: 1.4, life: 0.7, hold: 0.2, alpha: 0.6 });
                 this.addFx({ type: 'roar', follow: true, life: 0.4, seed: Math.random() });
             }
-            // 咆哮の風圧で、近くのプレイヤーを少し押し返す（ダメージなし）
-            const v = this.toPlayer();
-            if (v.length() < 220 && this.player.moveBy) this.player.moveBy(v.normalize().mult(140 * dt));
+            // 咆哮の風圧で、近くのプレイヤーを押し返し続ける（ダメージなし）
+            this.roarPush(dt);
         });
         this.invulnerable = false;
     }
@@ -870,9 +926,8 @@ class BlackWolfAI extends BossAI {
             yield* this.sleep(0.14, () => { this.face(dir); this.pose = 1; this.e.velocity = dir.mult(380 * this.SP); });
             yield* this.sleep(0.08, () => { this.pose = 2; });
         }
-        this.motion = 'idle';
-        yield* this.sleep(a.recover * this.P.recoverMul * 0.6);
-        yield* this.backOff();
+        yield* this.recover(a.recover * 0.6);
+        yield* this.backOff(0.25);
     }
     *act_doubleBite(a) { yield* this.act_bite(a); }
     
@@ -895,9 +950,8 @@ class BlackWolfAI extends BossAI {
                 rot: ang - 0.52 + (i % 2 ? 0.35 : -0.35), life: 0.3, hold: 0.4, add: true });
             yield* this.sleep(0.12, (p) => { this.face(dir); this.pose = p < 0.5 ? 1 : 2; });
         }
-        this.motion = 'idle';
-        yield* this.sleep(a.recover * this.P.recoverMul * 0.6);
-        yield* this.backOff();
+        yield* this.recover(a.recover * 0.6);
+        yield* this.backOff(0.25);
     }
     *act_tripleClaw(a) { yield* this.act_claw(a); }
     
@@ -1014,7 +1068,7 @@ class BlackWolfAI extends BossAI {
         this.motion = 'leapPrepare';
         yield* this.sleep(a.windup, (p) => { this.face(this.dirToPlayer()); this.pose = Math.min(2, Math.floor(p * 3)); this.scaleY = 1 - 0.1 * p; this.jitter = p * 2.5; });
         this.motion = 'howl';
-        this.addHitbox({ kind: 'ring', x: at.x, y: at.y, r0: 20, r1: a.maxRadius, band: a.band, damage: this.dmg(a.damage), life: a.time, shake: 6 });
+        this.addHitbox({ kind: 'ring', x: at.x, y: at.y, r0: 20, r1: a.maxRadius, band: a.band, damage: this.dmg(a.damage), life: a.time, shake: 6, knock: 140 });
         this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 20, r1: a.maxRadius, life: a.time, width: a.band, color: 'rgba(170, 60, 255, 0.85)', ring: 'corrupt', ringAlpha: 0.3 });
         this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 10, r1: a.maxRadius * 0.8, life: a.time * 1.1, width: 6, color: '#f0c8ff' });
         this.events.push({ type: 'shake', power: 6, time: 0.4 });
@@ -1050,10 +1104,12 @@ class BlackWolfAI extends BossAI {
         this.invulnerable = true;
         yield* this.sleep(0.3, (p) => { this.scaleY = 1 - 0.08 * p; });
         this.events.push({ type: 'shake', power: 7, time: 0.8 });
+        this.roarBlast(); // 遠吠えの風圧で、必ず吹き飛ばされる
         let next = 0;
         yield* this.sleep(1.2, (p, dt) => {
             this.face(new Vector2(0, 1));
             this.scaleY = 1.1; this.jitter = 1.5;
+            this.roarPush(dt);
             next -= dt;
             if (next <= 0) {
                 next = 0.28;

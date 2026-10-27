@@ -84,8 +84,15 @@ Save-Row $side 3 $KS $out 'stomp_right' 'feet' 'stomp_left'
 Save-Row $side 4 $KS $out 'roar_right' 'feet' 'roar_left'
 Save-Row $side 5 $KS $out 'right' 'feet' 'left'
 $KF = 0.3; $KB = 0.34
-$s = Get-Frames 'boar_roar_down.png' 1 3;  Save-Row $s 0 $KF $out 'roar_down';  Save-Still $s 0 0 $KF $out 'down'
-$s = Get-Frames 'boar_roar_up.png' 1 3;    Save-Row $s 0 $KB $out 'roar_up';    Save-Still $s 0 0 $KB $out 'up'
+$s = Get-Frames 'boar_roar_down.png' 1 3;  Save-Row $s 0 $KF $out 'roar_down'
+$s = Get-Frames 'boar_roar_up.png' 1 3;    Save-Row $s 0 $KB $out 'roar_up'
+# sheet 2 (front / back): walk, tusk, charge prepare, charge. Scale matched to the body size of the pictures above
+$K2 = 0.66
+$s = Get-Frames 'boar_sheet2_down.png' 4 3
+Save-Row $s 0 $K2 $out 'down'; Save-Row $s 1 $K2 $out 'tuskAttack_down'; Save-Row $s 2 $K2 $out 'chargePrepare_down'; Save-Row $s 3 $K2 $out 'charge_down'
+$s = Get-Frames 'boar_sheet2_up.png' 4 3
+# charge (back view) is tall: a little smaller so it stays inside the frame
+Save-Row $s 0 $K2 $out 'up'; Save-Row $s 1 $K2 $out 'tuskAttack_up'; Save-Row $s 2 $K2 $out 'chargePrepare_up'; Save-Row $s 3 0.64 $out 'charge_up'
 $s = Get-Frames 'boar_stomp_down.png' 1 3; Save-Row $s 0 $KF $out 'stomp_down'
 $s = Get-Frames 'boar_stomp_up.png' 1 3;   Save-Row $s 0 $KB $out 'stomp_up'
 
@@ -102,10 +109,17 @@ Save-Row $side 3 $KS $out 'leapPrepare_right' 'feet' 'leapPrepare_left'
 Save-Row $side 4 $KS $out 'leap_right' 'union' 'leap_left'
 Save-Row $side 5 $KS $out 'howl_right' 'feet' 'howl_left'
 $KF = 0.28; $KB = 0.3
-$s = Get-Frames 'wolf_howl_down.png' 1 3; Save-Row $s 0 $KF $out 'howl_down'; Save-Still $s 0 0 $KF $out 'down'
+$s = Get-Frames 'wolf_howl_down.png' 1 3; Save-Row $s 0 $KF $out 'howl_down'
 $s = Get-Frames 'wolf_howl_up.png' 1 3;   Save-Row $s 0 $KB $out 'howl_up'
 $s = Get-Frames 'wolf_claw_down.png' 1 3; Save-Row $s 0 $KF $out 'claw_down'
-$s = Get-Frames 'wolf_claw_up.png' 1 3;   Save-Row $s 0 $KB $out 'claw_up';   Save-Still $s 0 2 $KB $out 'up'
+$s = Get-Frames 'wolf_claw_up.png' 1 3;   Save-Row $s 0 $KB $out 'claw_up'
+# sheet 2 (front / back): walk, run, bite, leap prepare, leap
+$K2 = 0.66
+foreach ($d in 'down', 'up') {
+    $s = Get-Frames "wolf_sheet2_$d.png" 5 3
+    Save-Row $s 0 $K2 $out $d; Save-Row $s 1 $K2 $out "run_$d"; Save-Row $s 2 $K2 $out "bite_$d"
+    Save-Row $s 3 $K2 $out "leapPrepare_$d"; Save-Row $s 4 $K2 $out "leap_$d"
+}
 
 # ---------------- effects ----------------
 $fxDir = "$root/js_version/assets/effects/boss"

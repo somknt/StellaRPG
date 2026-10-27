@@ -460,7 +460,8 @@ class Game {
             return;
         }
         
-        // プレイヤー更新
+        // プレイヤー更新（動く前の位置を覚えておく：敵の体から押し出す向きに使う）
+        const prevPlayerPos = this.player.position.clone();
         this.player.update(deltaTime, this.input);
         
         // 魔法：ボタンで詠唱開始 → 頭上のゲージが満タンになったら発動
@@ -493,10 +494,8 @@ class Game {
         // 魔法と敵の衝突
         const magicHits = this.magicSystem.checkCollisions(this.enemySpawner.enemies);
         for (const hit of magicHits) {
-            // 星力段階4なら威力1.2倍
-            const damage = this.player.starPowerStage >= 4 
-                ? Math.floor(hit.damage * 1.2) 
-                : hit.damage;
+            // 魔法のダメージ倍率（Player.MAGIC_DAMAGE_MUL）。星力段階4ならさらに1.2倍
+            const damage = Math.round(hit.damage * Player.MAGIC_DAMAGE_MUL * (this.player.starPowerStage >= 4 ? 1.2 : 1));
             
             // 残り火・竜巻の継続ダメージではひるませない
             hit.enemy.takeDamage(damage, hit.direction, !hit.noStagger, 'magic');
@@ -518,6 +517,9 @@ class Game {
         
         // 敵更新
         this.enemySpawner.update(enemyDeltaTime, this.player, window.gameData.enemies);
+        
+        // 敵の体はすり抜けられない（主人公を来た側へ押し出す）
+        this.enemySpawner.resolveBodyCollisions(this.player, prevPlayerPos);
         
         // 敵の攻撃
         this.enemySpawner.checkEnemyAttacks(this.player);

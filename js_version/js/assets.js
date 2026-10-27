@@ -258,12 +258,12 @@ AssetManager.BEAST_SPRITES_READY = ['giant_forest_boar', 'black_corrupted_wolf']
 // モーション名: 画像がある向き（ない向きは Enemy.getEnemyImage が横向きか歩きの絵で代わりに出す）
 AssetManager.BOSS_MOTION_SPRITES_READY = {
     giant_forest_boar: {
-        tuskAttack: ['right', 'left'], chargePrepare: ['right', 'left'], charge: ['right', 'left'],
+        tuskAttack: ['right', 'left', 'down', 'up'], chargePrepare: ['right', 'left', 'down', 'up'], charge: ['right', 'left', 'down', 'up'],
         stomp: ['right', 'left', 'down', 'up'], roar: ['right', 'left', 'down', 'up']
     },
     black_corrupted_wolf: {
-        run: ['right', 'left'], bite: ['right', 'left'], claw: ['right', 'left', 'down', 'up'],
-        leapPrepare: ['right', 'left'], leap: ['right', 'left'], howl: ['right', 'left', 'down', 'up']
+        run: ['right', 'left', 'down', 'up'], bite: ['right', 'left', 'down', 'up'], claw: ['right', 'left', 'down', 'up'],
+        leapPrepare: ['right', 'left', 'down', 'up'], leap: ['right', 'left', 'down', 'up'], howl: ['right', 'left', 'down', 'up']
     }
 };
 // ボス戦のエフェクト画像（assets/effects/boss/<名前>.png）。_1〜_3 は3コマの物
