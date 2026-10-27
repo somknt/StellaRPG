@@ -1,7 +1,7 @@
 // 魔法陣システム
 //
 // 流れ：魔法ボタン → 主人公が詠唱（足元に属性色の魔法陣、頭上にゲージ）→ ゲージ満タンで発動
-// 詠唱中は歩くことしかできない（ダッシュ・回避・攻撃は不可）。詠唱の処理は player.js
+// 詠唱中は歩くことしかできない（ダッシュ・攻撃は不可。回避を押すと詠唱をキャンセルして回避）。詠唱の処理は player.js
 
 // 属性ごとの色と画像の名前（魔法陣の形は全属性共通で、色だけ変える）
 const MAGIC_ELEMENTS = {
@@ -30,10 +30,10 @@ const STARTER_MAGIC = [
     { id: 'magic_202', name: 'ウォーターボール', category: '攻撃', element: '水', power: 20, spCost: 8, cooldown: 0.6, chantTime: 0.8, requiredStage: 0, starter: true,
       shape: 'projectile', speed: 380, size: 13, range: 400, knockback: 70,
       description: '水の玉を放つ。当たった敵を大きく押し流す。' },
-    // 風：小さな竜巻。少し前に進んでその場にとどまり、まわりの敵を吸い寄せて何度もダメージ
+    // 風：小さな竜巻。前に進んでその場にとどまり、まわりの敵を吸い寄せて何度もダメージ
     { id: 'magic_203', name: 'テンペスト', category: '攻撃', element: '風', power: 6, spCost: 9, cooldown: 1.0, chantTime: 0.8, requiredStage: 0, starter: true,
-      shape: 'tornado', travel: 110, travelTime: 0.45, radius: 30, duration: 3.0, interval: 0.4, pull: 90, pullRadius: 120,
-      description: '小さな竜巻を生み出す。少し前に進んでその場にとどまり、まわりの敵を吸い寄せながら何度もダメージを与える。' },
+      shape: 'tornado', travel: 280, travelTime: 0.9, radius: 30, duration: 6.0, interval: 0.4, pull: 90, pullRadius: 120,
+      description: '小さな竜巻を生み出す。前に進んでその場に長くとどまり、まわりの敵を吸い寄せながら何度もダメージを与える。' },
     // 土：岩の弾。遅いが重くて威力が高い
     { id: 'magic_204', name: 'ストーンキャノン', category: '攻撃', element: '土', power: 38, spCost: 12, cooldown: 1.0, chantTime: 1.3, requiredStage: 0, starter: true,
       shape: 'projectile', speed: 270, size: 17, range: 380, knockback: 40, rock: true,
@@ -357,12 +357,12 @@ class FirePatch {
 
 // テンペスト：小さな竜巻。ゆっくり前に進み、巻き込んだ敵に一定間隔でダメージ。少し吸い寄せる
 class Tornado {
-    constructor(magic, position, direction) {
+    constructor(magic, position, direction, travel = null) {
         this.magic = magic;
         this.position = position.clone();
         this.direction = direction.normalize();
         this.start = position.clone();
-        this.travel = magic.travel || 110;          // 進む距離
+        this.travel = travel !== null ? travel : (magic.travel || 110); // 進む距離（壁があればその手前まで）
         this.travelTime = magic.travelTime || 0.45; // 進むのにかかる時間（そのあとはその場にとどまる）
         this.radius = (magic.radius || 30) * MAGIC_SIZE_MUL;
         this.duration = magic.duration || 3.0;
@@ -589,7 +589,14 @@ class MagicSystem {
         if (magic.shape === 'strike') {
             this.strikes.push(new LightningStrike(magic, targetPos ? targetPos.clone() : this.findStrikeTarget(magic, position, dirVec, enemies)));
         } else if (magic.shape === 'tornado') {
-            this.tornados.push(new Tornado(magic, position, dirVec));
+            // 壁・柱の手前で止まる（game.js の computeCastAim の「届く所」の輪と同じ調べ方）
+            let travel = magic.travel || 110;
+            if (this.map && this.map.isShotBlocked) {
+                for (let d = 16; d <= travel; d += 8) {
+                    if (this.map.isShotBlocked(position.add(dirVec.mult(d)))) { travel = Math.max(0, d - 8); break; }
+                }
+            }
+            this.tornados.push(new Tornado(magic, position, dirVec, travel));
         } else {
             this.projectiles.push(new MagicProjectile(magic, position, direction));
         }

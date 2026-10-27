@@ -90,7 +90,7 @@ class Player {
         this.magicCooldowns = {};
         
         // 詠唱：魔法ボタンを押すと頭上のゲージが溜まり、満タンで発動
-        // 詠唱中は歩くことしかできない（ダッシュ・回避・攻撃は不可）
+        // 詠唱中は歩くことしかできない（ダッシュ・攻撃は不可。回避を押すと詠唱をキャンセルして回避する）
         this.isChanting = false;
         this.chantMagic = null;
         this.chantTime = 0;
@@ -157,12 +157,14 @@ class Player {
         // 魔法の切り替え（詠唱中はできない）
         this.updateMagicSelect(input);
         
-        // 回避の開始（移動より先に判定。詠唱中・飛ばされている間はできない）
+        // 回避の開始（移動より先に判定。飛ばされている間はできない）
         // 回避中・待ち時間中に押した時は少しだけ覚えておき、できるようになったらすぐ出す（連続の回避がつながるように）
         if (input.isDodgePressed()) this.dodgeBuffer = Player.DODGE_BUFFER;
         else if (this.dodgeBuffer > 0) this.dodgeBuffer -= deltaTime;
-        if (this.dodgeBuffer > 0 && !this.isChanting && this.knockTimer <= 0) {
-            if (this.tryDodge(input)) this.dodgeBuffer = 0;
+        // 詠唱中に回避を押したら、魔法をキャンセルして回避する（使った MP は戻らない）
+        if (this.dodgeBuffer > 0 && this.knockTimer <= 0) {
+            if (this.isChanting && this.canDodgeNow()) this.cancelChant();
+            if (!this.isChanting && this.tryDodge(input)) this.dodgeBuffer = 0;
         }
         
         // 移動処理（飛ばされている間はノックバックだけ。回避中は回避の移動を優先）
@@ -305,9 +307,13 @@ class Player {
     }
     
     // ---------- 回避 ----------
+    // 今すぐ回避できるか（待ち時間・スタミナ）。できない時は詠唱もキャンセルしない
+    canDodgeNow() {
+        return !this.isDodging && this.dodgeCooldownTimer <= 0 && this.currentStamina >= this.dodgeStaminaCost;
+    }
+    
     tryDodge(input) {
-        if (this.isDodging || this.dodgeCooldownTimer > 0) return false;
-        if (this.currentStamina < this.dodgeStaminaCost) return false;
+        if (!this.canDodgeNow()) return false;
         
         // 入力方向へ回避。入力がなければ向いている方向へ
         const move = input.getMovementVector();
@@ -578,7 +584,7 @@ class Player {
         this.isChanting = true;
         this.chantMagic = magic;
         this.chantTime = 0;
-        this.chantDuration = magic.chantTime || 1.0;
+        this.chantDuration = (magic.chantTime || 1.0) * Player.CHANT_TIME_MUL;
         this.chantRotation = 0;
         this.castFrame = 0;
         this.castFrameTimer = 0;
@@ -606,6 +612,16 @@ class Player {
             this.magicCooldowns[magic.id] = magic.cooldown || 0;
             this.readyCast = magic;
         }
+    }
+    
+    // 詠唱をやめる（回避でキャンセルした時）。魔法は出ず、クールダウンも始まらない
+    cancelChant() {
+        if (!this.isChanting) return;
+        this.isChanting = false;
+        this.chantMagic = null;
+        this.chantTime = 0;
+        this.castFrame = 0;
+        this.castFrameTimer = 0;
     }
     
     // 今の向きでの、手のひらの前の魔法陣の位置（ワールド座標）と形
@@ -692,7 +708,8 @@ class Player {
         }
     }
     
-    takeDamage(damage) {
+    // from：攻撃が来た所（ワールド座標）。当たったらその反対へ少し飛ばされる（なければ向いている方の後ろへ）
+    takeDamage(damage, from = null) {
         // 回避中は無敵。攻撃を避けたらジャスト回避成立
         if (this.isDodging) {
             this.dodgedAttack = true;
@@ -703,6 +720,11 @@ class Player {
         const actualDamage = Math.max(1, damage - this.defense);
         this.currentHP = Math.max(0, this.currentHP - actualDamage);
         this.invincibleTime = this.maxInvincibleTime;
+        
+        // 敵の攻撃に当たったら、少しノックバック（全部の敵・全部の攻撃。回避中は上で抜けているので飛ばされない）
+        let away = from ? this.position.sub(from) : null;
+        if (!away || away.length() < 0.01) away = this.directionToVector(this.direction).mult(-1);
+        this.knockback(away, Player.HIT_KNOCK.dist, Player.HIT_KNOCK.time, true);
         
         // ダメージ効果音
         if (window.soundManager) {
@@ -1130,6 +1152,10 @@ Player.MAGIC_SLOT_COUNT = 5;
 // 主人公の魔法のダメージの倍率（全部の魔法：弾・残り火・竜巻・雷など。game.js で掛ける）
 // （3.2 = 前の 1.6 の2倍）。属性の相性（有利 1.5倍 / 不利 0.5倍）はこの後に掛ける
 Player.MAGIC_DAMAGE_MUL = 3.2;
+// 詠唱の長さの倍率（magic_circles.json の chantTime にかける）
+Player.CHANT_TIME_MUL = 1.3;
+// 敵の攻撃に当たった時のノックバック（dist：飛ばされる距離 px / time：秒。この間は動けない）
+Player.HIT_KNOCK = { dist: 40, time: 0.2 };
 // レベルのステータス（data/player_stats_table.json と同じ式）
 Player.statsForLevel = (lv) => ({
     level: lv, hp: 100 + 21 * (lv - 1), attack: 15 + 3 * (lv - 1), defense: 5 + (lv - 1),

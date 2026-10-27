@@ -151,7 +151,8 @@ class MagicGolemAI extends BossAI {
             if (!hit) continue;
             // ジャスト回避の無敵中にふれた攻撃は、使ったことにする（無敵が切れた瞬間に当たらないように）
             if (player.isGuarded && player.isGuarded() && !player.isDodging) { h.used = true; continue; }
-            const dealt = player.takeDamage(h.damage);
+            // 当たった攻撃の中心から外へ少しノックバック（中心にいる時はゴーレムから外へ）
+            const dealt = player.takeDamage(h.damage, d > 0.5 ? new Vector2(c.x, c.y - 28) : this.e.position);
             if (dealt > 0) { h.used = true; this.events.push({ type: 'hit', power: h.shake || 5 }); }
         }
         super.checkHits(player);
@@ -577,10 +578,16 @@ Enemy.drawGolem = function (e, ctx, s, hop) {
     const dir = e.direction;
     const side = dir === 'left' || dir === 'right';
     const back = dir === 'up';
-    // 被弾した瞬間は白、ジャスト回避のスロー中は薄い水色
-    const slow = Enemy.slowMotion;
+    // 被弾した瞬間は白（魔法の有利属性は赤・不利属性は青）、ジャスト回避のスロー中は薄い水色
+    const hitColor = e.hitFlashTimer > 0 ? e.hitFlashColor : null;
+    const colored = hitColor === '#ff3030' || hitColor === '#3a7dff';
+    const slow = Enemy.slowMotion && !colored;
     const flash = e.hitFlashTimer > 0 || slow;
-    const C = slow
+    const C = colored
+        ? (hitColor === '#ff3030'
+            ? { stone: '#ff4a4a', light: '#ff8a8a', dark: '#c42020', line: '#5a0e0e', metal: '#e83a3a', metalL: '#ff9a9a', gold: '#ffb0b0' }
+            : { stone: '#4a86ff', light: '#8ab4ff', dark: '#2253c4', line: '#0e2560', metal: '#3a70e8', metalL: '#9ac0ff', gold: '#b0ccff' })
+        : slow
         ? { stone: '#c8f0ff', light: '#e4f9ff', dark: '#9fd8ee', line: '#5a9ab8', metal: '#b4e6fa', metalL: '#dcf6ff', gold: '#e4f9ff' }
         : flash
         ? { stone: '#ffffff', light: '#ffffff', dark: '#e6e6f0', line: '#c8c8d8', metal: '#f2f2ff', metalL: '#ffffff', gold: '#ffffff' }

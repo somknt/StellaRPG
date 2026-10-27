@@ -36,7 +36,7 @@ const BOSS_DATA = [
         elements: { weak: ['炎', '雷', '土'], resist: [] },
         enemy: {
             enemyId: 'boss_001', name: '巨大森イノシシ', displayName: '巨大森イノシシ',
-            hp: 640, attack: 16, defense: 3, exp: 120,
+            hp: 850, attack: 16, defense: 3, exp: 120,
             size: 74, speed: 64, detectionRange: 4000, attackRange: 90,
             isBoss: true, poiseRatio: 0.14, knockbackScale: 0.35
         },
@@ -88,7 +88,7 @@ const BOSS_DATA = [
         elements: { weak: ['炎', '土', '風'], resist: ['雷'] },
         enemy: {
             enemyId: 'boss_002', name: '黒蝕狼', displayName: '黒蝕狼',
-            hp: 720, attack: 14, defense: 4, exp: 200,
+            hp: 1000, attack: 34, defense: 4, exp: 200,
             size: 56, speed: 150, detectionRange: 4000, attackRange: 70,
             isBoss: true, poiseRatio: 0.12, knockbackScale: 0.5
         },
@@ -140,7 +140,6 @@ const BOSS_DATA = [
         features: ['古代遺跡を守る魔導機械', '高い防御力', '強力な範囲攻撃', '魔法陣による特殊攻撃', '上級者向けのボス'],
         ai: 'MagicGolemAI',
         theme: { color: '#7fd6ff', banner: 'golem', flash: '#7fe6ff', arenaTint: 'rgba(20, 50, 120, 0.1)', vignette: 'rgba(5, 10, 40, 0.55)' },
-        countdown: true,      // BATTLE START の後に 3・2・1（この間は操作も敵AIも止まる）
         playerLevel: 15,      // 推奨レベル：この戦いは主人公をこのレベルの強さで始める（data/player_stats_table.json）
         elements: { weak: ['水'], resist: ['炎', '風', '雷'] },
         enemy: {
@@ -151,13 +150,13 @@ const BOSS_DATA = [
         },
         look: { key: 'magic_golem', golem: true },
         attackInterval: 1.6,
-        // フェーズ：HP50%以下で2、30%以下で3
+        // フェーズ：HP50%以下で2、25%以下で3（イノシシ・狼と同じ）
         phases: [
             { hp: 1.0, label: '通常', speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0,
               attacks: { punch: 4, slam: 3 } },
             { hp: 0.5, label: '強化', speedMul: 1.15, intervalMul: 0.9, recoverMul: 0.9, transition: 'activate',
               attacks: { punch: 1, punchCombo: 3, slam: 2, magicShot: 3, shockwave: 3, hazardFloor: 3, shield: 1 } },
-            { hp: 0.3, label: '最終強化', speedMul: 1.25, intervalMul: 0.8, recoverMul: 0.8, transition: 'activate',
+            { hp: 0.25, label: '最終強化', speedMul: 1.25, intervalMul: 0.8, recoverMul: 0.8, transition: 'activate',
               attacks: { punchTriple: 3, slam: 1, magicCannon: 3, bigShockwave: 3, hazardBarrage: 3, magicShot: 2, shield: 1 } }
         ],
         // 距離（range・reach・radius・maxRadius・band）は Enemy.SCALE.range 倍、弾の速さは Enemy.SCALE.speed 倍される

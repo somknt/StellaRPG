@@ -202,14 +202,14 @@
       "requiredStage": 0,
       "starter": true,
       "shape": "tornado",
-      "travel": 110,
-      "travelTime": 0.45,
+      "travel": 280,
+      "travelTime": 0.9,
       "radius": 30,
-      "duration": 3.0,
+      "duration": 6.0,
       "interval": 0.4,
       "pull": 90,
       "pullRadius": 120,
-      "description": "小さな竜巻を生み出す。少し前に進んでその場にとどまり、まわりの敵を吸い寄せながら何度もダメージを与える。"
+      "description": "小さな竜巻を生み出す。前に進んでその場に長くとどまり、まわりの敵を吸い寄せながら何度もダメージを与える。"
     },
     {
       "id": "magic_204",

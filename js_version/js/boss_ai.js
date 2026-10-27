@@ -154,6 +154,7 @@ class BossAI {
         this.phase.update(e.currentHP / e.maxHP);
         const changed = this.phase.consume();
         if (changed !== null) {
+            this.applyPhaseBuff(changed);
             this.cancel();
             this.events.push({ type: 'phase', index: changed });
             this.startAction('transition', this.transition(changed));
@@ -175,6 +176,15 @@ class BossAI {
             this.idleMove(dt);
             if (this.wait <= 0) this.chooseAttack();
         }
+    }
+    
+    // フェーズが変わった時の強化（全ボス共通。BossAI.PHASE_BUFF）
+    // 攻撃力は元の値に倍率をかけ直す（何回呼んでも重ならない）。防御は「受けるダメージの倍率」（Enemy.takeDamage）
+    applyPhaseBuff(index) {
+        if (this.baseAttack === undefined) this.baseAttack = this.e.attack;
+        const b = BossAI.PHASE_BUFF[Math.min(index, BossAI.PHASE_BUFF.length - 1)];
+        this.e.attack = Math.max(1, Math.round(this.baseAttack * b.attack));
+        this.e.damageTakenMul = b.damageTaken;
     }
     
     // プレイヤーがボスの後ろ（向いている方向から 100度以上うしろ）の近くにいるか
@@ -345,7 +355,8 @@ class BossAI {
             if (!hit) continue;
             // ジャスト回避の無敵中にふれた攻撃は、使ったことにする（無敵が切れた瞬間に当たらないように）
             if (player.isGuarded && player.isGuarded() && !player.isDodging) { h.used = true; continue; }
-            const dealt = player.takeDamage(h.damage);
+            // 当たった攻撃の中心から外へ少しノックバック（中心にいる時はボスから外へ）
+            const dealt = player.takeDamage(h.damage, d > 0.01 ? c : this.e.position);
             if (dealt > 0) {
                 h.used = true;
                 this.events.push({ type: 'hit', power: h.shake || 4 });
@@ -617,6 +628,13 @@ class BossAI {
 // behindRange ：この距離（× Enemy.SCALE.range）より近くで後ろに回られたら、すぐ振り向いて攻撃
 // roarRange / roarKnock：咆哮・遠吠えでプレイヤーが必ず吹き飛ばされる範囲と距離(px)
 BossAI.TUNING = { interval: 0.35, recover: 0.55, behindRange: 300, roarRange: 330, roarKnock: 260 };
+// フェーズごとの強化（全ボス共通。[通常, HP50%以下, HP25%以下]）
+// attack：攻撃力の倍率 / damageTaken：受けるダメージの倍率（0.85 なら 15% 減る＝防御力アップ）
+BossAI.PHASE_BUFF = [
+    { attack: 1.0,  damageTaken: 1.0 },
+    { attack: 1.0,  damageTaken: 0.85 },  // HP50%以下：少し硬くなる
+    { attack: 1.25, damageTaken: 0.7 }    // HP25%以下：もっと硬く、攻撃力も上がる
+];
 
 // ==========================================================
 // 巨大森イノシシ：重い動き・牙・突進（壁に当たると目を回す）・踏みつけ

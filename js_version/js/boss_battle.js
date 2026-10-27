@@ -3,7 +3,7 @@
 // 1. ボスのフィールドを読み込み、主人公を南、ボスを北に置く（game.startBossBattle）
 //    星の闘技場（巨大森イノシシ・黒蝕狼）/ 古代星紋遺跡（魔道ゴーレム。map.getBossStage がある）
 // 2. 開始演出：門が開いてボスが出てくる（遺跡はその場で起動）→ ボス名 → BATTLE START と同時に戦闘開始
-//    def.countdown のボス（魔道ゴーレム）は BATTLE START の後に 3・2・1・GO!（その間は操作も敵AIも止まる）
+//    def.countdown: true のボスは BATTLE START の後に 3・2・1・GO!（その間は操作も敵AIも止まる。今は使っているボスなし）
 // 3. 戦闘：ボスの HP バー（なめらかに減る・フェーズ表示）。フェーズ移行の演出はボスAIが1回だけ知らせてくる
 // 4. 勝利（ボスの HP 0）/ 敗北（主人公の HP 0）→ 結果画面（もう一度・モンスター選択・メインメニュー）
 //
@@ -85,7 +85,7 @@ class BossBattle {
         this.boss.direction = 'down';
         game.camera.snapToTarget();
         this.countStep = 0;
-        // HP バーの目印を、そのボスのフェーズが変わる所（HP50%・30% など）に置く
+        // HP バーの目印を、そのボスのフェーズが変わる所（HP50%・25%）に置く
         const ticks = this.ui.hud ? this.ui.hud.querySelectorAll('.bh2-tick') : [];
         def.phases.slice(1).forEach((ph, i) => { if (ticks[i]) ticks[i].style.left = (ph.hp * 100) + '%'; });
         

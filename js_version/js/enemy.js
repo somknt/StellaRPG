@@ -27,6 +27,7 @@ class Enemy {
         this.attackCooldown = enemyData.attackCooldown || 1.5;
         this.attackTimer = 0;
         this.hitFlashTimer = 0;
+        this.hitFlashColor = '#ffffff'; // 被弾の光の色（ふつうは白。魔法の有利属性は赤・不利属性は青。game.js が入れる）
         
         // アニメーション
         this.animationFrame = 0;
@@ -578,9 +579,11 @@ class Enemy {
         }
         if (this.ai && this.ai.superArmor) canStagger = false;
         const def = kind === 'magic' && this.magicDefense !== null ? this.magicDefense : this.defense;
-        const actualDamage = Math.max(1, damage - def);
+        // damageTakenMul：ボスのフェーズの防御力アップ（boss_ai.js の BossAI.PHASE_BUFF）
+        const actualDamage = Math.max(1, Math.round((damage - def) * (this.damageTakenMul || 1)));
         this.currentHP = Math.max(0, this.currentHP - actualDamage);
         this.hitFlashTimer = 0.1;
+        this.hitFlashColor = '#ffffff';
         if (this.isSlime) this.provoked = true; // 攻撃されたら怒る
         
         // ひるみ値がたまったら大きくノックバック
@@ -675,10 +678,11 @@ class Enemy {
             const ix = Math.floor(screenPos.x - imageSize/2);
             const iy = Math.floor(screenPos.y - imageSize/2 - hop);
             ctx.drawImage(enemyImage, ix, iy, imageSize, imageSize);
-            // 被弾した瞬間は、体の形のまま白く光らせる。ジャスト回避のスロー中は薄い水色
+            // 被弾した瞬間は、体の形のまま光らせる（ふつうは白・有利属性は赤・不利属性は青）。ジャスト回避のスロー中は薄い水色
             if (this.hitFlashTimer > 0 || Enemy.slowMotion) {
-                ctx.globalAlpha = Enemy.slowMotion ? 0.6 : 0.75;
-                ctx.drawImage(Enemy.getWhiteSilhouette(enemyImage, Enemy.slowMotion ? Enemy.SLOW_TINT : '#ffffff'), ix, iy, imageSize, imageSize);
+                const slowOnly = Enemy.slowMotion && !(this.hitFlashTimer > 0 && this.hitFlashColor !== '#ffffff');
+                ctx.globalAlpha = slowOnly ? 0.6 : 0.75;
+                ctx.drawImage(Enemy.getWhiteSilhouette(enemyImage, slowOnly ? Enemy.SLOW_TINT : this.hitFlashColor), ix, iy, imageSize, imageSize);
                 ctx.globalAlpha = 1;
             }
         } else if (Enemy.BEAST_LOOKS[this.data.name]) {
@@ -723,7 +727,7 @@ class Enemy {
         // 画像がない敵：被弾した瞬間は白い丸で光らせる
         if (this.hitFlashTimer > 0 && !enemyImage) {
             ctx.globalAlpha = 0.7;
-            ctx.fillStyle = Enemy.slowMotion ? Enemy.SLOW_TINT : '#ffffff';
+            ctx.fillStyle = this.hitFlashColor !== '#ffffff' ? this.hitFlashColor : Enemy.slowMotion ? Enemy.SLOW_TINT : '#ffffff';
             ctx.beginPath();
             ctx.arc(screenPos.x, screenPos.y, this.size * 0.6, 0, Math.PI * 2);
             ctx.fill();
@@ -869,11 +873,12 @@ class Enemy {
         const side = dir === 'left' ? -1 : 1;
         const bob = (this.animationFrame === 1 ? -1.5 : 0) * (this.velocity.length() > 1 ? 1 : 0);
         const cx = s.x, cy = s.y - hop + bob;
-        // 被弾した瞬間は白く、ジャスト回避のスロー中は薄い水色にする
-        const slow = Enemy.slowMotion;
+        // 被弾した瞬間は白く（有利属性は赤・不利属性は青）、ジャスト回避のスロー中は薄い水色にする
+        const tint = this.hitFlashTimer > 0 ? Enemy.HIT_TINTS[this.hitFlashColor] : null;
+        const slow = Enemy.slowMotion && !(tint && this.hitFlashColor !== '#ffffff');
         const flash = this.hitFlashTimer > 0 || slow;
-        const body = !flash ? look.body : slow ? Enemy.SLOW_TINT : '#ffffff';
-        const dark = !flash ? look.dark : slow ? '#9fd8ee' : '#e8e8e8';
+        const body = !flash ? look.body : slow ? Enemy.SLOW_TINT : (tint ? tint.body : '#ffffff');
+        const dark = !flash ? look.dark : slow ? '#9fd8ee' : (tint ? tint.dark : '#e8e8e8');
         ctx.save();
         ctx.lineWidth = 2;
         ctx.strokeStyle = look.outline;
@@ -1060,6 +1065,12 @@ Enemy.BODY = { rx: 0.42, ry: 0.28, oy: 0.12, player: 16 };
 // ジャスト回避で敵がスローになっている間（game.js が毎フレーム入れる）。敵を薄い水色にして知らせる
 Enemy.slowMotion = false;
 Enemy.SLOW_TINT = '#bfefff';
+// 被弾の光の色（魔法の属性の相性。game.js の Game.AFFINITY_FLASH と同じ色）と、コードで描く体の影の色
+Enemy.HIT_TINTS = {
+    '#ffffff': { body: '#ffffff', dark: '#e8e8e8' },   // ふつう：白
+    '#ff3030': { body: '#ff3030', dark: '#c41a1a' },   // 有利属性（よく効く）：赤
+    '#3a7dff': { body: '#3a7dff', dark: '#2253c4' }    // 不利属性（効きにくい）：青
+};
 
 // 狼・猪の仮の見た目の色と形。key は画像を置いた時の名前（assets/enemies/<key>/<向き>_<1〜3>.png）
 Enemy.BEAST_LOOKS = {
@@ -1380,11 +1391,13 @@ class EnemySpawner {
         // 光弾の当たり判定
         for (const p of this.projectiles) {
             if (p.position.distance(player.position) > p.radius + player.size * 0.3) continue;
+            // from：弾が飛んできた方（当たったら少しノックバック）
+            const from = p.velocity ? p.position.sub(p.velocity) : p.position;
             if (player.isDodging) {
                 // 回避中はすり抜ける（ジャスト回避の判定だけ起こす）
-                player.takeDamage(p.damage);
+                player.takeDamage(p.damage, from);
             } else {
-                player.takeDamage(p.damage);
+                player.takeDamage(p.damage, from);
                 p.life = 0;
             }
         }
@@ -1398,7 +1411,7 @@ class EnemySpawner {
             const b = enemy.bodyShape();
             const touch = Math.hypot((player.position.x - b.cx) / (b.rx + 6), (player.position.y - b.cy) / (b.ry + 6)) <= 1;
             if (!player.isDodging && touch) {
-                player.takeDamage(Math.max(1, Math.round(enemy.attack * Enemy.CONTACT.damage)));
+                player.takeDamage(Math.max(1, Math.round(enemy.attack * Enemy.CONTACT.damage)), enemy.position);
             }
             
             // ボス：AI が出した当たり判定（牙・突進・踏みつけ・噛みつき・侵蝕波動など）
@@ -1412,7 +1425,7 @@ class EnemySpawner {
                 const distance = enemy.position.distance(player.position);
                 if (distance <= enemy.size * 0.75 + 24) {
                     const attackData = enemy.performAttack();
-                    player.takeDamage(attackData.damage);
+                    player.takeDamage(attackData.damage, enemy.position);
                 }
             }
             // 通常の攻撃（かみつき）：溜めが終わった瞬間に、届く距離にいれば当たる
@@ -1420,7 +1433,7 @@ class EnemySpawner {
                 enemy.pendingMelee = false;
                 const distance = enemy.position.distance(player.position);
                 if (distance <= enemy.attackRange + player.size * 0.35) {
-                    player.takeDamage(enemy.attack);
+                    player.takeDamage(enemy.attack, enemy.position);
                 }
             }
         }

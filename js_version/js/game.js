@@ -524,10 +524,14 @@ class Game {
             const element = hit.projectile && hit.projectile.magic && hit.projectile.magic.element;
             const affinity = this.getElementAffinity(hit.enemy, element);
             const damage = Math.round(hit.damage * Player.MAGIC_DAMAGE_MUL * (this.player.starPowerStage >= 4 ? 1.2 : 1) * Game.ELEMENT_MUL[affinity]);
-            if (affinity !== 'normal') this.addAffinityText(hit.enemy, affinity);
             
             // 残り火・竜巻の継続ダメージではひるませない
-            hit.enemy.takeDamage(damage, hit.direction, !hit.noStagger, 'magic');
+            const res = hit.enemy.takeDamage(damage, hit.direction, !hit.noStagger, 'magic');
+            // 当たった時の光の色：有利属性は赤・不利属性は青（ふつうは白のまま。文字は出さない）
+            if (affinity !== 'normal' && res && res.damage > 0) {
+                hit.enemy.hitFlashColor = Game.AFFINITY_FLASH[affinity];
+                hit.enemy.hitFlashTimer = Math.max(hit.enemy.hitFlashTimer, Game.AFFINITY_FLASH_TIME);
+            }
             if (hit.knockback > 0 && hit.enemy.isAlive()) {
                 hit.enemy.applyKnockback(hit.direction, hit.knockback, true); // 水・土は敵を大きく押し出す
             }
@@ -638,7 +642,6 @@ class Game {
             if (this.activeBattle) this.activeBattle.drawWorld(this.ctx, cam); // 敵の出現・ボスの攻撃の演出
             this.enemySpawner.drawEffects(this.ctx, cam);       // 倒れた敵の星・敵の光弾
             this.magicSystem.draw(this.ctx, cam);               // 魔術
-            this.drawAffinityTexts(this.ctx, cam);              // 「効果ばつぐん！」など
             this.drawAim(this.ctx, cam);                        // 攻撃ボタンのスライドの向き
             this.map.drawAbove(this.ctx, cam);                  // 入口のアーチ（キャラより手前）
             if (window.showCollision) this.map.drawCollisionDebug(this.ctx, cam);
@@ -729,38 +732,6 @@ class Game {
         if (el.weak && el.weak.includes(element)) return 'weak';
         if (el.resist && el.resist.includes(element)) return 'resist';
         return 'normal';
-    }
-    
-    // 敵の頭の上に「効果ばつぐん！」「いまひとつ…」を少しだけ出す（竜巻などの連続ヒットで重ならないよう、同じ敵は0.5秒に1回）
-    addAffinityText(enemy, affinity) {
-        this.affinityTexts = this.affinityTexts || [];
-        const now = performance.now();
-        if (enemy._affinityAt && now - enemy._affinityAt < 500) return;
-        enemy._affinityAt = now;
-        this.affinityTexts.push({ enemy, affinity, age: 0, x: enemy.position.x, y: enemy.position.y - enemy.size * 0.9 });
-    }
-    
-    drawAffinityTexts(ctx, cam) {
-        if (!this.affinityTexts || !this.affinityTexts.length) return;
-        const dt = Math.min(this.deltaTime || 0.016, 0.1);
-        ctx.save();
-        ctx.textAlign = 'center';
-        ctx.font = 'bold 22px sans-serif';
-        ctx.lineWidth = 4;
-        for (const t of this.affinityTexts) {
-            t.age += dt;
-            const k = t.age / Game.AFFINITY_TEXT_TIME;
-            const weak = t.affinity === 'weak';
-            ctx.globalAlpha = Math.max(0, 1 - k * k);
-            const x = t.x - cam.x, y = t.y - cam.y - k * 28;
-            const text = weak ? '効果ばつぐん！' : 'いまひとつ…';
-            ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
-            ctx.strokeText(text, x, y);
-            ctx.fillStyle = weak ? '#ffd84a' : '#a9b8c8';
-            ctx.fillText(text, x, y);
-        }
-        ctx.restore();
-        this.affinityTexts = this.affinityTexts.filter(t => t.age < Game.AFFINITY_TEXT_TIME);
     }
     
     // ---------- ねらう向き ----------
@@ -1003,7 +974,9 @@ class Game {
 
 // 属性の相性のダメージ倍率
 Game.ELEMENT_MUL = { weak: 1.5, resist: 0.5, normal: 1 };
-Game.AFFINITY_TEXT_TIME = 0.8;
+// 魔法が当たった時の敵の光の色（有利属性は赤・不利属性は青。ふつうは白）と、光る時間（秒）
+Game.AFFINITY_FLASH = { weak: '#ff3030', resist: '#3a7dff' };
+Game.AFFINITY_FLASH_TIME = 0.15;
 // 魔法のねらい
 Game.TARGET_HOLD_MS = 250;     // スマホ：魔法ボタンをこれ以上押し続けると、その場系のターゲットカーソルが出る
 Game.TARGET_SLIDE_GAIN = 1.6;  // スマホ：指を 1px 動かした時、ターゲットカーソルが動く量（画面の拡大率で割る）
