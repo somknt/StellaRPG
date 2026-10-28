@@ -111,6 +111,7 @@ class Game {
         this.enemySpawner.autoSpawn = true;
         this.enemySpawner.map = null;
         document.body.dataset.mode = 'field';
+        playBGM('bgm_field');
         
         // ティウム村マップを初期化
         const villageMapData = typeof initializeTiumVillageMap === 'function' 
@@ -179,6 +180,7 @@ class Game {
         this.battleMode.start(this.map);
         document.body.dataset.mode = 'arena';
         this.gameState = 'playing';
+        playBGM('bgm_battle');
     }
     
     // ---------- バトルモード：ボス戦 ----------
@@ -215,6 +217,7 @@ class Game {
         if (this.bossBattle) this.bossBattle.stop();
         this.activeBattle = null;
         this.paused = false;
+        if (window.soundManager) soundManager.setDuck(false);
         document.body.classList.remove('paused');
         this.shakeTime = 0;
     }
@@ -262,8 +265,11 @@ class Game {
     togglePause(force) {
         const b = this.activeBattle;
         if (!this.isArena() || !b || b.isOver || b.isFrozen) return;
+        const was = this.paused;
         this.paused = force === undefined ? !this.paused : !!force;
         document.body.classList.toggle('paused', this.paused);
+        if (was !== this.paused) playSE('ui_pause');
+        if (window.soundManager) soundManager.setDuck(this.paused); // 止めている間は BGM を小さく
         if (this.paused) {
             b.showPause();
             this.pauseNav = new UINav(document.querySelector('#battle-pause .battle-panel'), 'vertical');
@@ -491,6 +497,8 @@ class Game {
         if (cast) {
             this.magicSystem.castMagic(cast.magic, cast.position, cast.direction, cast.circlePos,
                 this.enemySpawner.enemies, cast.circleShape, cast.circleRadius, this.castAim && this.castAim.target);
+            // 発動の音（雷は落ちた瞬間に magic.js で鳴らす）
+            if (cast.magic.shape !== 'strike') playSE(`magic_${getElementInfo(cast.magic.element).key}`);
             this.input.clearTouchAim('magic');
             this.castAim = null;
             this.castAnchor = null;
@@ -504,10 +512,12 @@ class Game {
             const attackData = this.player.startAttack(this.enemySpawner.enemies, aim);
             if (attackData) {
                 const hits = this.enemySpawner.checkMeleeAttack(attackData);
+                if (hits.some(h => h.damage > 0)) playSE('attack_hit');
                 for (const hit of hits) {
                     if (!hit.enemy.isAlive()) {
                         const drops = hit.enemy.getDrops();
                         this.player.gainExp(drops.exp);
+                        if (!hit.enemy.isBoss) playSE('enemy_defeat');
                     }
                 }
             }
@@ -532,12 +542,22 @@ class Game {
                 hit.enemy.hitFlashColor = Game.AFFINITY_FLASH[affinity];
                 hit.enemy.hitFlashTimer = Math.max(hit.enemy.hitFlashTimer, Game.AFFINITY_FLASH_TIME);
             }
+            // 当たった音：弾・竜巻は属性ごと（残り火の小さなダメージと、雷は鳴らさない。雷は落ちた時に鳴る）
+            // 有利・不利の属性で当たった時は、もう1つ音を重ねる
+            if (res && res.damage > 0) {
+                const p = hit.projectile;
+                const isStrike = typeof LightningStrike === 'function' && p instanceof LightningStrike;
+                if (!hit.burn && !isStrike && element) playSE(`magic_${getElementInfo(element).key}_hit`);
+                if (affinity === 'weak') playSE('magic_weak');
+                else if (affinity === 'resist') playSE('magic_resist');
+            }
             if (hit.knockback > 0 && hit.enemy.isAlive()) {
                 hit.enemy.applyKnockback(hit.direction, hit.knockback, true); // 水・土は敵を大きく押し出す
             }
             if (!hit.enemy.isAlive()) {
                 const drops = hit.enemy.getDrops();
                 this.player.gainExp(drops.exp);
+                if (!hit.enemy.isBoss && res && res.damage > 0) playSE('enemy_defeat');
             }
         }
         
@@ -561,6 +581,7 @@ class Game {
         // スロー中にもう一度ジャスト回避が決まったら、スローと無敵をそこから延ばす（連続でできる）
         // 無敵はスローより少し長くして、スローが終わった瞬間に残っている攻撃に当たらないようにする
         if (this.player.consumeJustDodge()) {
+            playSE('just_dodge');
             this.justDodgeTimer = this.justDodgeDuration;
             this.player.onJustDodge(this.justDodgeDuration + this.justDodgeGuardExtra);
             Enemy.slowMotion = true;

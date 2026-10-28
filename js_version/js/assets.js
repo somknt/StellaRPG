@@ -71,6 +71,12 @@ class AssetManager {
             list[`magic_circle_${el}`] = `assets/effects/magic_circle_${el}.png`;
         }
         
+        // 魔術のエフェクト（assets/effects/magic/<名前>_<コマ>.png）。大きさ・基準点は magic.js の MAGIC_FX
+        // ない間は magic.js が丸と線で描く
+        for (const [name, n] of Object.entries(AssetManager.MAGIC_FX_READY)) {
+            for (let f = 1; f <= n; f++) list[`magicfx_${name}_${f}`] = `assets/effects/magic/${name}_${f}.png`;
+        }
+        
         // 闘技場の素材（assets/tiles/arena/<名前>.png）。置いた物だけ ARENA_ART_READY に足す
         // ない間はコードで描いた仮の見た目で表示する
         for (const name of AssetManager.ARENA_ART_READY) {
@@ -232,7 +238,16 @@ class AssetManager {
 // まだ画像がない物は読み込まない（存在しないファイルを毎回取りに行くとスマホで遅くなるため）
 // 画像を置いたらここに足す
 AssetManager.CAST_SPRITES_READY = ['male', 'female'];
-AssetManager.MAGIC_CIRCLES_READY = [];  // 例: ['fire', 'water', 'wind', 'earth', 'thunder']
+// 魔法陣と魔術のエフェクト（art_source/magic/tools/cut.ps1 で切り出した物）
+AssetManager.MAGIC_CIRCLES_READY = ['fire', 'water', 'wind', 'earth', 'thunder'];
+// 名前: コマ数
+AssetManager.MAGIC_FX_READY = {
+    fire_fly: 4, fire_hit: 4, fire_burn: 4,
+    water_fly: 3, water_hit: 4,
+    wind_loop: 3, wind_edge: 4,
+    thunder_bolt: 4, thunder_flash: 4,
+    stone_fly: 4, stone_hit: 4, stone_dust: 4
+};
 // 闘技場の素材（素材一覧から切り出した物。arena_map.js が使う物だけ読み込む）
 AssetManager.ARENA_ART_READY = [
     'arena_sand', 'arena_sand_rocks', 'arena_sand_rocks_b', 'arena_sand_rocks_c', 'arena_sand_grass',

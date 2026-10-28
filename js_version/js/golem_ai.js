@@ -1,19 +1,23 @@
 // 魔道ゴーレム（古代星紋遺跡の防衛装置。バトルモード用の暫定設定）
 //
 // - MagicGolemAI：ボスAI（boss_ai.js の BossAI を使う）。攻撃は *act_<名前> に書き、boss_data.js の phases[].attacks で使う
-//     フェーズ1：拳・地面叩きつけ（攻撃後に大きな隙）
+//     フェーズ1：拳・地面叩きつけ（攻撃後に大きな隙）・腕の振り回し（回りながら近づく。後で目を回す）・衝撃波
 //     フェーズ2：＋連続拳・星力弾・範囲衝撃波・危険床・防御
 //     フェーズ3：＋3連続拳・魔法陣砲撃（石柱と連動）・広範囲衝撃波・連続危険床
 // - ステージ（ruins_map.js の RuinsMap）と連動：フェーズで魔法陣・石柱・星晶石の光り方が変わる。攻撃の予兆で魔法陣が光る
 // - 見た目：画像がない間は Enemy.drawGolem（下）でコードで描く仮の姿。
 //   画像を置けば assets/enemies/magic_golem/<モーション>_<向き>_<1〜3>.png が使われる（Enemy.getEnemyImage）
-//   モーション名：idle / activate / walk / turn / punch / slam / stomp / magicCharge / magicShot / shockwave /
+//   モーション名：idle / activate / walk / turn / punch / armSwing / slam / stomp / magicCharge / magicShot / shockwave /
 //                 shield / phaseChange / hit / stun / breakdown / death
 
-// ---------- 機械の音（音声ファイルがない間は Web Audio で作る） ----------
+// ---------- 機械の音 ----------
+// assets/sounds/se/golem_boot・golem_roar・golem_thud があればそのファイルを鳴らす。ない間は Web Audio で作った音
 const GolemSound = {
     ac: null,
     context() {
+        // 効果音と同じ Web Audio を使う（音量の設定・一時停止がそのまま効く）
+        const sm = window.soundManager;
+        if (sm && sm.ac) return sm.ac;
         if (!this.ac) {
             const AC = window.AudioContext || window.webkitAudioContext;
             if (!AC) return null;
@@ -25,10 +29,12 @@ const GolemSound = {
     // kind：'boot'（起動） / 'roar'（フェーズ移行の咆哮に当たる機械音） / 'thud'（叩きつけ）
     play(kind) {
         const sm = window.soundManager;
+        if (sm && sm.has('golem_' + kind)) { sm.play('golem_' + kind); return; }
         if (sm && sm.muted) return;
         const ac = this.context();
-        if (!ac) return;
-        const vol = (sm ? sm.sfxVolume : 0.5) * 0.45;
+        if (!ac || ac.state !== 'running') return;
+        const toSfx = !!(sm && sm.sfxGain && sm.ac === ac); // 効果音の音量につなぐ
+        const vol = (toSfx ? 1 : (sm ? sm.sfxVolume : 0.5)) * 0.45;
         const now = ac.currentTime;
         const len = kind === 'roar' ? 1.5 : kind === 'boot' ? 1.2 : 0.35;
         const out = ac.createGain();
@@ -38,7 +44,7 @@ const GolemSound = {
         const lp = ac.createBiquadFilter();
         lp.type = 'lowpass';
         lp.frequency.setValueAtTime(kind === 'thud' ? 260 : 700, now);
-        lp.connect(out); out.connect(ac.destination);
+        lp.connect(out); out.connect(toSfx ? sm.sfxGain : ac.destination);
         const o = ac.createOscillator();
         o.type = 'sawtooth';
         const f0 = kind === 'boot' ? 40 : kind === 'roar' ? 70 : 90;
@@ -67,7 +73,8 @@ class MagicGolemAI extends BossAI {
     
     // 見た目のポーズ（毎フレーム 0 に戻し、攻撃側で決める。Enemy.drawGolem が使う）
     resetPose() {
-        this.pose = { armL: 0, armR: 0, armsUp: 0, slam: 0, shield: 0, charge: 0, stomp: 0, kneel: 0, dormant: 0,
+        // spin：両腕を横にまっすぐ広げる（腕の振り回し）
+        this.pose = { armL: 0, armR: 0, armsUp: 0, slam: 0, shield: 0, charge: 0, stomp: 0, kneel: 0, dormant: 0, spin: 0,
             core: 0.45 + (this.phase ? this.phase.index : 0) * 0.2 };
     }
     
@@ -164,7 +171,9 @@ class MagicGolemAI extends BossAI {
             if (f.trigger !== undefined && !f.fired && f.age >= f.trigger) {
                 f.fired = true;
                 this.events.push({ type: 'shake', power: f.big ? 8 : 4, time: 0.25 });
-                if (f.big) GolemSound.play('thud');
+                // 危険床がはじける音。砲撃の光の柱（big）は golem_beam（どちらもなければ大きい方だけ機械の音）
+                if (f.big) { if (!playSE('golem_beam')) GolemSound.play('thud'); }
+                else playSE('golem_rune');
             }
         }
     }
@@ -190,6 +199,7 @@ class MagicGolemAI extends BossAI {
             });
             this.e.moveBy(dir.mult(22));
             this.addHitbox({ kind: 'arc', follow: true, ang, r, spread: 1.15, damage: this.dmg(a.damage), life: 0.12, shake: 6 });
+            playSE('golem_punch');
             this.addFx({ type: 'slash', follow: true, ang, r: r * 0.82, spread: 1.0, life: 0.22, color: '#c8f4ff', reverse: i % 2 === 1 });
             this.events.push({ type: 'shake', power: 3, time: 0.15 });
             yield* this.sleep(0.2, () => { this.face(dir); this.pose[arm] = 1; });
@@ -200,6 +210,62 @@ class MagicGolemAI extends BossAI {
     *act_punch(a) { yield* this.punches(a, a.hits || 1); }
     *act_punchCombo(a) { yield* this.punches(a, a.hits || 2); }
     *act_punchTriple(a) { yield* this.punches(a, a.hits || 3); }
+    
+    // 腕の振り回し：両腕を横に広げて上半身をひねる（予告：足元の丸）→ 体ごと回りながら腕を振り回し、
+    // まわりをなぎ払いながらプレイヤーへ近づく（1回転ごとに1回当たる）→ 目が回ってふらつく（攻撃のチャンス）
+    *act_armSwing(a) {
+        this.motion = 'armSwing';
+        this.superArmor = true;
+        const spins = (a.spins || 2) + (this.phase.index >= 2 ? 1 : 0);
+        const time = a.time * spins / (a.spins || 2);          // 1回転にかかる時間は同じ
+        const ang0 = Math.atan2(this.facing.y, this.facing.x);
+        this.addFx({ type: 'circleWarn', warn: true, follow: true, feet: true, r: a.radius, life: a.windup });
+        // 両腕を広げ、回る向きと逆に上半身をひねって力をためる
+        yield* this.sleep(a.windup, (p) => {
+            const tw = ang0 - 0.9 * (1 - (1 - p) * (1 - p));
+            this.face(new Vector2(Math.cos(tw), Math.sin(tw)));
+            this.pose.spin = Math.min(1, p * 1.6);
+            this.pose.core += 0.3 * p;
+            this.jitter = p > 0.6 ? 1.5 : 0;
+        });
+        // 回転：まわり（足元の楕円）に当たり判定。1回転ごとに出し直す
+        this.addFx({ type: 'circleWarn', warn: true, follow: true, feet: true, r: a.radius, life: time }); // 回っている間も範囲を見せる
+        const turn = time / spins;
+        let box = null, done = -1, nextSlash = 0;
+        yield* this.sleep(time, (p, dt) => {
+            const k = Math.floor(p * spins - 1e-6);
+            if (k !== done) {
+                done = k;
+                if (box) box.life = 0;
+                box = this.addHitbox({ kind: 'ellipse', follow: true, feet: true, r: a.radius * 0.95, damage: this.dmg(a.damage), life: turn, shake: 7 });
+                if (!playSE('golem_swing')) GolemSound.play('thud');
+            }
+            const ang = ang0 - 0.9 + Math.PI * 2 * spins * p;
+            this.face(new Vector2(Math.cos(ang), Math.sin(ang)));
+            this.pose.spin = 1;
+            // 回りながらゆっくりプレイヤーへ近づく
+            const to = this.toPlayer();
+            if (to.length() > 30) this.e.velocity = to.normalize().mult(this.speed * 0.9);
+            // 腕の通った後の光の線（腕の高さで、体のまわりを横に回る）と、足元の砂ぼこり
+            nextSlash -= dt;
+            if (nextSlash <= 0) {
+                nextSlash = 0.05;
+                const arm = new Vector2(this.e.position.x, this.e.position.y - this.e.size * 0.15);
+                this.addFx({ type: 'slash', x: arm.x, y: arm.y, ang, r: this.e.size * 0.95, sy: 0.42, spread: 1.3, life: 0.2, color: '#c8f4ff' });
+                if (Math.random() < 0.5) this.dust(this.feet(), 1, 'rgba(190, 180, 210, 0.6)');
+            }
+        });
+        if (box) box.life = 0;
+        this.superArmor = false;
+        // 目が回ってふらつく
+        yield* this.sleep(a.dizzy || 0.8, (p) => {
+            this.face(this.facing);
+            this.pose.spin = Math.max(0, 1 - p * 3);
+            this.pose.core = 0.25 + Math.random() * 0.2;
+            this.jitter = 2 * (1 - p);
+        });
+        yield* this.recover(a.recover);
+    }
     
     // 地面の叩きつけ：前方の地面に予告 → 両腕で叩きつける → 腕が抜けるまで大きな隙
     *act_slam(a) {
@@ -287,6 +353,7 @@ class MagicGolemAI extends BossAI {
                 }
             }
             this.addFx({ type: 'shock', x: from.x, y: from.y, r0: 6, r1: 50, life: 0.25, width: 5, color: '#c8f4ff' });
+            playSE('golem_shot');
             yield* this.sleep(0.4, () => { this.pose.charge = 1; });
         }
         yield* this.recover(a.recover);
@@ -364,6 +431,7 @@ class MagicGolemAI extends BossAI {
         this.motion = 'shield';
         this.invulnerable = true;
         this.addFx({ type: 'barrier', follow: true, life: a.time + 0.45 });
+        playSE('golem_shield');
         yield* this.sleep(a.time, (p) => { this.face(this.dirToPlayer()); this.pose.shield = Math.min(1, p * 5); });
         const at = this.feet();
         this.addFx({ type: 'circleWarn', warn: true, x: at.x, y: at.y, r: a.maxRadius, life: 0.45 });
@@ -405,7 +473,8 @@ class MagicGolemAI extends BossAI {
         if (index >= 2) {
             const C = this.map && this.map.layers && this.map.layers.magicCircle;
             const cx = C ? C.x : this.e.position.x, cy = C ? C.y : this.e.position.y;
-            const r = 52 * this.R;
+            const hf = this.atk('hazardFloor');
+            const r = hf ? hf.radius : 52 * this.R; // 危険床と同じ大きさ
             const pl = this.player.position;
             for (let i = 0; i < 7; i++) {
                 const ang = i / 7 * Math.PI * 2 + 0.3;
@@ -664,6 +733,8 @@ Enemy.drawGolem = function (e, ctx, s, hop) {
             x = lerp(x, (front ? 1.0 : 0.85) * r, P.slam); y = lerp(y, 0.92 * r, P.slam);
             x = lerp(x, 0.45 * r, P.shield); y = lerp(y, -0.25 * r, P.shield);
             x = lerp(x, (front ? 0.6 : 0.5) * r, P.charge); y = lerp(y, -0.1 * r, P.charge);
+            // 腕の振り回し：手前の腕は前へ、奥の腕は後ろへまっすぐ伸ばす
+            x = lerp(x, (front ? 1.35 : -1.2) * r, P.spin); y = lerp(y, -0.3 * r, P.spin);
         } else {
             x = sgn * 0.98 * r; y = (0.35 + sgn * swing * 0.06) * r;
             if (ext > 0) {
@@ -676,6 +747,8 @@ Enemy.drawGolem = function (e, ctx, s, hop) {
             if (P.slam > 0 && !back) k = lerp(k, 1.2, P.slam);
             x = lerp(x, -sgn * 0.22 * r, P.shield); y = lerp(y, -0.22 * r, P.shield);
             x = lerp(x, sgn * 0.5 * r, P.charge); y = lerp(y, -0.05 * r, P.charge);
+            // 腕の振り回し：両腕を横にまっすぐ広げる
+            x = lerp(x, sgn * 1.6 * r, P.spin); y = lerp(y, -0.3 * r, P.spin);
         }
         // ひざをついた・眠っている時は腕を地面につく
         const rest = Math.max(P.kneel, P.dormant);

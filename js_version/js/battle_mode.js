@@ -144,6 +144,7 @@ class BattleMode {
         const n = this.waveIndex + 1;
         if (wave.boss) this.showBanner(`FINAL WAVE`, 'ボス　' + (BattleMode.TUNING['森イノシシ'].displayName), 'boss');
         else this.showBanner(`WAVE ${n}`, `敵 ${this.spawnQueue.length} 体`);
+        playSE('battle_start');
         this.updateHUD();
     }
     
@@ -203,6 +204,7 @@ class BattleMode {
                 this.state = 'victory';
                 this.resultTimer = 1.6; // 最後の敵の星のエフェクトを見せてから
                 this.showBanner('VICTORY', '全ウェーブ クリア', 'victory');
+                playBGM('jingle_victory');
             } else {
                 this.state = 'clear';
                 this.stateTimer = 3.0;   // 数秒後に次のウェーブ
@@ -223,6 +225,7 @@ class BattleMode {
         this.state = 'defeat';
         this.resultTimer = 1.2;
         this.showBanner('DEFEAT', '', 'defeat');
+        playBGM('jingle_defeat');
         this.updateHUD();
     }
     

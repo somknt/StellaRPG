@@ -325,6 +325,7 @@ class Player {
         this.dodgedAttack = false;
         this.isMoving = true;
         this.useStamina(this.dodgeStaminaCost);
+        if (window.playSE) playSE('dodge');
         return true;
     }
     
@@ -544,6 +545,12 @@ class Player {
     
     updateMagicSelect(input) {
         if (this.isChanting) return;
+        const before = this.selectedMagicIndex;
+        this.pickMagicFromInput(input);
+        if (this.selectedMagicIndex !== before && window.playSE) playSE('magic_switch');
+    }
+    
+    pickMagicFromInput(input) {
         // 1〜5キーで直接選ぶ
         for (let i = 0; i < this.magicSlots.length; i++) {
             if (input.isKeyPressed(`Digit${i + 1}`) && this.magicSlots[i]) this.selectedMagicIndex = i;
@@ -589,6 +596,8 @@ class Player {
         this.castFrame = 0;
         this.castFrameTimer = 0;
         this.isDashing = false;
+        // 詠唱の音は詠唱している間だけ（終わる時にふっと消える）
+        if (window.playSE) playSE('chant', { dur: this.chantDuration + 0.12 });
         return true;
     }
     
@@ -622,6 +631,8 @@ class Player {
         this.chantTime = 0;
         this.castFrame = 0;
         this.castFrameTimer = 0;
+        if (window.soundManager) soundManager.stop('chant');
+        if (window.playSE) playSE('chant_cancel');
     }
     
     // 今の向きでの、手のひらの前の魔法陣の位置（ワールド座標）と形

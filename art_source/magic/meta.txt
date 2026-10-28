@@ -1,0 +1,13 @@
+﻿circle: { n: 5, w: 273, h: 273, ax: 138, ay: 134, coreW: 248, coreH: 249 }
+fire_fly: { n: 4, w: 163, h: 109, ax: 144, ay: 48, coreW: 134, coreH: 85 }
+fire_hit: { n: 4, w: 171, h: 153, ax: 86, ay: 78, coreW: 122, coreH: 115 }
+fire_burn: { n: 4, w: 111, h: 111, ax: 53, ay: 102, coreW: 91, coreH: 80 }
+water_fly: { n: 3, w: 159, h: 94, ax: 146, ay: 45, coreW: 138, coreH: 80 }
+water_hit: { n: 4, w: 155, h: 124, ax: 78, ay: 64, coreW: 96, coreH: 101 }
+wind_loop: { n: 3, w: 166, h: 227, ax: 87, ay: 199, coreW: 133, coreH: 187 }
+wind_edge: { n: 4, w: 129, h: 147, ax: 56, ay: 132, coreW: 86, coreH: 104 }
+thunder_bolt: { n: 4, w: 175, h: 321, ax: 86, ay: 296, coreW: 128, coreH: 272 }
+thunder_flash: { n: 4, w: 230, h: 132, ax: 114, ay: 68, coreW: 172, coreH: 98 }
+stone_fly: { n: 4, w: 324, h: 154, ax: 322, ay: 76, coreW: 311, coreH: 142 }
+stone_hit: { n: 4, w: 373, h: 301, ax: 211, ay: 163, coreW: 304, coreH: 211 }
+stone_dust: { n: 4, w: 263, h: 194, ax: 126, ay: 86, coreW: 176, coreH: 141 }

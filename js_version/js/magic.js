@@ -58,6 +58,104 @@ function getElementInfo(element) {
     return MAGIC_ELEMENTS[element] || MAGIC_ELEMENTS['無'];
 }
 
+// ===== 魔術のエフェクト画像 =====
+// art_source/magic/tools/cut.ps1 で切り出した物（値は art_source/magic/meta.txt を写した物）
+// n：コマ数 / w, h：1コマの大きさ / ax, ay：基準点（弾は先頭、竜巻・雷・炎は根元、そのほかは中心）
+// coreW, coreH：光の芯の大きさ（ゲームで描く大きさを決めるのに使う）
+// 弾（*_fly）と岩の砕け（stone_hit）は右向きに描いてあるので、飛ぶ向きに回して使う
+// circle は魔法陣（画像は magic_circle_<属性>.png）
+const MAGIC_FX = {
+    circle:        { n: 5, w: 273, h: 273, ax: 138, ay: 134, coreW: 248, coreH: 249 },
+    fire_fly:      { n: 4, w: 163, h: 109, ax: 144, ay: 48,  coreW: 134, coreH: 85 },
+    fire_hit:      { n: 4, w: 171, h: 153, ax: 86,  ay: 78,  coreW: 122, coreH: 115 },
+    fire_burn:     { n: 4, w: 111, h: 111, ax: 53,  ay: 102, coreW: 91,  coreH: 80 },
+    water_fly:     { n: 3, w: 159, h: 94,  ax: 146, ay: 45,  coreW: 138, coreH: 80 },
+    water_hit:     { n: 4, w: 155, h: 124, ax: 78,  ay: 64,  coreW: 96,  coreH: 101 },
+    wind_loop:     { n: 3, w: 166, h: 227, ax: 87,  ay: 199, coreW: 133, coreH: 187 },
+    wind_edge:     { n: 4, w: 129, h: 147, ax: 56,  ay: 132, coreW: 86,  coreH: 104 },
+    thunder_bolt:  { n: 4, w: 175, h: 321, ax: 86,  ay: 296, coreW: 128, coreH: 272 },
+    thunder_flash: { n: 4, w: 230, h: 132, ax: 114, ay: 68,  coreW: 172, coreH: 98 },
+    stone_fly:     { n: 4, w: 324, h: 154, ax: 322, ay: 76,  coreW: 311, coreH: 142 },
+    stone_hit:     { n: 4, w: 373, h: 301, ax: 211, ay: 163, coreW: 304, coreH: 211 },
+    stone_dust:    { n: 4, w: 263, h: 194, ax: 126, ay: 86,  coreW: 176, coreH: 141 }
+};
+// stone_hit の1コマ目（岩の弾が当たった瞬間）の、光の中心から弾の先頭までの長さ（画像の px）
+const STONE_HIT_TIP = 107;
+
+// その名前のコマが全部読めているか（1枚でも欠けていたら、丸と線で描く）
+function hasMagicFx(name) {
+    const fx = MAGIC_FX[name];
+    if (!fx || !window.assetManager) return false;
+    for (let i = 1; i <= fx.n; i++) if (!window.assetManager.get(`magicfx_${name}_${i}`)) return false;
+    return true;
+}
+
+// 光の芯が px ピクセルになる倍率（by：'w' なら横幅、'h' なら高さで合わせる）
+function magicFxScale(name, px, by = 'w') {
+    const fx = MAGIC_FX[name];
+    return px / (by === 'h' ? fx.coreH : fx.coreW);
+}
+
+// 1コマを、基準点を (x, y) に合わせて描く。frame はコマ数を超えるとくり返す
+// rot：回す角度（右向きの画像を飛ぶ向きへ。左向きの時は上下が逆さにならないよう裏返す）
+function drawMagicFx(ctx, name, frame, x, y, scale, rot = 0, alpha = 1) {
+    const fx = MAGIC_FX[name];
+    const i = ((Math.floor(frame) % fx.n) + fx.n) % fx.n;
+    const img = window.assetManager && window.assetManager.get(`magicfx_${name}_${i + 1}`);
+    if (!img || alpha <= 0) return;
+    ctx.save();
+    ctx.globalAlpha *= Math.min(1, alpha);
+    // 縮めて描くので、なめらかに（ドットが抜けてチラつかないように）
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.translate(x, y);
+    if (rot) {
+        ctx.rotate(rot);
+        if (Math.cos(rot) < 0) ctx.scale(1, -1);
+    }
+    ctx.drawImage(img, -fx.ax * scale, -fx.ay * scale, fx.w * scale, fx.h * scale);
+    ctx.restore();
+}
+
+// 一度だけ流すコマ送り：t 秒目のコマと濃さ（終わったら null）。最後のコマは fade 秒かけて消える
+function magicFxOnce(name, t, frameTime, fade = 0) {
+    const n = MAGIC_FX[name].n;
+    if (t < 0) return null;
+    const f = Math.floor(t / frameTime);
+    if (f < n) return { frame: f, alpha: 1 };
+    const over = t - n * frameTime;
+    if (fade > 0 && over < fade) return { frame: n - 1, alpha: 1 - over / fade };
+    return null;
+}
+
+// 着弾の爆発・しぶき・岩の砕け・砂ぼこりなど、その場で一度だけ流すエフェクト
+class MagicSpriteFx {
+    // opts：frameTime（1コマの秒数）/ fade（最後のコマが消えるまでの秒数）/ delay（出るまでの秒数）/ rot（回す角度）
+    constructor(name, position, scale, opts = {}) {
+        this.name = name;
+        this.position = position.clone();
+        this.scale = scale;
+        this.frameTime = opts.frameTime || 0.07;
+        this.fade = opts.fade || 0;
+        this.delay = opts.delay || 0;
+        this.rot = opts.rot || 0;
+        this.age = 0;
+        this.active = true;
+    }
+    
+    update(deltaTime) {
+        this.age += deltaTime;
+        if (this.age >= this.delay + MAGIC_FX[this.name].n * this.frameTime + this.fade) this.active = false;
+    }
+    
+    draw(ctx, camera) {
+        const k = magicFxOnce(this.name, this.age - this.delay, this.frameTime, this.fade);
+        if (!k) return;
+        const s = this.position.sub(camera);
+        drawMagicFx(ctx, this.name, k.frame, s.x, s.y, this.scale, this.rot, k.alpha);
+    }
+}
+
 // 魔法陣を描く（画像 assets/effects/magic_circle_<属性>.png があれば画像、なければ六芒星を線で描く）
 // squash: 縦のつぶし具合（地面に置くと 0.5 くらい）
 // scaleX: 横のつぶし具合（横向きのキャラが手の前に出す時は 0.3 くらいで縦長のだ円になる）
@@ -72,7 +170,11 @@ function drawMagicCircle(ctx, x, y, radius, element, rotation = 0, alpha = 1, sq
     ctx.rotate(rotation);
     
     if (img) {
-        ctx.drawImage(img, -radius, -radius, radius * 2, radius * 2);
+        // 画像の外側の円が radius に来るように（そのまわりの光のにじみは少しはみ出す）
+        const c = MAGIC_FX.circle, k = radius * 2 / c.coreW;
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, -c.ax * k, -c.ay * k, c.w * k, c.h * k);
     } else {
         // 光のにじみ
         const glow = ctx.createRadialGradient(0, 0, radius * 0.2, 0, 0, radius * 1.15);
@@ -181,8 +283,43 @@ class MagicProjectile {
         if (!this.pierce) { this.active = false; this.ended = true; }
     }
     
+    // 画像の名前（炎 fire_fly / 水 water_fly / 土 stone_fly）
+    get fxName() {
+        return this.magic.rock ? 'stone_fly' : `${getElementInfo(this.magic.element).key}_fly`;
+    }
+    
+    // 画像の大きさ：弾の高さを当たり判定の何倍にするか / 弾の先頭を中心からどれだけ前に出すか
+    static FX_LOOK = {
+        fire_fly:  { height: 2.8, tip: 0.95, frameTime: 0.07 },
+        water_fly: { height: 2.6, tip: 0.95, frameTime: 0.08 },
+        stone_fly: { height: 2.4, tip: 1.1,  frameTime: 0.08 }
+    };
+    
+    fxScale() {
+        const look = MagicProjectile.FX_LOOK[this.fxName];
+        return look ? magicFxScale(this.fxName, this.size * look.height, 'h') : 1;
+    }
+    
+    // 弾の先頭の位置（画面の座標）
+    fxTip(camera) {
+        const look = MagicProjectile.FX_LOOK[this.fxName];
+        const tip = this.size * (look ? look.tip : 1);
+        return this.position.add(this.direction.mult(tip)).sub(camera);
+    }
+    
+    // 画像があれば、飛ぶ向きに回したコマ送りで描く（なければ false を返し、丸と線で描く）
+    drawSprite(ctx, camera) {
+        const name = this.fxName, look = MagicProjectile.FX_LOOK[name];
+        if (!look || !hasMagicFx(name)) return false;
+        const t = this.fxTip(camera);
+        drawMagicFx(ctx, name, this.age / look.frameTime, t.x, t.y, this.fxScale(),
+            Math.atan2(this.direction.y, this.direction.x));
+        return true;
+    }
+    
     draw(ctx, camera) {
         if (!this.active) return;
+        if (this.drawSprite(ctx, camera)) return;
         if (this.magic.rock) return this.drawRock(ctx, camera);
         
         const screenPos = this.position.sub(camera);
@@ -298,6 +435,15 @@ class FirePatch {
             const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * this.radius * 0.8;
             this.flames.push({ x: Math.cos(a) * d, y: Math.sin(a) * d * 0.5, phase: Math.random() * Math.PI * 2, size: (6 + Math.random() * 6) * MAGIC_SIZE_MUL });
         }
+        // 画像の炎（fire_burn）：真ん中に大きいの1つ、まわりに小さいの4つ。奥（上）から順に描く
+        this.sprites = [{ x: 0, y: 0, k: 1, phase: 0, speed: 0.1 }];
+        for (let i = 0; i < 4; i++) {
+            const a = (Math.PI * 2 / 4) * i + Math.PI / 4 + (Math.random() - 0.5) * 0.6;
+            const d = this.radius * (0.5 + Math.random() * 0.2);
+            this.sprites.push({ x: Math.cos(a) * d, y: Math.sin(a) * d * 0.5, k: 0.6 + Math.random() * 0.2,
+                phase: Math.floor(Math.random() * 4), speed: 0.09 + Math.random() * 0.04 });
+        }
+        this.sprites.sort((p, q) => p.y - q.y);
     }
     
     update(deltaTime) {
@@ -331,6 +477,17 @@ class FirePatch {
         ctx.beginPath();
         ctx.ellipse(s.x, s.y, this.radius * 1.2, this.radius * 0.65, 0, 0, Math.PI * 2);
         ctx.fill();
+        // 画像の炎：燃え上がる時は下から伸びるように大きくなり、最後はうすくなって消える
+        if (hasMagicFx('fire_burn')) {
+            const grow = 1 - Math.pow(1 - Math.min(1, this.age / 0.25), 2);
+            const base = magicFxScale('fire_burn', this.radius * 1.15, 'w');
+            for (const f of this.sprites) {
+                drawMagicFx(ctx, 'fire_burn', f.phase + this.age / f.speed, s.x + f.x, s.y + f.y,
+                    base * f.k * (0.4 + 0.6 * grow)); // 濃さは上の globalAlpha（= a）のまま
+            }
+            ctx.restore();
+            return;
+        }
         // 炎（ゆらゆら）
         for (const f of this.flames) {
             const t = this.age * 7 + f.phase;
@@ -404,6 +561,24 @@ class Tornado {
         ctx.beginPath();
         ctx.ellipse(s.x, s.y, this.radius, this.radius * 0.4, 0, 0, Math.PI * 2);
         ctx.fill();
+        // 画像の竜巻：出る時は wind_edge の1→2コマ目（小さな渦が立ち上がる）、
+        // その場で回る間は wind_loop、消える時は wind_edge の3→4コマ目（ほどけて散る）
+        if (hasMagicFx('wind_loop')) {
+            const edge = hasMagicFx('wind_edge');
+            const sc = magicFxScale('wind_loop', this.radius * 2.3, 'w');
+            const x = s.x + Math.sin(this.age * 5) * 2, y = s.y + this.radius * 0.2; // 根元は影の少し手前
+            const left = this.duration - this.age;
+            ctx.globalAlpha = 1;
+            if (edge && this.age < 0.2) {
+                drawMagicFx(ctx, 'wind_edge', this.age < 0.1 ? 0 : 1, x, y, sc);
+            } else if (edge && left < 0.32) {
+                drawMagicFx(ctx, 'wind_edge', left > 0.16 ? 2 : 3, x, y, sc, 0, left > 0.16 ? 1 : left / 0.16);
+            } else {
+                drawMagicFx(ctx, 'wind_loop', this.age / 0.07, x, y, sc, 0, edge ? 1 : a);
+            }
+            ctx.restore();
+            return;
+        }
         // 下から上へ広がっていく回転するだ円を重ねて竜巻に
         const rings = 7;
         for (let i = 0; i < rings; i++) {
@@ -440,7 +615,9 @@ class LightningStrike {
         this.position = targetPos.clone();
         this.radius = (magic.radius || 45) * MAGIC_SIZE_MUL;
         this.delay = 0.12;      // 落ちるまでの一瞬の溜め
-        this.duration = 0.35;   // 光っている時間
+        this.sprite = hasMagicFx('thunder_bolt');
+        this.duration = this.sprite ? 0.45 : 0.35; // 光っている時間（画像の時は、地面の光の輪が消えるまで）
+        this.flip = Math.random() < 0.5;          // 画像の稲妻を左右どちらに曲げるか（毎回ちがって見えるように）
         this.age = 0;
         this.detonated = false;
         this.pendingHit = false;
@@ -455,6 +632,7 @@ class LightningStrike {
         if (!this.detonated && this.age >= this.delay) {
             this.detonated = true;
             this.pendingHit = true; // checkCollisions で一度だけダメージ判定
+            if (window.playSE) playSE('magic_thunder');
         }
         if (this.age >= this.delay + this.duration) this.active = false;
     }
@@ -467,6 +645,19 @@ class LightningStrike {
             // 落ちる場所の予告
             ctx.globalAlpha = 0.6;
             drawMagicCircle(ctx, s.x, s.y, this.radius * 0.8, this.magic.element, this.age * 6, 0.7, 0.5);
+        } else if (this.sprite) {
+            // 画像：地面に光の輪が広がり（thunder_flash）、その上に稲妻（thunder_bolt）が落ちる
+            const t = this.age - this.delay;
+            if (hasMagicFx('thunder_flash')) {
+                const k = magicFxOnce('thunder_flash', t, 0.08, 0.12);
+                if (k) drawMagicFx(ctx, 'thunder_flash', k.frame, s.x, s.y, magicFxScale('thunder_flash', this.radius * 2.4, 'w'), 0, k.alpha);
+            }
+            const k = magicFxOnce('thunder_bolt', t, 0.065, 0.1);
+            if (k) {
+                ctx.translate(s.x, 0);
+                if (this.flip) ctx.scale(-1, 1);
+                drawMagicFx(ctx, 'thunder_bolt', k.frame, 0, s.y, magicFxScale('thunder_bolt', this.radius * 1.9, 'w'), 0, k.alpha);
+            }
         } else {
             const t = (this.age - this.delay) / this.duration; // 0→1
             ctx.globalAlpha = 1 - t;
@@ -571,8 +762,29 @@ class MagicSystem {
     onProjectileEnd(proj) {
         if (proj.endHandled) return;
         proj.endHandled = true;
+        this.spawnImpact(proj);
         if (proj.magic.burn && isFlammableAt(this.map, proj.position)) {
             this.firePatches.push(new FirePatch(proj.magic, proj.position));
+        }
+    }
+    
+    // 弾が消えた所のエフェクト（画像がある時だけ）：炎は爆発、水はしぶき、岩は砕けて砂ぼこり
+    spawnImpact(proj) {
+        const r = proj.size, name = proj.fxName;
+        if (name === 'fire_fly' && hasMagicFx('fire_hit')) {
+            this.effects.push(new MagicSpriteFx('fire_hit', proj.position, magicFxScale('fire_hit', r * 4, 'w'), { frameTime: 0.06, fade: 0.1 }));
+        } else if (name === 'water_fly' && hasMagicFx('water_hit')) {
+            this.effects.push(new MagicSpriteFx('water_hit', proj.position, magicFxScale('water_hit', r * 4.2, 'w'), { frameTime: 0.07, fade: 0.12 }));
+        } else if (name === 'stone_fly' && hasMagicFx('stone_hit')) {
+            // 1コマ目は飛んでいた岩の弾と同じ形なので、同じ大きさ・向きで、先頭をそろえて出す
+            const sc = proj.fxScale(), rot = Math.atan2(proj.direction.y, proj.direction.x);
+            const tip = proj.position.add(proj.direction.mult(r * MagicProjectile.FX_LOOK.stone_fly.tip));
+            const at = tip.sub(proj.direction.mult(STONE_HIT_TIP * sc));
+            // 砂ぼこりは、飛び散る岩のかけらの後ろに（先に入れた物から描く）
+            if (hasMagicFx('stone_dust')) {
+                this.effects.push(new MagicSpriteFx('stone_dust', at, magicFxScale('stone_dust', r * 4, 'w'), { delay: 0.1, frameTime: 0.12, fade: 0.25 }));
+            }
+            this.effects.push(new MagicSpriteFx('stone_hit', at, sc, { frameTime: 0.07, fade: 0.1, rot }));
         }
     }
     
@@ -718,3 +930,4 @@ window.MAGIC_SIZE_MUL = MAGIC_SIZE_MUL;
 window.STARTER_MAGIC = STARTER_MAGIC;
 window.getElementInfo = getElementInfo;
 window.drawMagicCircle = drawMagicCircle;
+window.MAGIC_FX = MAGIC_FX;

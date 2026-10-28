@@ -103,6 +103,8 @@ class BossBattle {
         if (this.ui.hud) this.ui.hud.classList.remove('show');
         if (this.ui.name) this.ui.name.textContent = def.name;
         this.updateHUD(0, true);
+        // ボスごとの BGM（boss_data.js の bgm。ファイルがなければ共通の bgm_boss）
+        playBGM(def.bgm || 'bgm_boss');
     }
     
     // 開始演出を飛ばす（Enter・クリック・タップ）
@@ -142,6 +144,8 @@ class BossBattle {
                 this.state = 'victory';
                 this.resultTimer = 2.6; // ボスが光になって消えるのを見せてから
                 this.showBanner('VICTORY', '勝利！', 'victory');
+                playSE('boss_down');
+                playBGM('jingle_victory');
             }
         } else if (this.isOver && this.resultTimer > 0) {
             this.resultTimer -= dt;
@@ -165,6 +169,8 @@ class BossBattle {
             const d = this.def.difficulty;
             const stars = '★'.repeat(d) + '☆'.repeat(Math.max(0, 3 - d));
             this.showBanner(this.def.name, `難易度 ${stars}　${this.def.fieldName}`, this.def.theme && this.def.theme.banner || 'boss');
+            // ボスごとの鳴き声（boss_data.js の introSE。なければ共通の boss_intro）
+            if (!(this.def.introSE && playSE(this.def.introSE))) playSE('boss_intro');
         }
         if (this.step === 1 && t >= 3.4) {
             this.step = 2;
@@ -176,6 +182,7 @@ class BossBattle {
         if (this.step < 4 && t >= 4.0) {
             this.step = 4;
             this.showBanner('BATTLE START', '', 'start');
+            playSE('battle_start');
             if (!this.def.countdown) this.beginFight();
         }
         if (this.step === 4 && this.def.countdown) {
@@ -200,6 +207,7 @@ class BossBattle {
         // 形態が変わった時は文字を出さない（画面の光と揺れ、ボスの咆哮・遠吠えだけ）
         this.flash = 0.5;
         this.game.addShake(8, 0.5);
+        playSE('boss_phase');
     }
     
     onDefeat() {
@@ -209,6 +217,7 @@ class BossBattle {
         this.ai.cancel();
         this.ai.active = false; // ボスはその場で止まる
         this.showBanner('DEFEAT', '敗北……', 'defeat');
+        playBGM('jingle_defeat');
     }
     
     // ---------- HP バー ----------

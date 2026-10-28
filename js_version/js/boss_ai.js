@@ -179,11 +179,12 @@ class BossAI {
         }
     }
     
-    // フェーズが変わった時の強化（全ボス共通。BossAI.PHASE_BUFF）
+    // フェーズが変わった時の強化（boss_data.js の phaseBuff。なければ全ボス共通の BossAI.PHASE_BUFF）
     // 攻撃力は元の値に倍率をかけ直す（何回呼んでも重ならない）。防御は「受けるダメージの倍率」（Enemy.takeDamage）
     applyPhaseBuff(index) {
         if (this.baseAttack === undefined) this.baseAttack = this.e.attack;
-        const b = BossAI.PHASE_BUFF[Math.min(index, BossAI.PHASE_BUFF.length - 1)];
+        const list = this.def.phaseBuff || BossAI.PHASE_BUFF;
+        const b = list[Math.min(index, list.length - 1)];
         this.e.attack = Math.max(1, Math.round(this.baseAttack * b.attack));
         this.e.damageTakenMul = b.damageTaken;
     }
@@ -529,8 +530,11 @@ class BossAI {
                     const a0 = f.ang - f.spread / 2, a1 = f.ang + f.spread / 2;
                     const from = f.reverse ? a1 : a0, to = f.reverse ? a0 : a1;
                     const sweep = Math.min(1, t * 3);
+                    const s0 = Math.min(from, from + (to - from) * sweep), s1 = Math.max(from, from + (to - from) * sweep);
                     ctx.beginPath();
-                    ctx.arc(p.x, p.y, f.r, Math.min(from, from + (to - from) * sweep), Math.max(from, from + (to - from) * sweep));
+                    // sy：縦につぶす（体のまわりを横に回る線。ゴーレムの腕の振り回し）
+                    if (f.sy) ctx.ellipse(p.x, p.y, f.r, f.r * f.sy, 0, s0, s1);
+                    else ctx.arc(p.x, p.y, f.r, s0, s1);
                     ctx.stroke();
                     break;
                 }
@@ -632,7 +636,7 @@ class BossAI {
 BossAI.TUNING = { interval: 0.35, recover: 0.55, behindRange: 300, roarRange: 330, roarKnock: 260 };
 // 攻撃範囲の予告（円・扇・突進の帯・ゴーレムの危険床）の色。全ボス共通の薄い赤
 BossAI.WARN_COLOR = '#ff7a7a';
-// フェーズごとの強化（全ボス共通。[通常, HP50%以下, HP25%以下]）
+// フェーズごとの強化（[通常, HP50%以下, HP25%以下]）。boss_data.js に phaseBuff があるボス（魔道ゴーレム）はそちらを使う
 // attack：攻撃力の倍率 / damageTaken：受けるダメージの倍率（0.85 なら 15% 減る＝防御力アップ）
 BossAI.PHASE_BUFF = [
     { attack: 1.0,  damageTaken: 1.0 },
@@ -676,13 +680,15 @@ class ForestBoarAI extends BossAI {
         this.face(dir);
         const ang = Math.atan2(dir.y, dir.x);
         const r = a.reach + this.e.size * 0.3;
-        this.addFx({ type: 'arcWarn', warn: true, follow: true, ang, r, spread: 1.7, life: windup });
+        const spread = a.spread || 1.7;
+        this.addFx({ type: 'arcWarn', warn: true, follow: true, ang, r, spread, life: windup });
         // 頭を下げて力をためる
         yield* this.sleep(windup, (p) => { this.face(dir); this.pose = 0; this.scaleX = 1 + 0.05 * p; this.scaleY = 1 - 0.07 * p; this.jitter = p > 0.6 ? 1.5 : 0; });
         // 突き上げる
         this.e.moveBy(dir.mult(24));
-        this.addHitbox({ kind: 'arc', follow: true, ang, r, spread: 1.7, damage: this.dmg(a.damage), life: 0.12 });
-        this.addFx({ type: 'slash', follow: true, ang, r: r * 0.85, spread: 1.5, life: 0.25, reverse: k % 2 === 1 });
+        this.addHitbox({ kind: 'arc', follow: true, ang, r, spread, damage: this.dmg(a.damage), life: 0.12 });
+        playSE('boar_tusk');
+        this.addFx({ type: 'slash', follow: true, ang, r: r * 0.85, spread: spread * 0.88, life: 0.25, reverse: k % 2 === 1 });
         // 前足でふんばった所に土煙
         const f = this.feet().add(dir.mult(this.e.size * 0.35));
         this.fxImg('dust_cloud', { x: f.x, y: f.y - 6, w: this.e.size * 0.9, s0: 0.5, s1: 1.1, life: 0.45, hold: 0.3, alpha: 0.8 });
@@ -690,9 +696,9 @@ class ForestBoarAI extends BossAI {
     }
     
     *act_tusk(a) {
-        // hits 回まで続けて突き上げる（2回目からは溜めが短い）
+        // hits 回まで続けて突き上げる（2回目からは溜めが windup2。なければ windup の 0.6 倍）
         for (let i = 0; i < (a.hits || 1); i++) {
-            yield* this.tuskStrike(a, i === 0 ? a.windup : a.windup * 0.6, i);
+            yield* this.tuskStrike(a, i === 0 ? a.windup : (a.windup2 || a.windup * 0.6), i);
             yield* this.sleep(0.05);
         }
         yield* this.recover(a.recover);
@@ -701,7 +707,7 @@ class ForestBoarAI extends BossAI {
     // フェーズ3：牙の連続攻撃
     *act_tuskCombo(a) {
         for (let i = 0; i < a.hits; i++) {
-            yield* this.tuskStrike(a, i === 0 ? a.windup : a.windup * 0.6, i);
+            yield* this.tuskStrike(a, i === 0 ? a.windup : (a.windup2 || a.windup * 0.6), i);
             yield* this.sleep(0.06);
         }
         yield* this.recover(a.recover);
@@ -724,6 +730,8 @@ class ForestBoarAI extends BossAI {
         let dir = this.dirToPlayer();
         const warn = this.addFx({ type: 'laneWarn', warn: true, follow: true, ang: Math.atan2(dir.y, dir.x), len: a.speed * a.duration * 0.8,
             width: this.e.size * 0.95, dy: this.e.size * 0.3, life: prepare });
+        // 鼻を鳴らして地面をかく音（溜めの間だけ）
+        playSE('boar_snort', { dur: Math.max(0.4, prepare) });
         // 予備動作：前半はプレイヤーに向きを合わせ、後半は向きを固定して地面をかく
         yield* this.sleep(prepare, (p, dt) => {
             if (p < 0.65) { dir = this.dirToPlayer(); warn.ang = Math.atan2(dir.y, dir.x); }
@@ -739,7 +747,8 @@ class ForestBoarAI extends BossAI {
         });
         this.motion = 'charge';
         this.superArmor = true;
-        const body = this.addHitbox({ kind: 'circle', follow: true, r: this.e.size * 0.55, damage: this.dmg(a.damage), life: a.duration + 0.1, shake: 7 });
+        playSE('boar_charge');
+        const body = this.addHitbox({ kind: 'circle', follow: true, r: this.e.size * (a.body || 0.55), damage: this.dmg(a.damage), life: a.duration + 0.1, shake: 7 });
         this.blocked = false;
         let t = 0;
         while (t < a.duration) {
@@ -780,6 +789,7 @@ class ForestBoarAI extends BossAI {
         this.crashed = true;
         this.superArmor = false;
         this.motion = 'stun';
+        playSE('boar_crash');
         this.events.push({ type: 'shake', power: 9, time: 0.35 });
         this.addFx({ type: 'shock', follow: true, fwd: this.e.size * 0.5, ang: Math.atan2(dir.y, dir.x), r0: 10, r1: 80, life: 0.35, width: 8 });
         this.dust(this.e.position.add(dir.mult(this.e.size * 0.5)), 8);
@@ -798,7 +808,7 @@ class ForestBoarAI extends BossAI {
         this.motion = 'stomp';
         this.superArmor = true;
         for (let w = 0; w < a.waves; w++) {
-            const windup = w === 0 ? a.windup : 0.5;
+            const windup = w === 0 ? a.windup : (a.windup2 || 0.5);
             const at = this.feet();
             this.addFx({ type: 'circleWarn', warn: true, x: at.x, y: at.y, r: a.radius, life: windup });
             // 前脚を上げる（体が浮いて縦にのびる）
@@ -812,6 +822,7 @@ class ForestBoarAI extends BossAI {
             });
             // 着地
             this.addHitbox({ kind: 'circle', x: at.x, y: at.y, r: a.radius * 0.95, damage: this.dmg(a.damage), life: 0.1, shake: 8 });
+            playSE('boar_stomp');
             this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 20, r1: a.radius * 1.1, life: 0.5, width: 12, ring: 'boar', ringAlpha: 0.8 });
             this.addFx({ type: 'crack', x: at.x, y: at.y, r: a.radius * 0.7, life: 1.4, seed: Math.random() * 6 });
             // 前足の下で地面がくだけ、土煙が広がる
@@ -836,6 +847,7 @@ class ForestBoarAI extends BossAI {
         this.invulnerable = true;
         yield* this.sleep(0.35, (p) => { this.face(this.dirToPlayer()); this.scaleY = 1 - 0.06 * p; });
         this.events.push({ type: 'shake', power: 10, time: 0.9 });
+        playSE('boar_roar');
         this.roarBlast(); // 吠えた瞬間の風圧で、必ず吹き飛ばされる
         let next = 0;
         yield* this.sleep(1.2, (p, dt) => {
@@ -941,7 +953,8 @@ class BlackWolfAI extends BossAI {
             const windup = i === 0 ? a.windup : a.windup * 0.75;
             this.addFx({ type: 'flash', warn: true, follow: true, life: windup });
             yield* this.sleep(windup, (p) => { this.face(dir); this.pose = 0; this.scaleY = 1 - 0.1 * p; this.scaleX = 1 + 0.05 * p; });
-            this.addHitbox({ kind: 'circle', follow: true, ang, fwd: this.e.size * 0.7, r: 40 * this.R, damage: this.dmg(a.damage), life: 0.14 });
+            this.addHitbox({ kind: 'circle', follow: true, ang, fwd: this.e.size * 0.7, r: a.radius || 40 * this.R, damage: this.dmg(a.damage), life: 0.14 });
+            playSE('wolf_bite');
             // かみついた所に紫の牙（画像がなければ白い線）
             if (!this.fxImg('bite_fangs', { ground: false, follow: true, ang, fwd: this.e.size * 0.85, dy: -this.e.size * 0.15, w: 50 * this.R, s0: 1.35, s1: 0.9, life: 0.26, hold: 0.45 })) {
                 this.addFx({ type: 'slash', follow: true, ang, fwd: this.e.size * 0.55, r: 22 * this.R, spread: 2.4, life: 0.2 });
@@ -962,11 +975,13 @@ class BlackWolfAI extends BossAI {
             const dir = this.dirToPlayer();
             const ang = Math.atan2(dir.y, dir.x) + (i % 2 ? 0.25 : -0.25);
             const windup = i === 0 ? a.windup : a.windup * 0.6;
-            this.addFx({ type: 'arcWarn', warn: true, follow: true, ang, r: a.reach, spread: 1.9, life: windup });
+            const spread = a.spread || 1.9;
+            this.addFx({ type: 'arcWarn', warn: true, follow: true, ang, r: a.reach, spread, life: windup });
             yield* this.sleep(windup, (p) => { this.face(dir); this.pose = 0; this.scaleX = 1 - 0.06 * p; this.jitter = p > 0.5 ? 1 : 0; });
             this.e.moveBy(dir.mult(18));
-            this.addHitbox({ kind: 'arc', follow: true, ang, r: a.reach, spread: 1.9, damage: this.dmg(a.damage), life: 0.12 });
-            this.addFx({ type: 'slash', follow: true, ang, r: a.reach * 0.8, spread: 1.8, life: 0.24, color: '#e9c6ff', reverse: i % 2 === 1 });
+            this.addHitbox({ kind: 'arc', follow: true, ang, r: a.reach, spread, damage: this.dmg(a.damage), life: 0.12 });
+            playSE('wolf_claw');
+            this.addFx({ type: 'slash', follow: true, ang, r: a.reach * 0.8, spread: spread * 0.95, life: 0.24, color: '#e9c6ff', reverse: i % 2 === 1 });
             // 爪の跡（3本の紫の光）。連続攻撃は交互に向きを変える
             this.fxImg('claw_slash', { ground: false, follow: true, ang, fwd: a.reach * 0.55, dy: -this.e.size * 0.2, w: a.reach * 0.95, s0: 0.8, s1: 1.1,
                 // 画像の爪あとは右上がり（約60度）。攻撃の向きと直角になるように回す
@@ -1002,6 +1017,7 @@ class BlackWolfAI extends BossAI {
         // 着地
         const at = this.feet();
         this.addHitbox({ kind: 'circle', x: at.x, y: at.y, r: a.radius, damage: this.dmg(a.damage), life: 0.12, shake: 6 });
+        playSE('wolf_leap');
         this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 16, r1: a.radius * 1.2, life: 0.4, width: 8, color: '#d59cff', ring: 'corrupt', ringAlpha: 0.85 });
         this.dust(at, 6, 'rgba(120, 70, 150, 0.6)');
         this.events.push({ type: 'shake', power: 4, time: 0.2 });
@@ -1031,6 +1047,7 @@ class BlackWolfAI extends BossAI {
         yield* this.sleep(a.prepare, (p) => { this.face(v); this.pose = p < 0.5 ? 1 : 2; this.scaleY = 1 - 0.1 * p; this.jitter = 1.5; });
         this.motion = 'shadowDash';
         this.invulnerable = true;
+        playSE('wolf_dash');
         const vel = v.mult(1 / a.time);
         let next = 0;
         yield* this.sleep(a.time, (p, dt) => {
@@ -1078,6 +1095,7 @@ class BlackWolfAI extends BossAI {
             });
         }
         this.addFx({ type: 'shock', follow: true, ang, fwd: this.e.size * 0.5, r0: 6, r1: 40, life: 0.25, width: 5, color: '#c77dff' });
+        playSE('wolf_shot');
         this.fxImg(['corrupt_ring_1', 'corrupt_ring_2', 'corrupt_ring_3'], { ground: false, x: mouth.x, y: mouth.y, w: 50 * this.R, s0: 0.5, s1: 1.2, life: 0.3, hold: 0.3, add: true });
         yield* this.sleep(0.2);
         yield* this.recover(a.recover);
@@ -1095,6 +1113,7 @@ class BlackWolfAI extends BossAI {
         yield* this.sleep(a.windup, (p) => { this.face(this.dirToPlayer()); this.pose = Math.min(2, Math.floor(p * 3)); this.scaleY = 1 - 0.1 * p; this.jitter = p * 2.5; });
         this.motion = 'howl';
         this.addHitbox({ kind: 'ring', x: at.x, y: at.y, r0: 20, r1: a.maxRadius, band: a.band, damage: this.dmg(a.damage), life: a.time, shake: 6, knock: 140 });
+        playSE('wolf_wave');
         this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 20, r1: a.maxRadius, life: a.time, width: a.band, color: 'rgba(170, 60, 255, 0.85)', ring: 'corrupt', ringAlpha: 0.3 });
         this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 10, r1: a.maxRadius * 0.8, life: a.time * 1.1, width: 6, color: '#f0c8ff' });
         this.events.push({ type: 'shake', power: 6, time: 0.4 });
@@ -1107,6 +1126,7 @@ class BlackWolfAI extends BossAI {
     *act_dodge() {
         this.motion = 'dodge';
         this.invulnerable = true;
+        playSE('wolf_dash');
         const n = this.dirToPlayer();
         const side = Math.random() < 0.5 ? 1 : -1;
         const away = n.mult(-1).add(new Vector2(-n.y * side, n.x * side)).normalize();
@@ -1130,6 +1150,7 @@ class BlackWolfAI extends BossAI {
         this.invulnerable = true;
         yield* this.sleep(0.3, (p) => { this.scaleY = 1 - 0.08 * p; });
         this.events.push({ type: 'shake', power: 7, time: 0.8 });
+        playSE('wolf_howl');
         this.roarBlast(); // 遠吠えの風圧で、必ず吹き飛ばされる
         let next = 0;
         yield* this.sleep(1.2, (p, dt) => {

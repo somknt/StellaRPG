@@ -23,7 +23,11 @@ class UINav {
             el._navBound = true;
             el.addEventListener('pointerenter', (e) => {
                 const nav = el._nav;
-                if (nav && e.pointerType === 'mouse' && !nav.isSkip(el)) nav.setIndex(nav.items.indexOf(el));
+                if (!nav || e.pointerType !== 'mouse' || nav.isSkip(el)) return;
+                const i = nav.items.indexOf(el);
+                // 画面が切りかわった直後は、マウスの下に新しいボタンが来ただけなので鳴らさない
+                if (i !== nav.index && performance.now() > UINav.quietUntil) playSE('ui_move');
+                nav.setIndex(i);
             });
         }
         this.refresh();
@@ -58,16 +62,22 @@ class UINav {
         // 音量・ON/OFF の項目は左右で値を変える
         if (cur && cur.dataset.adjust !== undefined && (left || right)) {
             cur.dispatchEvent(new CustomEvent('adjust', { detail: right ? 1 : -1 }));
+            playSE('ui_move'); // 効果音の音量を変えた時は、新しい音量で鳴る
             return;
         }
+        const before = this.index;
         if (this.mode !== 'horizontal' && (up || down)) this.move(up ? -1 : 1);
         if (this.mode !== 'vertical' && (left || right)) this.move(left ? -1 : 1);
+        if (this.index !== before) playSE('ui_move');
         if ((k('Enter') || k('Space')) && cur && !this.isSkip(cur)) {
             pressEffect(cur);
             cur.click();
         }
     }
 }
+
+// この時間まではマウスを重ねてもカーソル移動の音を鳴らさない（画面の切りかえ直後）
+UINav.quietUntil = 0;
 
 // 決定した時の軽い発光
 function pressEffect(el) {
@@ -527,13 +537,13 @@ class ScreenManager {
     
     // 画面の名前 → HTML と、キーボードの動かし方
     static SCREENS = {
-        title:          { id: 'scr-title',    nav: null },
-        main_menu:      { id: 'scr-menu',     nav: 'vertical', back: 'title' },
-        story:          { id: 'scr-story',    nav: 'vertical', back: 'main_menu' },
-        battle_select:  { id: 'scr-battle',   nav: 'vertical', back: 'main_menu' },
-        monster_select: { id: 'scr-monster',  nav: 'grid',     back: 'battle_select' },
-        hero_select:    { id: 'scr-hero',     nav: 'grid',     back: 'monster_select' },
-        settings:       { id: 'scr-settings', nav: 'vertical', back: 'main_menu' }
+        title:          { id: 'scr-title',    nav: null,       bgm: 'bgm_title' },
+        main_menu:      { id: 'scr-menu',     nav: 'vertical', back: 'title',          bgm: 'bgm_title' },
+        story:          { id: 'scr-story',    nav: 'vertical', back: 'main_menu',      bgm: 'bgm_title' },
+        battle_select:  { id: 'scr-battle',   nav: 'vertical', back: 'main_menu',      bgm: 'bgm_title' },
+        monster_select: { id: 'scr-monster',  nav: 'grid',     back: 'battle_select',  bgm: 'bgm_select' },
+        hero_select:    { id: 'scr-hero',     nav: 'grid',     back: 'monster_select', bgm: 'bgm_select' },
+        settings:       { id: 'scr-settings', nav: 'vertical', back: 'main_menu',      bgm: 'bgm_title' }
     };
     
     isMenuState(state) { return state in ScreenManager.SCREENS; }
@@ -572,7 +582,10 @@ class ScreenManager {
         if (name === 'monster_select') this.enterMonster();
         if (name === 'settings') this.refreshSettings();
         // 最初の項目を選んだ状態にする（戻ってきた時は前に選んでいた所）
+        UINav.quietUntil = performance.now() + ScreenManager.FADE_MS + 400;
         this.nav = def.nav ? new UINav(el, def.nav) : null;
+        // 画面の BGM（同じ曲なら途切れずに続く）
+        if (def.bgm) playBGM(def.bgm);
     }
     
     // バトルが始まったら画面を閉じる
@@ -611,7 +624,12 @@ class ScreenManager {
             if (input.isKeyPressed('Enter') || input.isKeyPressed('Space')) this.startFromTitle();
             return;
         }
-        if (input.isKeyPressed('Escape') || input.isKeyPressed('Backspace')) { this.back(); return; }
+        if (input.isKeyPressed('Escape') || input.isKeyPressed('Backspace')) {
+            const def = ScreenManager.SCREENS[this.current];
+            if (def && def.back) playSE('ui_cancel');
+            this.back();
+            return;
+        }
         if (this.nav) this.nav.handle(input);
     }
     
@@ -621,7 +639,8 @@ class ScreenManager {
     }
     
     startFromTitle() {
-        if (this.current !== 'title') return;
+        if (this.current !== 'title' || this.busy) return;
+        playSE('ui_start');
         this.go('main_menu');
     }
     
@@ -633,6 +652,18 @@ class ScreenManager {
         };
         // タイトル：画面のどこをクリック・タップしても進む
         this.$('scr-title').addEventListener('click', () => this.startFromTitle());
+        
+        // ボタンの音（メニュー・一時停止・結果画面のボタン全部）：戻るボタンは「戻る」、押せないボタンは「選べない」、ほかは「決定」
+        // （モンスターのカードは chooseMonster、一時停止のボタンは game.togglePause で鳴らす）
+        document.addEventListener('click', (e) => {
+            const b = e.target.closest && e.target.closest('.ui-btn');
+            if (!b || b.closest('#touch-controls') || b.classList.contains('boss-card')) return;
+            if (b.id === 'pause-btn' || b.id === 'pause-resume' || b.id === 'fullscreen-btn') return;
+            if (this.busy && b.closest('#screens')) return; // 画面の切り替え中（押しても進まない）
+            const disabled = b.disabled || b.getAttribute('aria-disabled') === 'true' || b.classList.contains('disabled');
+            const back = b.classList.contains('back') || /-back$/.test(b.id);
+            playSE(disabled ? 'ui_error' : back ? 'ui_cancel' : 'ui_select');
+        }, true);
         
         on('menu-story', () => this.go('story'));
         on('menu-battle', () => this.go('battle_select'));
@@ -697,6 +728,7 @@ class ScreenManager {
     }
     
     chooseMonster(b, card) {
+        playSE(b.status === 'playable' ? 'ui_select' : 'ui_error');
         if (b.status !== 'playable') {
             card.classList.remove('shake');
             void card.offsetWidth;
