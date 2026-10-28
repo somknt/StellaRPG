@@ -445,7 +445,9 @@ SoundManager.LIST = [
     { key: 'ui_cancel', label: '戻る', volume: 0.35, vary: 0 },                                           // ★ キャンセル
     { key: 'ui_error',  label: '選べない（今後実装予定のボスなど）', fallback: 'ui_cancel', volume: 0.35, rate: 0.7, vary: 0 },
     { key: 'ui_start',  label: 'タイトルで決定（Press Enter）', fallback: 'ui_select', vary: 0 },
-    { key: 'ui_pause',  label: '一時停止・再開', volume: 0.55, vary: 0 },                                 // ★ 確認2
+    { key: 'ui_pause',  label: '一時停止・再開', volume: 0.55, vary: 0 },
+    { key: 'target_lock', label: 'PC で敵をクリックしてターゲットにした', fallback: 'ui_move', volume: 0.5, rate: 1.3, vary: 0 },
+    { key: 'coin_get',  label: 'バトルコインをもらった（結果画面）', fallback: 'ui_select', volume: 0.6, rate: 1.4, vary: 0 },                                 // ★ 確認2
     
     // ===== 主人公 =====
     { key: 'attack',       label: 'ナイフを振る（attack_2 とランダム）', volume: 0.7, gap: 0.08 },        // ★ 斬撃1・斬撃2

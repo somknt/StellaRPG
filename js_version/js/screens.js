@@ -1,4 +1,4 @@
-// 画面の切り替え（タイトル → メインメニュー → バトルモード → モンスター選択 → 主人公選択 → ボス戦）
+// 画面の切り替え（タイトル → メインメニュー → バトルモード → モンスター選択（→ マイベスト）→ 主人公選択 → ボス戦）
 //
 // - 各画面は index.html の #screens の中の .screen（HTML）。背景はキャンバスに描く
 // - 画面を切り替える時は、黒くフェードアウト → 切り替え → フェードイン
@@ -542,6 +542,7 @@ class ScreenManager {
         story:          { id: 'scr-story',    nav: 'vertical', back: 'main_menu',      bgm: 'bgm_title' },
         battle_select:  { id: 'scr-battle',   nav: 'vertical', back: 'main_menu',      bgm: 'bgm_title' },
         monster_select: { id: 'scr-monster',  nav: 'grid',     back: 'battle_select',  bgm: 'bgm_select' },
+        ranking:        { id: 'scr-ranking',  nav: 'grid',     back: 'monster_select', bgm: 'bgm_select' },
         hero_select:    { id: 'scr-hero',     nav: 'grid',     back: 'monster_select', bgm: 'bgm_select' },
         settings:       { id: 'scr-settings', nav: 'vertical', back: 'main_menu',      bgm: 'bgm_title' }
     };
@@ -580,6 +581,7 @@ class ScreenManager {
         if (name === 'title') this.bg.logoTime = 0; // ロゴの登場をもう一度
         if (name === 'hero_select') this.enterHero();
         if (name === 'monster_select') this.enterMonster();
+        if (name === 'ranking') this.enterRanking();
         if (name === 'settings') this.refreshSettings();
         // 最初の項目を選んだ状態にする（戻ってきた時は前に選んでいた所）
         UINav.quietUntil = performance.now() + ScreenManager.FADE_MS + 400;
@@ -631,6 +633,9 @@ class ScreenManager {
             return;
         }
         if (this.nav) this.nav.handle(input);
+        // マイベスト：キーボードでモンスターの札を選んだら、そのモンスターの記録に切りかえる
+        if (this.current === 'ranking' && this.nav && this.nav.current && this.nav.current.dataset.boss
+            && this.nav.current.dataset.boss !== this.rankingBoss) this.showRanking(this.nav.current.dataset.boss);
     }
     
     draw(ctx) {
@@ -673,6 +678,8 @@ class ScreenManager {
         on('battle-multi', () => this.toast('マルチプレイは今後実装予定です'));
         on('battle-back', () => this.go('main_menu'));
         on('monster-back', () => this.go('battle_select'));
+        on('monster-ranking', () => this.go('ranking'));
+        on('ranking-back', () => this.go('monster_select'));
         on('hero-ok', () => this.startBattle());
         on('hero-back', () => this.back());
         on('settings-back', () => this.go('main_menu'));
@@ -699,12 +706,17 @@ class ScreenManager {
             card.dataset.id = b.id;
             const stars = b.unknown ? '？？？' : '★'.repeat(b.difficulty) + '☆'.repeat(Math.max(0, 3 - b.difficulty));
             const feats = b.unknown ? '<li class="muted">新しいボスが現れるかも…</li>' : b.features.map(f => `<li>${f}</li>`).join('');
+            const playable = b.status === 'playable';
+            const coins = playable && window.BattleRecords ? BattleRecords.baseCoins(b) : 0;
+            // 倒したことのあるボスは、絵の上に「CLEAR」（enterMonster で出し入れする）
             card.innerHTML = `
-                <div class="bc-art"><canvas width="240" height="150"></canvas></div>
+                <div class="bc-art"><canvas width="240" height="150"></canvas>${playable ? '<span class="bc-clear" hidden>CLEAR</span>' : ''}</div>
                 <div class="bc-name">${b.name}${b.reading ? `<small>${b.reading}</small>` : ''}</div>
                 <div class="bc-row"><span>難易度</span><b class="bc-stars">${stars}</b></div>
                 <div class="bc-row"><span>フィールド</span><b>${b.fieldName}</b></div>
                 ${b.playerLevel ? `<div class="bc-row"><span>主人公</span><b>Lv.${b.playerLevel}</b></div>` : ''}
+                ${playable ? `<div class="bc-row"><span>報酬</span><b><i class="coin-icon"></i>${coins}枚 ＋ランクボーナス</b></div>
+                <div class="bc-row bc-best"><span>ベスト</span><b>─</b></div>` : ''}
                 ${b.elements ? `<div class="bc-row bc-elem"><span>有利属性</span><b>${elemChips(b.elements.weak)}</b></div>
                 <div class="bc-row bc-elem"><span>不利属性</span><b>${elemChips(b.elements.resist)}</b></div>` : ''}
                 <ul class="bc-feat">${feats}</ul>
@@ -744,6 +756,92 @@ class ScreenManager {
         // 前に選んだボスのカードを選んだ状態に
         const cards = [...this.root.querySelectorAll('#monster-cards .boss-card')];
         cards.forEach(c => c.classList.toggle('focused', c.dataset.id === (this.selectedBoss || BOSS_DATA[0].id)));
+        // 記録（バトルの後に変わる）：持っているコイン・CLEAR の印・ベストタイム
+        const R = window.BattleRecords;
+        if (!R) return;
+        this.showCoins();
+        for (const c of cards) {
+            const id = c.dataset.id;
+            const clear = c.querySelector('.bc-clear');
+            if (clear) clear.hidden = !R.isCleared(id);
+            c.classList.toggle('cleared', R.isCleared(id));
+            const best = c.querySelector('.bc-best b');
+            if (best) {
+                const r = R.getBest(id);
+                best.innerHTML = r ? `${R.formatTime(r.time)} <em class="rank-letter" data-rank="${r.rank}">${r.rank}</em>` : '─';
+            }
+        }
+    }
+    
+    // 右上のバトルコインの数（モンスター選択・マイベスト）
+    showCoins() {
+        const n = window.BattleRecords ? BattleRecords.getCoins() : 0;
+        for (const id of ['coin-count', 'ranking-coin-count']) {
+            const el = this.$(id);
+            if (el) el.textContent = String(n);
+        }
+    }
+    
+    // ---------- マイベストランキング ----------
+    // ボスごとに、クリアタイムの速い順（battle_records.js の MAX_RECORDS 件まで）
+    enterRanking() {
+        const R = window.BattleRecords;
+        const bosses = BOSS_DATA.filter(b => b.status === 'playable');
+        if (!this.rankingBoss || !bosses.some(b => b.id === this.rankingBoss)) {
+            this.rankingBoss = bosses.some(b => b.id === this.selectedBoss) ? this.selectedBoss : (bosses[0] && bosses[0].id);
+        }
+        const tabs = this.$('ranking-tabs');
+        if (tabs) {
+            tabs.innerHTML = '';
+            for (const b of bosses) {
+                const t = document.createElement('button');
+                t.type = 'button';
+                t.className = 'ranking-tab ui-btn';
+                t.dataset.nav = '';
+                t.dataset.boss = b.id;
+                t.innerHTML = `${b.name}${R && R.isCleared(b.id) ? '<small>CLEAR</small>' : ''}`;
+                t.addEventListener('click', (e) => { e.preventDefault(); if (!this.busy) { pressEffect(t); this.showRanking(b.id); } });
+                // 画面を開いた時は、選んでいるモンスターの札から（UINav は focused の付いた項目から始める）
+                t.classList.toggle('focused', b.id === this.rankingBoss);
+                tabs.appendChild(t);
+            }
+        }
+        // ランクの決まり方とコイン
+        const note = this.$('ranking-note');
+        if (note && R) {
+            const dur = (s) => s === Infinity ? '' : s < 60 ? `${s}秒` : `${Math.floor(s / 60)}分${s % 60 ? `${s % 60}秒` : ''}`;
+            const ranks = R.RANKS.map((r, i) => r.max === Infinity ? `${r.rank} ${dur(R.RANKS[i - 1].max)}より長い` : `${r.rank} ${dur(r.max)}以内`).join(' ／ ');
+            const coins = bosses.map(b => `${b.name} ${R.baseCoins(b)}枚`).join(' ／ ');
+            const bonus = R.RANKS.map(r => `${r.rank} +${r.bonus}`).join(' ／ ');
+            note.innerHTML = `ランク：${ranks}<br>バトルコイン：${coins}　＋ランクのボーナス（${bonus}）`;
+        }
+        this.showCoins();
+        this.showRanking(this.rankingBoss);
+    }
+    
+    showRanking(id) {
+        const R = window.BattleRecords;
+        const b = getBossData(id);
+        if (!R || !b) return;
+        this.rankingBoss = id;
+        for (const t of this.root.querySelectorAll('#ranking-tabs .ranking-tab')) t.classList.toggle('on', t.dataset.boss === id);
+        const list = R.getRecords(id);
+        const sum = this.$('ranking-summary');
+        if (sum) {
+            const best = list[0];
+            sum.innerHTML = `<b>${b.name}</b>　クリア ${R.clearCount(id)}回` +
+                (best ? `　ベスト ${R.formatTime(best.time)} <em class="rank-letter" data-rank="${best.rank}">${best.rank}</em>` : '');
+        }
+        const body = this.$('ranking-body');
+        if (!body) return;
+        if (!list.length) {
+            body.innerHTML = '<tr class="empty"><td colspan="5">まだ記録がありません。倒すとここにクリアタイムがのります</td></tr>';
+            return;
+        }
+        body.innerHTML = list.map((r, i) => `<tr class="${i === 0 ? 'top' : ''}">
+            <td>${i + 1}位</td><td>${R.formatTime(r.time)}</td>
+            <td><em class="rank-letter" data-rank="${r.rank}">${r.rank}</em></td>
+            <td>${r.hero === 'female' ? '女の子' : '男の子'}</td><td>${R.formatDate(r.date)}</td></tr>`).join('');
     }
     
     drawMonsterArt(dt) {

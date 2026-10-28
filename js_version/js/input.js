@@ -20,6 +20,7 @@ class InputManager {
         this.isMouseClicked = false;
         this.isLeftMouseClicked = false;
         this.isRightClicked = false;
+        this.leftMouseHeld = false; // マウスの左ボタンを押したまま（長押しで連続攻撃。タッチの画面タップは入れない）
         this.paletteOpen = false;   // 魔法パレットを開いている間 true（攻撃・回避をしない）
         
         // スマホのバーチャルスティック（-1〜1）
@@ -98,7 +99,7 @@ class InputManager {
             if (e.button === 0) {
                 this.isMouseClicked = true;
                 // 攻撃に使うのはマウスの左クリックだけ（スマホで画面をタップしても攻撃しない）
-                if (e.pointerType === 'mouse') this.isLeftMouseClicked = true;
+                if (e.pointerType === 'mouse') { this.isLeftMouseClicked = true; this.leftMouseHeld = true; }
             }
             if (e.button === 2) {
                 this.isRightClicked = true;
@@ -107,9 +108,11 @@ class InputManager {
         
         window.addEventListener('pointerup', (e) => {
             this.mouseButtons[e.button] = false;
+            if (e.button === 0) this.leftMouseHeld = false;
         });
         window.addEventListener('pointercancel', (e) => {
             this.mouseButtons[e.button] = false;
+            if (e.button === 0) this.leftMouseHeld = false;
         });
         
         // 右クリックメニュー・長押しメニューを出さない（右クリックは回避に使う）
@@ -157,6 +160,7 @@ class InputManager {
     resetAll() {
         this.keys = {};
         this.mouseButtons = {};
+        this.leftMouseHeld = false;
         this.stick = new Vector2(0, 0);
         this.touchAim = InputManager.emptyAim();
     }
@@ -277,6 +281,12 @@ class InputManager {
     isAttackPressed() {
         if (this.paletteOpen) return false;
         return this.isLeftMouseClicked === true || this.isKeyPressed('Space');
+    }
+    
+    // 攻撃を押したまま（マウスの左ボタン・Space。スマホの攻撃ボタンも Space として入る）。押している間は連続で攻撃する
+    isAttackHeld() {
+        if (this.paletteOpen) return false;
+        return this.leftMouseHeld === true || this.isKeyDown('Space');
     }
     
     // 魔法パレット（E キー）

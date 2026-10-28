@@ -19,6 +19,7 @@
 // playerLevel: バトルモードの主人公のレベル（このレベルのステータスで戦う。data/player_stats_table.json）
 // elements   : 属性の相性（魔法のダメージ。game.js の Game.ELEMENT_MUL）
 //              weak = 有利属性（よく効く：1.5倍） / resist = 不利属性（効きにくい：0.5倍） / 書いていない属性はふつう（1倍）
+// coins      : 倒した時のバトルコイン（難易度が上がるごとに10枚ずつ増える）。クリアタイムのランクで増える（battle_records.js）
 // attackInterval: 1つの攻撃が終わってから次の攻撃までの待ち時間（大きいほどゆっくり。Enemy.SCALE.cooldown と BossAI.TUNING.interval がかかる）
 // phaseBuff  : HP50%・25%を切った時の強化（[通常, HP50%以下, HP25%以下]）。書いていないボスは BossAI.PHASE_BUFF（全ボス共通）
 //              attack = 攻撃力の倍率 / damageTaken = 受けるダメージの倍率（小さいほど硬い）
@@ -38,6 +39,7 @@ const BOSS_DATA = [
         theme: { color: '#ff8a5a', banner: 'boss' },
         bgm: 'bgm_boss_boar',   // 戦いの BGM（assets/sounds/bgm/。なければ共通の bgm_boss）
         introSE: 'boar_cry',    // 名前が出た時の鳴き声（assets/sounds/se/）
+        coins: 10,              // 倒した時のバトルコイン（＋クリアタイムのランクのボーナス）
         playerLevel: 5,
         elements: { weak: ['炎', '雷', '土'], resist: [] },
         enemy: {
@@ -93,6 +95,7 @@ const BOSS_DATA = [
         theme: { color: '#c58bff', banner: 'corrupt', arenaTint: 'rgba(70, 15, 110, 0.2)' },
         bgm: 'bgm_boss_wolf',
         introSE: 'wolf_howl',
+        coins: 20,
         playerLevel: 10,
         elements: { weak: ['炎', '土', '風'], resist: ['雷'] },
         enemy: {
@@ -151,6 +154,7 @@ const BOSS_DATA = [
         ai: 'MagicGolemAI',
         theme: { color: '#7fd6ff', banner: 'golem', flash: '#7fe6ff', arenaTint: 'rgba(20, 50, 120, 0.1)', vignette: 'rgba(5, 10, 40, 0.55)' },
         bgm: 'bgm_boss_golem',
+        coins: 30,
         playerLevel: 15,      // 推奨レベル：この戦いは主人公をこのレベルの強さで始める（data/player_stats_table.json）
         elements: { weak: ['水'], resist: ['炎', '風', '雷'] },
         enemy: {

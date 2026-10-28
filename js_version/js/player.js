@@ -79,6 +79,7 @@ class Player {
         this.attackAnimDuration = 0.24; // 斬撃モーションの長さ（4コマ × 0.06秒）
         this.attackAnimTimer = 0;
         this.aimVector = new Vector2(0, 1); // 攻撃する向き
+        this.faceTarget = null;             // この敵の方を向き続ける（game.js が毎フレーム入れる）
         this.slashFx = null;                // 斬撃エフェクト（{ t, angle }。t は経過時間）
         
         // 魔法（最初から 炎・水・風・土・雷 の5つが使える）
@@ -137,9 +138,12 @@ class Player {
         this.dashFrameTimer = 0;
         this.dashFrameSpeed = 0.09; // ダッシュ1コマの表示時間
         
-        // 無敵時間
-        this.invincibleTime = 0;
-        this.maxInvincibleTime = 1.0;  // 攻撃を受けた後の無敵時間（1秒）
+        // 攻撃に当たった時（無敵時間はない。続けて当たった時・詠唱中に当たった時だけ少し飛ばされる）
+        this.hitChain = 0;       // 続けて当たった回数（Player.HIT_CHAIN.window 秒以内に次が当たると増える）
+        this.hitChainTimer = 0;
+        this.hitFlash = 0;       // 当たった瞬間に体を赤く光らせる残り時間
+        this.hitStun = 0;        // 飛ばされた後、攻撃・詠唱ができない残り時間
+        this.attackCancelled = false; // 近接攻撃がキャンセルされた（game.js が攻撃の先行入力を消す）
         
         // ノックバック（敵の咆哮などで飛ばされる）。飛ばされている間は動けない
         this.knockDir = new Vector2(0, 0);
@@ -191,10 +195,13 @@ class Player {
         // SP自然回復
         this.updateSPRegen(deltaTime);
         
-        // 無敵時間
-        if (this.invincibleTime > 0) {
-            this.invincibleTime -= deltaTime;
+        // 被弾のタイマー（続けて当たった回数は、しばらく当たらなければ 0 に戻る）
+        if (this.hitChainTimer > 0) {
+            this.hitChainTimer -= deltaTime;
+            if (this.hitChainTimer <= 0) { this.hitChainTimer = 0; this.hitChain = 0; }
         }
+        if (this.hitFlash > 0) this.hitFlash = Math.max(0, this.hitFlash - deltaTime);
+        if (this.hitStun > 0) this.hitStun = Math.max(0, this.hitStun - deltaTime);
         if (this.justGuardTime > 0) {
             this.justGuardTime -= deltaTime;
         }
@@ -238,9 +245,20 @@ class Player {
         // 走るかどうかはマップで決まる（戦闘フィールドは常に走る・拠点は常に歩く）。詠唱中は歩き
         this.isDashing = this.isMoving && this.moveMode === 'run' && !this.isChanting;
         
+        // 向く敵（game.js が毎フレーム入れる：PC でクリックしたターゲット、または近接攻撃中の敵）がいれば、
+        // 歩いていてもその敵の方を向く（攻撃モーション中は斬った向きのまま）
+        const ft = this.faceTarget && this.faceTarget.isAlive && this.faceTarget.isAlive() ? this.faceTarget : null;
+        if (ft && this.attackAnimTimer <= 0) {
+            const to = ft.position.sub(this.position);
+            if (to.length() > 1) {
+                this.setDirectionFromVector(to);
+                this.aimVector = to.normalize();
+            }
+        }
+        
         if (this.isMoving) {
-            // 方向を更新（攻撃モーション中は向きを固定）
-            if (this.attackAnimTimer <= 0) {
+            // 方向を更新（攻撃モーション中・敵の方を向いている時は向きを固定）
+            if (this.attackAnimTimer <= 0 && !ft) {
                 this.setDirectionFromVector(moveVector);
                 this.aimVector = this.directionToVector(this.direction);
             }
@@ -277,11 +295,11 @@ class Player {
     }
     
     // ---------- ノックバック ----------
-    // dir の方向へ dist(px) 飛ばされる。force = true（咆哮など）は回避中・無敵中でも必ず飛ばされる
+    // dir の方向へ dist(px) 飛ばされる。force = true（咆哮など）は回避中でも必ず飛ばされる
     knockback(dir, dist, duration = 0.3, force = false) {
         if (!dir || dir.length() < 0.01) dir = new Vector2(0, 1);
         if (this.justGuardTime > 0) return false; // ジャスト回避のスロー中は咆哮でも飛ばされない
-        if (!force && (this.isDodging || this.invincibleTime > 0)) return false;
+        if (!force && this.isDodging) return false;
         if (this.isDodging) {
             // 回避は打ち消される（無敵も消える）
             this.isDodging = false;
@@ -412,13 +430,26 @@ class Player {
         }
     }
     
+    // 近接攻撃を途中でやめる（続けて攻撃に当たった時）。斬撃の見た目も消す
+    cancelAttack() {
+        this.isAttacking = false;
+        this.attackAnimTimer = 0;
+        this.slashFx = null;
+        this.attackCancelled = true;
+    }
+    
     // 攻撃を開始する。近くに敵がいればその方向へ向き直って斬る
-    // 戻り値: 攻撃データ（クールダウン中・回避中は null）
+    // 戻り値: 攻撃データ（クールダウン中・回避中・攻撃に当たって飛ばされた直後は null）
     // aimDir：ねらう向き（スマホのスライド・PC のカーソル。Vector2）。null なら近くの敵を自動でねらう
-    startAttack(enemies = [], aimDir = null) {
-        if (this.attackTimer > 0 || this.isDodging || this.isChanting) return null;
+    // target：この敵の方へまっすぐ向いて斬る（game.js の getMeleeTarget。ターゲット・近くの敵）
+    startAttack(enemies = [], aimDir = null, target = null) {
+        if (this.attackTimer > 0 || this.isDodging || this.isChanting || this.hitStun > 0) return null;
         
-        if (aimDir) {
+        const to = target && target.isAlive() ? target.position.sub(this.position) : null;
+        if (to && to.length() > 1) {
+            this.aimVector = to.normalize();
+            this.setDirectionFromVector(this.aimVector);
+        } else if (aimDir) {
             // ねらった向きの近く（約30度以内）に敵がいれば、その敵に少しだけ吸いつける
             const t = this.pickAimTarget(enemies, aimDir, this.weapon.assistRange + 40, Player.AIM_ASSIST_DOT);
             this.aimVector = t ? t.position.sub(this.position).normalize() : aimDir.normalize();
@@ -576,7 +607,7 @@ class Player {
         if (!magic) return 'なし';
         if (!this.learnedMagic.includes(magic.id)) return '未習得';
         if (this.starPowerStage < (magic.requiredStage || 0)) return '星力不足';
-        if (this.isChanting || this.isDodging || this.isAttacking) return '行動中';
+        if (this.isChanting || this.isDodging || this.isAttacking || this.hitStun > 0) return '行動中';
         if (this.magicCooldowns[magic.id] > 0) return 'クールダウン';
         if (this.currentSP < magic.spCost) return 'SP不足';
         return null;
@@ -623,7 +654,7 @@ class Player {
         }
     }
     
-    // 詠唱をやめる（回避でキャンセルした時）。魔法は出ず、クールダウンも始まらない
+    // 詠唱をやめる（回避でキャンセルした時・詠唱中に攻撃に当たった時）。魔法は出ず、クールダウンも始まらない
     cancelChant() {
         if (!this.isChanting) return;
         this.isChanting = false;
@@ -719,23 +750,34 @@ class Player {
         }
     }
     
-    // from：攻撃が来た所（ワールド座標）。当たったらその反対へ少し飛ばされる（なければ向いている方の後ろへ）
+    // from：攻撃が来た所（ワールド座標）。飛ばされる時はその反対へ（なければ向いている方の後ろへ）
+    // 当たった後の無敵時間はない（次の攻撃にもすぐ当たる）
+    //   1回だけ当たった時：ダメージだけ（その場で動ける。近接攻撃も続けられる）
+    //   続けて当たった時（Player.HIT_CHAIN）：少し飛ばされて、近接攻撃がキャンセルされる
+    //   詠唱中に当たった時：1回でも少し飛ばされて、魔法がキャンセルされる（使った MP は戻らない）
     takeDamage(damage, from = null) {
         // 回避中は無敵。攻撃を避けたらジャスト回避成立
         if (this.isDodging) {
             this.dodgedAttack = true;
             return 0;
         }
-        if (this.invincibleTime > 0 || this.justGuardTime > 0) return 0;
+        if (this.justGuardTime > 0) return 0;
         
         const actualDamage = Math.max(1, damage - this.defense);
         this.currentHP = Math.max(0, this.currentHP - actualDamage);
-        this.invincibleTime = this.maxInvincibleTime;
+        this.hitFlash = Player.HIT_FLASH.time;
         
-        // 敵の攻撃に当たったら、少しノックバック（全部の敵・全部の攻撃。回避中は上で抜けているので飛ばされない）
-        let away = from ? this.position.sub(from) : null;
-        if (!away || away.length() < 0.01) away = this.directionToVector(this.direction).mult(-1);
-        this.knockback(away, Player.HIT_KNOCK.dist, Player.HIT_KNOCK.time, true);
+        this.hitChain = this.hitChainTimer > 0 ? this.hitChain + 1 : 1;
+        this.hitChainTimer = Player.HIT_CHAIN.window;
+        const chanting = this.isChanting;
+        if (chanting || this.hitChain >= Player.HIT_CHAIN.count) {
+            if (chanting) this.cancelChant();
+            this.cancelAttack();
+            let away = from ? this.position.sub(from) : null;
+            if (!away || away.length() < 0.01) away = this.directionToVector(this.direction).mult(-1);
+            this.knockback(away, Player.HIT_KNOCK.dist, Player.HIT_KNOCK.time, true);
+            this.hitStun = Player.HIT_KNOCK.stun;
+        }
         
         // ダメージ効果音
         if (window.soundManager) {
@@ -881,11 +923,6 @@ class Player {
             ctx.restore();
         }
         
-        // 被ダメージ後の無敵時間中は点滅
-        if (this.invincibleTime > 0 && Math.floor(this.invincibleTime * 10) % 2 === 0) {
-            return;
-        }
-        
         ctx.save();
         
         // 回避中は少し伸び縮みさせて「シュッ」と動いた感じを出す
@@ -903,6 +940,12 @@ class Player {
                 screenPos.x - drawW/2, screenPos.y - drawH/2,
                 drawW, drawH
             );
+            // 攻撃に当たった瞬間は、体の形のまま赤く光る（点滅はしない）
+            if (this.hitFlash > 0 && typeof Enemy === 'function' && Enemy.getWhiteSilhouette) {
+                ctx.globalAlpha *= Player.HIT_FLASH.alpha * (this.hitFlash / Player.HIT_FLASH.time);
+                ctx.drawImage(Enemy.getWhiteSilhouette(playerImg, Player.HIT_FLASH.color),
+                    screenPos.x - drawW/2, screenPos.y - drawH/2, drawW, drawH);
+            }
         } else {
             // 画像がない場合は色で描画（従来の方法）
             ctx.fillStyle = this.clothesColor;
@@ -1165,8 +1208,13 @@ Player.MAGIC_SLOT_COUNT = 5;
 Player.MAGIC_DAMAGE_MUL = 3.2;
 // 詠唱の長さの倍率（magic_circles.json の chantTime にかける）
 Player.CHANT_TIME_MUL = 1.3;
-// 敵の攻撃に当たった時のノックバック（dist：飛ばされる距離 px / time：秒。この間は動けない）
-Player.HIT_KNOCK = { dist: 40, time: 0.2 };
+// 敵の攻撃に当たって飛ばされる時（続けて当たった時・詠唱中に当たった時）
+// dist：飛ばされる距離 px / time：秒（この間は動けない） / stun：この秒数は攻撃・詠唱ができない
+Player.HIT_KNOCK = { dist: 40, time: 0.2, stun: 0.3 };
+// 続けて当たった：前に当たってから window 秒以内に次が当たると「続けて」。count 回目から飛ばされる
+Player.HIT_CHAIN = { window: 1.0, count: 2 };
+// 当たった瞬間の赤い光（time：秒 / alpha：濃さ）
+Player.HIT_FLASH = { time: 0.15, alpha: 0.6, color: '#ff4a3a' };
 // レベルのステータス（data/player_stats_table.json と同じ式）
 Player.statsForLevel = (lv) => ({
     level: lv, hp: 100 + 21 * (lv - 1), attack: 15 + 3 * (lv - 1), defense: 5 + (lv - 1),

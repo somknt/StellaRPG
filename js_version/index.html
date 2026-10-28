@@ -119,8 +119,14 @@
             <!-- ボス戦の勝利・敗北の画面 -->
             <div id="boss-result" class="battle-screen">
                 <div class="battle-panel">
-                    <h2 id="br-title">VICTORY</h2>
+                    <h2 id="br-title">GAME CLEAR</h2>
                     <div id="br-sub">勝利！</div>
+                    <!-- クリアタイムのランク（SS / S / A / B / C / D） -->
+                    <div id="br-rank" hidden>
+                        <span class="br-rank-label">RANK</span>
+                        <span id="br-rank-letter" data-rank="S">S</span>
+                        <span id="br-rank-note"></span>
+                    </div>
                     <div id="br-stats"></div>
                     <button class="ui-btn primary" id="br-retry" type="button" data-nav>もう一度戦う</button>
                     <button class="ui-btn" id="br-monster" type="button" data-nav>モンスター選択に戻る</button>
@@ -132,7 +138,7 @@
             <!-- 勝利・敗北の画面 -->
             <div id="battle-result" class="battle-screen">
                 <div class="battle-panel">
-                    <h2 id="result-title">勝利！</h2>
+                    <h2 id="result-title">GAME CLEAR</h2>
                     <div id="result-stats"></div>
                     <button class="ui-btn primary" id="result-retry" type="button">もう一度挑戦</button>
                     <button class="ui-btn" id="result-select" type="button">キャラクター選択へ</button>
@@ -144,7 +150,8 @@
             <div id="controls-help">
                 <h3>操作方法</h3>
                 <p><strong>WASD</strong>: 移動</p>
-                <p><strong>左クリック</strong>: 攻撃（ナイフ）</p>
+                <p><strong>左クリック</strong>: 攻撃（長押しで連続）</p>
+                <p><strong>敵をクリック</strong>: ターゲット</p>
                 <p><strong>右クリック</strong>: 回避</p>
                 <p><strong>Q</strong>: 魔法（詠唱→発動）</p>
                 <p><strong>E</strong>: 魔法パレット（マウスで選ぶ）</p>
@@ -198,12 +205,35 @@
             
             <!-- 対戦モンスター選択 -->
             <div class="screen" id="scr-monster">
+                <!-- 右上：持っているバトルコイン（ボスを倒すともらえる） -->
+                <div class="coin-box"><i class="coin-icon"></i><span>バトルコイン</span><b id="coin-count">0</b></div>
                 <h2 class="screen-title">対戦モンスター選択</h2>
                 <div id="monster-cards"></div>
                 <div class="screen-buttons">
+                    <button class="menu-item ui-btn" id="monster-ranking" type="button" data-nav>マイベスト</button>
                     <button class="menu-item ui-btn back" id="monster-back" type="button" data-nav>戻る</button>
                 </div>
                 <p class="screen-hint pc-only">←→ で選んで Enter で決定 ／ Esc で戻る</p>
+            </div>
+            
+            <!-- マイベストランキング（ボスごとのクリアタイムの記録。battle_records.js） -->
+            <div class="screen" id="scr-ranking">
+                <div class="coin-box"><i class="coin-icon"></i><span>バトルコイン</span><b id="ranking-coin-count">0</b></div>
+                <h2 class="screen-title">マイベストランキング</h2>
+                <div id="ranking-tabs"></div>
+                <div class="ranking-panel">
+                    <div id="ranking-summary"></div>
+                    <table id="ranking-table">
+                        <thead><tr><th>順位</th><th>クリアタイム</th><th>ランク</th><th>主人公</th><th>日付</th></tr></thead>
+                        <tbody id="ranking-body"></tbody>
+                    </table>
+                    <!-- ランクの決まり方とコインの数（screens.js が boss_data.js・battle_records.js から作る） -->
+                    <p class="ranking-note" id="ranking-note"></p>
+                </div>
+                <div class="screen-buttons">
+                    <button class="menu-item ui-btn back" id="ranking-back" type="button" data-nav>戻る</button>
+                </div>
+                <p class="screen-hint pc-only">←→ でモンスターを切りかえ ／ Esc で戻る</p>
             </div>
             
             <!-- 主人公選択 -->
@@ -267,7 +297,8 @@
                         </div>
                         <dl class="set-help" data-tab="keyboard">
                             <dt>WASD / 矢印</dt><dd>移動（バトルでは常にダッシュ）</dd>
-                            <dt>左クリック / Space</dt><dd>通常攻撃（ナイフ）</dd>
+                            <dt>左クリック / Space</dt><dd>通常攻撃（ナイフ。長押し・連打で連続攻撃。敵の方を向いて斬る）</dd>
+                            <dt>敵をクリック</dt><dd>その敵をターゲットにする（いつもその敵の方を向く）</dd>
                             <dt>右クリック / C</dt><dd>回避（スタミナを使う）</dd>
                             <dt>Q</dt><dd>魔法陣（詠唱 → 発動）</dd>
                             <dt>E</dt><dd>魔法パレット（マウスで選ぶ）</dd>
@@ -277,7 +308,7 @@
                         </dl>
                         <dl class="set-help" data-tab="touch">
                             <dt>画面の左半分</dt><dd>スティックで移動（常にダッシュ）</dd>
-                            <dt>攻撃ボタン</dt><dd>通常攻撃（ナイフ）</dd>
+                            <dt>攻撃ボタン</dt><dd>通常攻撃（ナイフ。長押し・連打で連続攻撃。近くの敵の方を向いて斬る）</dd>
                             <dt>回避ボタン</dt><dd>回避（スタミナを使う）</dd>
                             <dt>魔法ボタン</dt><dd>魔法陣（詠唱 → 発動）</dd>
                             <dt>属性ボタン</dt><dd>長押しでパレット、指を滑らせて選ぶ</dd>
@@ -359,6 +390,7 @@
     <script src="js/player.js"></script>
     <script src="js/enemy.js"></script>
     <script src="js/magic.js"></script>
+    <script src="js/damage_numbers.js"></script>
     <script src="js/map.js"></script>
     <script src="js/arena_map.js"></script>
     <script src="js/ruins_map.js"></script>
@@ -367,6 +399,7 @@
     <script src="js/boss_data.js"></script>
     <script src="js/boss_ai.js"></script>
     <script src="js/golem_ai.js"></script>
+    <script src="js/battle_records.js"></script>
     <script src="js/boss_battle.js"></script>
     <script src="js/title_atlas.js"></script>
     <script src="js/screens.js"></script>

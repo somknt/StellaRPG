@@ -47,6 +47,7 @@ class Game {
         this.map = null;
         this.camera = null;
         this.magicSystem = new MagicSystem();
+        this.damageNumbers = new DamageNumbers(); // 攻撃のダメージの数字（damage_numbers.js）
         this.enemySpawner = new EnemySpawner();
         
         // FPS計測
@@ -108,6 +109,8 @@ class Game {
         }
         console.log('ゲーム開始:', gender, '難易度:', this.battleDifficulty);
         this.selectedGender = gender;
+        this.lockTarget = null;
+        this.attackBuffer = 0;
         this.enemySpawner.autoSpawn = true;
         this.enemySpawner.map = null;
         document.body.dataset.mode = 'field';
@@ -144,6 +147,7 @@ class Game {
         
         // 魔術の残り火が燃える地面かどうかを調べるため、マップを渡しておく
         this.magicSystem.clear();
+        this.damageNumbers.clear();
         this.magicSystem.setMap(this.map);
         
         // 移動のしかた：バトルモードと戦闘フィールドは常に走る、村・町・拠点（safeZone）は常に歩く
@@ -228,6 +232,8 @@ class Game {
     setupArena(gender, field = 'arena') {
         this.selectedGender = gender;
         this.paused = false;
+        this.lockTarget = null; // PC でクリックしたターゲット（前のバトルの敵は忘れる）
+        this.attackBuffer = 0;
         document.body.classList.remove('paused');
         
         this.map = field === 'ruins' && typeof RuinsMap === 'function'
@@ -243,6 +249,8 @@ class Game {
         this.justDodgeTimer = 0;
         
         this.magicSystem.clear();
+        
+        this.damageNumbers.clear();
         this.magicSystem.setMap(this.map);
         
         this.enemySpawner.setDifficulty(this.battleDifficulty);
@@ -296,6 +304,7 @@ class Game {
             this.stopBattles();
             this.enemySpawner.clear();
             this.magicSystem.clear();
+            this.damageNumbers.clear();
             document.body.dataset.mode = '';
             document.body.dataset.waves = '';
             this.screens.setScreen(target);
@@ -464,11 +473,27 @@ class Game {
             this.justDodgeTimer = 0;
             Enemy.slowMotion = false;
             this.magicSystem.update(deltaTime);
+            this.damageNumbers.update(deltaTime);
             this.enemySpawner.update(deltaTime, this.player, window.gameData.enemies);
             battle.update(deltaTime);
             this.camera.update(deltaTime);
             return;
         }
+        
+        // 近接攻撃の向き：PC でクリックした敵（ターゲット）はいつも、それ以外は攻撃している間だけ、敵の方を向く
+        this.updateLockTarget(deltaTime);
+        // 連打：攻撃の間隔より速く押した分は少しの間（Game.ATTACK_BUFFER 秒）覚えておき、間隔が空いたらすぐ斬る
+        if (this.attackBuffer > 0) this.attackBuffer = Math.max(0, this.attackBuffer - deltaTime);
+        const attackPressed = this.input.isAttackPressed();
+        if (attackPressed) this.attackBuffer = Game.ATTACK_BUFFER;
+        // 続けて攻撃に当たって近接攻撃がキャンセルされた：それより前に押していた分は捨てる
+        if (this.player.attackCancelled) {
+            this.player.attackCancelled = false;
+            if (!attackPressed) this.attackBuffer = 0;
+        }
+        const attackInput = attackPressed || this.attackBuffer > 0 || this.input.isAttackHeld() || this.input.isAttackSliding();
+        const meleeMode = attackInput || this.player.attackAnimTimer > 0 || this.player.attackTimer > 0;
+        this.player.faceTarget = this.lockTarget || (meleeMode ? this.getMeleeTarget(this.getAimDirection()) : null);
         
         // プレイヤー更新（動く前の位置を覚えておく：敵の体から押し出す向きに使う）
         const prevPlayerPos = this.player.position.clone();
@@ -506,14 +531,16 @@ class Game {
             this.input.clearTouchAim('magic'); // 詠唱していない（MP 不足などで始まらなかった）なら、覚えた向きは使わない
         }
         
-        // プレイヤーの近接攻撃（ナイフ）：ねらう向き（なければ近くの敵の方向）へ向き直って斬る
-        // スマホで攻撃ボタンを押したままスライドしている間は、その向きへ斬り続ける
-        if (this.input.isAttackPressed() || this.input.isAttackSliding()) {
-            const attackData = this.player.startAttack(this.enemySpawner.enemies, aim);
+        // プレイヤーの近接攻撃（ナイフ）：敵の方へ向き直って斬る（ターゲット → ねらった向きの敵 → 近くの敵。いなければねらう向き）
+        // 連打でも、押したまま（マウスの左ボタン・Space・スマホの攻撃ボタン）でも、攻撃の間隔ごとに続けて斬る
+        if (attackInput) {
+            const attackData = this.player.startAttack(this.enemySpawner.enemies, aim, this.getMeleeTarget(aim));
             if (attackData) {
+                this.attackBuffer = 0;
                 const hits = this.enemySpawner.checkMeleeAttack(attackData);
                 if (hits.some(h => h.damage > 0)) playSE('attack_hit');
                 for (const hit of hits) {
+                    this.damageNumbers.add(hit.damage, hit.enemy); // ナイフは属性なし（白）
                     if (!hit.enemy.isAlive()) {
                         const drops = hit.enemy.getDrops();
                         this.player.gainExp(drops.exp);
@@ -525,6 +552,7 @@ class Game {
         
         // 魔法システム更新
         this.magicSystem.update(deltaTime);
+        this.damageNumbers.update(deltaTime);
         
         // 魔法と敵の衝突
         const magicHits = this.magicSystem.checkCollisions(this.enemySpawner.enemies);
@@ -547,6 +575,9 @@ class Game {
             if (res && res.damage > 0) {
                 const p = hit.projectile;
                 const isStrike = typeof LightningStrike === 'function' && p instanceof LightningStrike;
+                // ダメージの数字：有利属性は赤・不利属性は青・それ以外は魔法の属性の色。残り火・竜巻の続けて当たる分は小さく
+                const tick = hit.burn || (typeof Tornado === 'function' && p instanceof Tornado);
+                this.damageNumbers.add(res.damage, hit.enemy, { affinity, element, tick });
                 if (!hit.burn && !isStrike && element) playSE(`magic_${getElementInfo(element).key}_hit`);
                 if (affinity === 'weak') playSE('magic_weak');
                 else if (affinity === 'resist') playSE('magic_resist');
@@ -652,6 +683,8 @@ class Game {
             if (this.activeBattle && this.activeBattle.drawGround) this.activeBattle.drawGround(this.ctx, cam);
             // 詠唱中の魔法のねらい（通り道・届く所・落とす場所）。地面に描く
             this.drawCastAim(this.ctx, cam);
+            // PC でクリックしたターゲットの足元の輪
+            this.drawLockTarget(this.ctx, cam, false);
             const items = this.map.getDepthDrawables(this.player);
             for (const e of this.enemySpawner.enemies) {
                 items.push({ sortY: e.position.y + e.size * 0.55, draw: (ctx, c) => e.draw(ctx, c) });
@@ -664,7 +697,9 @@ class Game {
             this.enemySpawner.drawEffects(this.ctx, cam);       // 倒れた敵の星・敵の光弾
             this.magicSystem.draw(this.ctx, cam);               // 魔術
             this.drawAim(this.ctx, cam);                        // 攻撃ボタンのスライドの向き
+            this.drawLockTarget(this.ctx, cam, true);           // ターゲットの頭の上の矢印
             this.map.drawAbove(this.ctx, cam);                  // 入口のアーチ（キャラより手前）
+            this.damageNumbers.draw(this.ctx, cam);             // ダメージの数字（いちばん手前）
             if (window.showCollision) this.map.drawCollisionDebug(this.ctx, cam);
             return;
         }
@@ -677,6 +712,7 @@ class Game {
         
         // 魔法エフェクト描画
         this.magicSystem.draw(this.ctx, this.camera.position);
+        this.damageNumbers.draw(this.ctx, this.camera.position);
         
         // ジャスト回避は画面演出なし（敵がスローになるだけ）
     }
@@ -742,6 +778,7 @@ class Game {
         this.player.unlockStarPower(3);
         this.enemySpawner.clear();
         this.magicSystem.clear();
+        this.damageNumbers.clear();
         this.paused = false;
     }
     
@@ -753,6 +790,103 @@ class Game {
         if (el.weak && el.weak.includes(element)) return 'weak';
         if (el.resist && el.resist.includes(element)) return 'resist';
         return 'normal';
+    }
+    
+    // ---------- 近接攻撃のターゲット ----------
+    // PC：敵をクリックすると、その敵がターゲットになる（主人公はいつもその敵の方を向き、近接攻撃もその敵へ）
+    // ターゲットは、その敵が倒れるか、別の敵をクリックするまで続く。クリックはそのまま攻撃にもなる
+    updateLockTarget(dt) {
+        const t = this.lockTarget;
+        if (t && (!t.isAlive() || t.dying || !this.enemySpawner.enemies.includes(t))) this.lockTarget = null;
+        if (this.lockFlash > 0) this.lockFlash = Math.max(0, this.lockFlash - dt);
+        if (!this.input.isLeftMouseClicked || !this.input.mouseAim || this.input.paletteOpen) return;
+        const e = this.enemyAt(this.camera.screenToWorld(this.input.mousePos));
+        if (e && e !== this.lockTarget) {
+            this.lockTarget = e;
+            this.lockFlash = 0.35;
+            playSE('target_lock');
+        }
+    }
+    
+    // その場所（ワールド座標）にいる敵（体の絵の上。重なっていたら中心に近い方）
+    enemyAt(world) {
+        let best = null, bd = Infinity;
+        for (const e of this.enemySpawner.enemies) {
+            if (!e.isAlive() || e.dying) continue;
+            const rx = Math.max(28, e.size * 0.62), ry = Math.max(32, e.size * 0.72);
+            const dx = (world.x - e.position.x) / rx, dy = (world.y - (e.position.y - e.size * 0.1)) / ry;
+            const d = dx * dx + dy * dy;
+            if (d <= 1 && d < bd) { bd = d; best = e; }
+        }
+        return best;
+    }
+    
+    // 近接攻撃で向く敵：ターゲット → ねらった向き（カーソル・スライド）の近くの敵 → いちばん近い敵（Game.MELEE_FACE_RANGE 以内）
+    getMeleeTarget(aim) {
+        const t = this.lockTarget;
+        if (t && t.isAlive() && !t.dying) return t;
+        const p = this.player, range = Game.MELEE_FACE_RANGE;
+        const enemies = this.enemySpawner.enemies.filter(e => e.isAlive() && !e.dying);
+        if (aim) {
+            const a = p.pickAimTarget(enemies, aim, range, 0.5);
+            if (a) return a;
+        }
+        let best = null, bd = Infinity;
+        for (const e of enemies) {
+            const d = e.position.distance(p.position);
+            if (d <= range && d < bd) { bd = d; best = e; }
+        }
+        return best;
+    }
+    
+    // ターゲットの印：足元の回る金色の輪と、頭の上の下向きの矢印
+    drawLockTarget(ctx, cam, above) {
+        const e = this.lockTarget;
+        if (!e || !e.isAlive() || e.dying) return;
+        const time = performance.now() / 1000;
+        const s = e.position.sub(cam);
+        ctx.save();
+        if (!above) {
+            const pop = 1 + (this.lockFlash || 0) * 1.2;
+            const rx = Math.max(30, e.size * 0.62) * pop, ry = rx * 0.42;
+            const fy = s.y + e.size * 0.45;
+            ctx.globalAlpha = 0.35;
+            ctx.strokeStyle = '#1a1020';
+            ctx.lineWidth = 6;
+            ctx.beginPath(); ctx.ellipse(s.x, fy, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
+            ctx.globalAlpha = 0.95;
+            ctx.strokeStyle = '#ffd76a';
+            ctx.shadowColor = '#ffb030';
+            ctx.shadowBlur = 10;
+            ctx.lineWidth = 3;
+            ctx.setLineDash([16, 10]);
+            ctx.lineDashOffset = -time * 40;
+            ctx.beginPath(); ctx.ellipse(s.x, fy, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
+            ctx.setLineDash([]);
+            // 四方のかぎ
+            for (let i = 0; i < 4; i++) {
+                const a = time * 1.5 + i * Math.PI / 2;
+                const x = s.x + Math.cos(a) * rx * 1.12, y = fy + Math.sin(a) * ry * 1.12;
+                ctx.beginPath();
+                ctx.moveTo(x - Math.cos(a) * 10, y - Math.sin(a) * 4);
+                ctx.lineTo(x + Math.cos(a + 1.2) * 7, y + Math.sin(a + 1.2) * 3);
+                ctx.moveTo(x - Math.cos(a) * 10, y - Math.sin(a) * 4);
+                ctx.lineTo(x + Math.cos(a - 1.2) * 7, y + Math.sin(a - 1.2) * 3);
+                ctx.stroke();
+            }
+        } else {
+            const y = s.y - e.size * 0.8 - 14 + Math.sin(time * 5) * 4;
+            ctx.fillStyle = '#ffd76a';
+            ctx.strokeStyle = '#3a2108';
+            ctx.lineWidth = 3;
+            ctx.shadowColor = '#ffb030';
+            ctx.shadowBlur = 8;
+            ctx.beginPath();
+            ctx.moveTo(s.x - 11, y - 12); ctx.lineTo(s.x + 11, y - 12); ctx.lineTo(s.x, y + 2); ctx.closePath();
+            ctx.stroke();
+            ctx.fill();
+        }
+        ctx.restore();
     }
     
     // ---------- ねらう向き ----------
@@ -993,6 +1127,10 @@ class Game {
     }
 }
 
+// 近接攻撃で、この距離（px）以内の敵の方を向いて斬る（PC でクリックしたターゲットは距離に関係なく）
+Game.MELEE_FACE_RANGE = 600;
+// 連打で、攻撃の間隔（ナイフは 0.35秒）の途中に押した分を覚えておく時間（秒）
+Game.ATTACK_BUFFER = 0.4;
 // 属性の相性のダメージ倍率
 Game.ELEMENT_MUL = { weak: 1.5, resist: 0.5, normal: 1 };
 // 魔法が当たった時の敵の光の色（有利属性は赤・不利属性は青。ふつうは白）と、光る時間（秒）

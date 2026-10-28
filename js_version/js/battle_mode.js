@@ -203,7 +203,7 @@ class BattleMode {
             if (this.waveIndex >= this.totalWaves - 1) {
                 this.state = 'victory';
                 this.resultTimer = 1.6; // 最後の敵の星のエフェクトを見せてから
-                this.showBanner('VICTORY', '全ウェーブ クリア', 'victory');
+                this.showBanner('GAME CLEAR', '全ウェーブ クリア', 'victory');
                 playBGM('jingle_victory');
             } else {
                 this.state = 'clear';
@@ -224,7 +224,7 @@ class BattleMode {
         if (this.isOver) return;
         this.state = 'defeat';
         this.resultTimer = 1.2;
-        this.showBanner('DEFEAT', '', 'defeat');
+        this.showBanner('GAME OVER', '', 'defeat');
         playBGM('jingle_defeat');
         this.updateHUD();
     }
@@ -316,7 +316,7 @@ class BattleMode {
         const win = this.state === 'victory';
         const t = Math.floor(this.time);
         const timeText = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
-        u.resultTitle.textContent = win ? '勝利！' : '敗北…';
+        u.resultTitle.textContent = win ? 'GAME CLEAR' : 'GAME OVER';
         u.result.classList.toggle('win', win);
         u.resultStats.innerHTML =
             (BattleMode.USE_WAVES ? `<div><span>到達ウェーブ</span><b>${this.waveIndex + 1} / ${this.totalWaves}</b></div>` : '') +

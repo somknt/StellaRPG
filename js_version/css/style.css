@@ -1535,3 +1535,161 @@ body[data-boss="magic_golem"] #bh2-name { color: #c8f4ff; }
     box-shadow: 0 0 0 2px rgba(255, 215, 110, 0.6);
 }
 .battle-panel .ui-btn.primary.focused { background: linear-gradient(180deg, #ffe9a0, #d9a93e); }
+
+/* ==========================================================
+   バトルコイン・クリア・ランク・マイベスト（battle_records.js）
+   ========================================================== */
+/* コインの印（金色の丸に星） */
+.coin-icon {
+    position: relative;
+    display: inline-block;
+    width: 1.05em;
+    height: 1.05em;
+    margin-right: 0.25em;
+    vertical-align: -0.15em;
+    font-style: normal;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #fff6c2, #ffd24a 45%, #c88a1c 80%);
+    border: 2px solid #8a5a10;
+    box-shadow: 0 0 6px rgba(255, 200, 80, 0.55);
+}
+.coin-icon::after {
+    content: '★';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6em;
+    color: #9a5f0c;
+}
+
+/* 右上の所持コイン（モンスター選択・マイベスト） */
+.coin-box {
+    position: absolute;
+    top: 18px;
+    right: 22px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 16px 7px 12px;
+    font-size: 18px;
+    color: #f2eeff;
+    background: linear-gradient(180deg, rgba(20, 24, 62, 0.94), rgba(8, 10, 30, 0.94));
+    border: 2px solid #c9a24a;
+    border-radius: 4px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+}
+.coin-box .coin-icon { font-size: 22px; margin-right: 2px; }
+.coin-box span { font-size: 14px; color: #c9c2e6; letter-spacing: 1px; }
+.coin-box b { min-width: 2.5em; text-align: right; font-size: 24px; font-weight: normal; color: #ffe28a; text-shadow: 0 0 8px rgba(255, 200, 80, 0.6); font-variant-numeric: tabular-nums; }
+
+/* 倒したボスのカード：絵の上に「CLEAR」 */
+.bc-art { position: relative; }
+.bc-clear {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 2px 12px;
+    font-size: 20px;
+    letter-spacing: 3px;
+    color: #2a1606;
+    background: linear-gradient(180deg, #fff1a8, #e2a83a);
+    border: 2px solid #fff6c8;
+    border-radius: 3px;
+    box-shadow: 0 0 12px rgba(255, 210, 90, 0.85), 0 2px 0 #6b3e10;
+    transform: rotate(6deg);
+    pointer-events: none;
+}
+.bc-clear[hidden] { display: none; }
+.boss-card.cleared { border-color: rgba(255, 215, 110, 0.85); }
+
+/* ランクの文字の色（SS は虹色・S は金・A は赤・B は青・C は緑・D は灰色） */
+.rank-letter, #br-rank-letter { font-style: normal; font-weight: bold; }
+[data-rank="SS"] { background: linear-gradient(90deg, #ff6a8a, #ffd24a, #6affc0, #6ab8ff, #d07aff); -webkit-background-clip: text; background-clip: text; color: transparent !important; }
+[data-rank="S"] { color: #ffd24a !important; }
+[data-rank="A"] { color: #ff7a5a !important; }
+[data-rank="B"] { color: #6ab8ff !important; }
+[data-rank="C"] { color: #7ae27a !important; }
+[data-rank="D"] { color: #b4b4c4 !important; }
+
+/* 結果画面のランク */
+#br-rank {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 12px;
+    margin: -2px 0 2px;
+    font-family: 'DotGothic16', sans-serif;
+}
+#br-rank[hidden], #br-rank-note:empty { display: none; }
+.br-rank-label { font-size: 18px; letter-spacing: 3px; color: #e8d8b0; }
+#br-rank-letter {
+    font-size: 60px;
+    line-height: 1;
+    letter-spacing: 2px;
+    text-shadow: 0 0 14px rgba(255, 210, 120, 0.45);
+    animation: rank-pop 0.5s ease-out;
+}
+#br-rank-letter[data-rank="SS"] { text-shadow: none; filter: drop-shadow(0 0 8px rgba(255, 230, 160, 0.8)); }
+#br-rank-note { font-size: 16px; color: #ffe28a; letter-spacing: 1px; animation: star-twinkle-text 1.2s ease-in-out infinite; }
+#br-stats small { font-size: 12px; color: #c9b896; }
+/* クリアした時は項目が多いので2列にして、画面の高さに収める */
+#boss-result.win .battle-panel { min-width: 620px; }
+#boss-result.win #br-stats { display: grid; grid-template-columns: 1fr 1fr; column-gap: 18px; row-gap: 4px; }
+#boss-result.win #br-stats div { gap: 14px; align-items: baseline; }
+#boss-result.win #br-stats b { text-align: right; }
+#boss-result.win #br-stats small { display: block; }
+/* 画面が小さい時は、パネルごと縮めて全部見えるようにする（--fit は boss_battle.js が入れる） */
+#boss-result .battle-panel { transform: scale(calc(var(--hud-scale, 1) * var(--fit, 1))); }
+@keyframes rank-pop {
+    0% { transform: scale(2.2); opacity: 0; }
+    70% { transform: scale(0.92); opacity: 1; }
+    100% { transform: scale(1); }
+}
+@keyframes star-twinkle-text {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+
+/* マイベストランキング */
+#ranking-tabs { display: flex; gap: 10px; }
+.ranking-tab {
+    min-width: 170px;
+    padding: 8px 16px;
+    font-family: inherit;
+    font-size: 18px;
+    letter-spacing: 1px;
+    color: #d8d4f2;
+    background: rgba(20, 24, 62, 0.9);
+    border: 2px solid rgba(201, 162, 74, 0.5);
+    border-radius: 3px;
+    cursor: pointer;
+    pointer-events: auto;
+}
+.ranking-tab small { margin-left: 8px; font-size: 12px; color: #ffd76a; letter-spacing: 1px; }
+.ranking-tab.focused, .ranking-tab:hover { border-color: #ffd76a; color: #fff7d0; }
+.ranking-tab.on { color: #2a1606; background: linear-gradient(180deg, #ffd977, #c8902e); border-color: #ffe9a8; }
+.ranking-tab.on small { color: #6b3e10; }
+.ranking-panel {
+    width: 760px;
+    padding: 12px 18px 10px;
+    background: linear-gradient(180deg, rgba(20, 24, 62, 0.94), rgba(8, 10, 30, 0.94));
+    border: 2px solid rgba(201, 162, 74, 0.7);
+    border-radius: 4px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+}
+#ranking-summary { font-size: 17px; color: #c9c2e6; margin-bottom: 6px; }
+#ranking-summary b { font-weight: normal; color: #fff4d0; font-size: 20px; }
+#ranking-table { width: 100%; border-collapse: collapse; font-size: 16px; font-variant-numeric: tabular-nums; }
+#ranking-table th { padding: 4px 8px; font-weight: normal; font-size: 14px; color: #ffd76a; border-bottom: 2px solid rgba(201, 162, 74, 0.5); text-align: center; }
+#ranking-table td { padding: 3px 8px; text-align: center; color: #f2eeff; border-bottom: 1px solid rgba(201, 162, 74, 0.18); }
+#ranking-table tr.top td { color: #fff4d0; background: rgba(255, 215, 110, 0.1); }
+#ranking-table tr.empty td { padding: 26px 8px; color: #9a94b8; }
+#ranking-table .rank-letter { font-size: 18px; }
+.ranking-note { margin-top: 8px; font-size: 12.5px; line-height: 1.6; color: #9a94b8; }
+
+/* 報酬・ベストの行を足した分、カードを少しつめる（下のボタンと案内の文字が重ならないように） */
+#monster-cards .boss-card { gap: 4px; padding: 8px 12px 10px; min-height: 0; }
+#monster-cards .bc-feat { line-height: 1.38; }
+#scr-monster .screen-hint, #scr-ranking .screen-hint { bottom: 6px; }

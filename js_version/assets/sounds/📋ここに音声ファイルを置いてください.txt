@@ -84,6 +84,8 @@ BGM（bgm/ フォルダ）  ※ループする曲。ジングルは1回だけ流
     ui_error.mp3         選べない（今後実装予定のボスなど）
     ui_start.mp3         タイトルで決定（ない時は ui_select）
     ui_pause.mp3         一時停止・再開
+    target_lock.mp3      PC で敵をクリックしてターゲットにした（ない時は ui_move を高くして鳴らす）
+    coin_get.mp3         バトルコインをもらった・結果画面（ない時は ui_select を高くして鳴らす）
 
 【主人公】
  ★ attack.mp3           ナイフを振る

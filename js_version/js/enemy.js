@@ -131,6 +131,7 @@ class Enemy {
     
     update(deltaTime, player) {
         if (this.hitFlashTimer > 0) this.hitFlashTimer -= deltaTime;
+        if (this.contactTimer > 0) this.contactTimer -= deltaTime; // 体当たりの次まで（EnemySpawner.checkEnemyAttacks）
         
         // 倒れた敵：最後のノックバックで飛ばされきるまで動かす（そのあと星のエフェクトになる）
         if (!this.isAlive()) {
@@ -332,6 +333,7 @@ class Enemy {
                 // 突進開始！
                 this.isCharging = true;
                 this.chargeDuration = 0;
+                this.chargeHit = false; // この突進はまだ当たっていない
             }
             return;
         }
@@ -1056,7 +1058,8 @@ Enemy.SHOT_ORB_X = 0.4;
 
 // 体当たりのダメージ（全員の敵・ボス）
 // reach：敵の体の大きさのどこまでを「体」とするか / player：主人公の体の半径(px) / damage：敵の攻撃力に掛ける倍率
-Enemy.CONTACT = { reach: 0.42, player: 16, damage: 0.6 };
+// cooldown：同じ敵の体当たりが次に当たるまでの秒数（主人公には無敵時間がないので、ふれ続けても毎フレームは減らない）
+Enemy.CONTACT = { reach: 0.42, player: 16, damage: 0.6, cooldown: 0.8 };
 
 // 体の当たり（すり抜けられない範囲）。地面に寝かせただ円
 // rx・ry：敵の体の大きさに掛ける横・縦の半径 / oy：中心を下へずらす割合 / player：主人公の体の半径(px)
@@ -1403,30 +1406,21 @@ class EnemySpawner {
             }
         }
         
+        // 主人公には当たった後の無敵時間がないので、1つの攻撃が当たるのは1回だけにする
+        // （ボスの攻撃は当たり判定ごとに1回・突進は1回の突進で1回・体当たりは敵ごとに Enemy.CONTACT.cooldown 秒に1回）
         for (const enemy of this.enemies) {
             if (!enemy.isAlive()) continue;
-            
-            // 体当たり：敵（ボスも）の体にふれてもダメージ。回避中はすり抜ける（ジャスト回避にはしない）
-            // ダメージの後の無敵時間があるので、ふれ続けても毎フレームは減らない
-            // （体はすり抜けられないので、だ円の少し外までを「ふれている」とする）
-            const b = enemy.bodyShape();
-            const touch = Math.hypot((player.position.x - b.cx) / (b.rx + 6), (player.position.y - b.cy) / (b.ry + 6)) <= 1;
-            // 宙に浮いている間（狼の飛びかかり）は、下にいても当たらない
-            const airborne = enemy.ai && enemy.ai.airborne;
-            if (!player.isDodging && touch && !airborne) {
-                player.takeDamage(Math.max(1, Math.round(enemy.attack * Enemy.CONTACT.damage)), enemy.position);
-            }
+            const hpBefore = player.currentHP;
             
             // ボス：AI が出した当たり判定（牙・突進・踏みつけ・噛みつき・侵蝕波動など）
             if (enemy.ai) {
                 enemy.ai.checkHits(player);
-                continue;
             }
-            
-            // 突進攻撃（角ウサギ・森イノシシ）
-            if (enemy.isCharger && enemy.isCharging) {
+            // 突進攻撃（角ウサギ・森イノシシ）：1回の突進で当たるのは1回だけ（回避でよけた時も、その突進はもう当たらない）
+            else if (enemy.isCharger && enemy.isCharging) {
                 const distance = enemy.position.distance(player.position);
-                if (distance <= enemy.size * 0.75 + 24) {
+                if (!enemy.chargeHit && distance <= enemy.size * 0.75 + 24) {
+                    enemy.chargeHit = true;
                     const attackData = enemy.performAttack();
                     player.takeDamage(attackData.damage, enemy.position);
                 }
@@ -1438,6 +1432,22 @@ class EnemySpawner {
                 if (distance <= enemy.attackRange + player.size * 0.35) {
                     player.takeDamage(enemy.attack, enemy.position);
                 }
+            }
+            
+            // 体当たり：敵（ボスも）の体にふれてもダメージ。回避中はすり抜ける（ジャスト回避にはしない）
+            // ふれ続けても、同じ敵からは Enemy.CONTACT.cooldown 秒に1回だけ。攻撃が当たった時は体当たりを重ねない
+            // （体はすり抜けられないので、だ円の少し外までを「ふれている」とする）
+            if (player.currentHP < hpBefore) {
+                enemy.contactTimer = Enemy.CONTACT.cooldown;
+                continue;
+            }
+            if (enemy.contactTimer > 0 || player.isDodging) continue;
+            const b = enemy.bodyShape();
+            const touch = Math.hypot((player.position.x - b.cx) / (b.rx + 6), (player.position.y - b.cy) / (b.ry + 6)) <= 1;
+            // 宙に浮いている間（狼の飛びかかり）は、下にいても当たらない
+            const airborne = enemy.ai && enemy.ai.airborne;
+            if (touch && !airborne && player.takeDamage(Math.max(1, Math.round(enemy.attack * Enemy.CONTACT.damage)), enemy.position) > 0) {
+                enemy.contactTimer = Enemy.CONTACT.cooldown;
             }
         }
     }

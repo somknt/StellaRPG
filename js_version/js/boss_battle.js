@@ -5,7 +5,8 @@
 // 2. 開始演出：門が開いてボスが出てくる（遺跡はその場で起動）→ ボス名 → BATTLE START と同時に戦闘開始
 //    def.countdown: true のボスは BATTLE START の後に 3・2・1・GO!（その間は操作も敵AIも止まる。今は使っているボスなし）
 // 3. 戦闘：ボスの HP バー（なめらかに減る・フェーズ表示）。フェーズ移行の演出はボスAIが1回だけ知らせてくる
-// 4. 勝利（ボスの HP 0）/ 敗北（主人公の HP 0）→ 結果画面（もう一度・モンスター選択・メインメニュー）
+// 4. GAME CLEAR（ボスの HP 0）/ GAME OVER（主人公の HP 0）→ 結果画面（もう一度・モンスター選択・メインメニュー）
+//    クリアした時は battle_records.js に記録：クリアタイムのランク（SS〜D）・バトルコイン・マイベスト
 //
 // プレイヤー・魔術・ナイフ・回避などは game.js の共通処理をそのまま使う
 
@@ -27,6 +28,7 @@ class BossBattle {
             count: $('battle-countdown'),
             pause: $('battle-pause'),
             result: $('boss-result'), resultTitle: $('br-title'), resultSub: $('br-sub'), resultStats: $('br-stats'),
+            rank: $('br-rank'), rankLetter: $('br-rank-letter'), rankNote: $('br-rank-note'),
             retry: $('br-retry')
         };
     }
@@ -61,6 +63,7 @@ class BossBattle {
         this.trailDelay = 0;
         this.lastHP = null;
         this.maxPhase = 1;
+        this.record = null;      // クリアした時の記録（BattleRecords.recordClear の結果）
         
         const AIClass = BOSS_AI_CLASSES[def.ai];
         const stage = map.getBossStage ? map.getBossStage() : null;
@@ -143,7 +146,10 @@ class BossBattle {
             if (!this.boss.isAlive()) {
                 this.state = 'victory';
                 this.resultTimer = 2.6; // ボスが光になって消えるのを見せてから
-                this.showBanner('VICTORY', '勝利！', 'victory');
+                // クリアの記録：バトルコイン（ボスの基本＋ランクのボーナス）とクリアタイム（マイベスト）
+                const p = game.player;
+                this.record = window.BattleRecords ? BattleRecords.recordClear(this.def, this.time, p && p.gender) : null;
+                this.showBanner('GAME CLEAR', '勝利！', 'victory');
                 playSE('boss_down');
                 playBGM('jingle_victory');
             }
@@ -216,7 +222,8 @@ class BossBattle {
         this.resultTimer = 1.6;
         this.ai.cancel();
         this.ai.active = false; // ボスはその場で止まる
-        this.showBanner('DEFEAT', '敗北……', 'defeat');
+        this.record = null;
+        this.showBanner('GAME OVER', '敗北……', 'defeat');
         playBGM('jingle_defeat');
     }
     
@@ -313,26 +320,58 @@ class BossBattle {
         const u = this.ui;
         if (!u.result) return;
         const win = this.state === 'victory';
-        const t = Math.floor(this.time);
-        const timeText = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+        const R = window.BattleRecords;
+        const rec = win ? this.record : null;
+        const timeText = R ? R.formatTime(this.time) : `${Math.floor(this.time / 60)}:${String(Math.floor(this.time) % 60).padStart(2, '0')}`;
         const p = this.game.player;
-        u.resultTitle.textContent = win ? 'VICTORY' : 'DEFEAT';
+        u.resultTitle.textContent = win ? 'GAME CLEAR' : 'GAME OVER';
         u.resultSub.textContent = win ? '勝利！' : '敗北……';
         u.retry.textContent = win ? 'もう一度戦う' : '再挑戦';
         u.result.classList.toggle('win', win);
+        // クリアタイムのランク（大きな文字）と、自己ベストの時の「NEW RECORD!」
+        if (u.rank) {
+            u.rank.hidden = !rec;
+            if (rec) {
+                u.rankLetter.textContent = rec.rank;
+                u.rankLetter.dataset.rank = rec.rank;
+                u.rankNote.textContent = rec.best ? 'NEW RECORD!' : '';
+            }
+        }
         const hero = p && p.gender === 'female' ? '女の子' : '男の子';
         const rows = [
             ['対戦モンスター', this.def.name],
             ['主人公', hero],
-            [win ? 'クリアタイム' : '戦った時間', timeText],
-            ['到達フェーズ', `${this.maxPhase} / ${this.def.phases.length}`]
+            [win ? 'クリアタイム' : '戦った時間', timeText]
         ];
-        if (win) rows.push(['残りHP', `${p ? Math.ceil(p.currentHP) : 0} / ${p ? p.maxHP : 0}`]);
-        else rows.push(['ボスの残りHP', `${Math.round(this.boss.currentHP / this.boss.maxHP * 100)}%`]);
+        if (win) {
+            rows.push(['残りHP', `${p ? Math.ceil(p.currentHP) : 0} / ${p ? p.maxHP : 0}`]);
+            if (rec) {
+                rows.push(['獲得バトルコイン', `<i class="coin-icon"></i>+${rec.gained}枚 <small>（基本${rec.base}＋ランク${rec.bonus}）</small>`]);
+                rows.push(['所持バトルコイン', `<i class="coin-icon"></i>${rec.coins}枚`]);
+                rows.push(['マイベスト', rec.place ? `${rec.place}位${rec.best ? '（自己ベスト！）' : ''}` : '圏外']);
+            }
+        } else {
+            rows.push(['到達フェーズ', `${this.maxPhase} / ${this.def.phases.length}`]);
+            rows.push(['ボスの残りHP', `${Math.round(this.boss.currentHP / this.boss.maxHP * 100)}%`]);
+        }
         u.resultStats.innerHTML = rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
+        if (rec) playSE('coin_get');
         u.result.classList.add('show');
         document.body.classList.add('battle-result-open');
-        this.nav = new UINav(u.result.querySelector('.battle-panel'), 'vertical');
+        const panel = u.result.querySelector('.battle-panel');
+        this.fitPanel(panel);
+        this.nav = new UINav(panel, 'vertical');
+    }
+    
+    // 画面が小さい時（スマホは --hud-scale で拡大している）も、パネルが全部見えるように縮める
+    fitPanel(panel) {
+        if (!panel) return;
+        panel.style.setProperty('--fit', '1');
+        const hud = parseFloat(getComputedStyle(panel).getPropertyValue('--hud-scale')) || 1;
+        const roomH = this.ui.result.clientHeight - 16;
+        const roomW = this.ui.result.clientWidth - 16;
+        const fit = Math.min(1, roomH / (panel.offsetHeight * hud), roomW / (panel.offsetWidth * hud));
+        if (fit > 0 && fit < 1) panel.style.setProperty('--fit', fit.toFixed(3));
     }
     
     hideResult() {
