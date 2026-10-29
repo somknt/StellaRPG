@@ -19,10 +19,16 @@
 // playerLevel: バトルモードの主人公のレベル（このレベルのステータスで戦う。data/player_stats_table.json）
 // elements   : 属性の相性（魔法のダメージ。game.js の Game.ELEMENT_MUL）
 //              weak = 有利属性（よく効く：1.5倍） / resist = 不利属性（効きにくい：0.5倍） / 書いていない属性はふつう（1倍）
+// bgm        : 戦いの BGM（assets/sounds/bgm/）。BATTLE START の文字が出てから流れる（boss_battle.js）
+//              配列にすると形態ごとの曲（[第1形態, 第2形態, 第3形態]）。形態が変わる時は BGM を止めて、
+//              ボスが吠え終わってから次の曲。同じ曲のボスは、止めた所から続きを流す
+// introSE    : 名前が出た時の鳴き声（assets/sounds/se/。なければ共通の boss_intro）
 // coins      : 倒した時のバトルコイン（難易度が上がるごとに10枚ずつ増える）。クリアタイムのランクで増える（battle_records.js）
 // attackInterval: 1つの攻撃が終わってから次の攻撃までの待ち時間（大きいほどゆっくり。Enemy.SCALE.cooldown と BossAI.TUNING.interval がかかる）
 // phaseBuff  : HP50%・25%を切った時の強化（[通常, HP50%以下, HP25%以下]）。書いていないボスは BossAI.PHASE_BUFF（全ボス共通）
 //              attack = 攻撃力の倍率 / damageTaken = 受けるダメージの倍率（小さいほど硬い）
+// ultimate   : そのボスでいちばん大きい大技（必殺技）の攻撃の名前（attacks のキー。いくつかある時は配列）
+//              必殺技に当たった主人公は、少し飛ばされて1秒無敵になる（player.js の Player.ULT_HIT）。ほかの攻撃は無敵なし
 // 攻撃の数値のうち windup2 = 2回目からの溜め / spread = 扇の広さ（ラジアン）/ radius = 当たりの丸の大きさ / body = 突進の体の当たりの大きさ
 
 const BOSS_DATA = [
@@ -46,7 +52,7 @@ const BOSS_DATA = [
             enemyId: 'boss_001', name: '巨大森イノシシ', displayName: '巨大森イノシシ',
             hp: 850, attack: 16, defense: 3, exp: 120,
             size: 74, speed: 64, detectionRange: 4000, attackRange: 90,
-            isBoss: true, poiseRatio: 0.14, knockbackScale: 0.35
+            isBoss: true, knockbackScale: 0.35
         },
         look: { key: 'giant_forest_boar', body: '#6e4a2e', dark: '#43291a', outline: '#24150b', snout: '#a88063', eye: '#ff6a3a', head: 0.5, ear: 0.24, tusks: true, bigTusks: true, mane: true,
             sprite: {
@@ -56,6 +62,7 @@ const BOSS_DATA = [
                 speed: { walk: 0.2, turn: 0.3, run: 0.1, charge: 0.075, chargePrepare: 0.12, roar: 0.16 }
             } },
         attackInterval: 3.2,   // 攻撃と攻撃の間をゆっくりに（前は 1.0）
+        ultimate: 'bigStomp',  // 必殺技：最終強化の大踏みつけ（3回の大きな衝撃）
         phases: [
             { hp: 1.0, label: '通常', speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0,
               attacks: { tusk: 4, charge: 3 } },
@@ -101,8 +108,8 @@ const BOSS_DATA = [
         enemy: {
             enemyId: 'boss_002', name: '黒蝕狼', displayName: '黒蝕狼',
             hp: 1000, attack: 24, defense: 4, exp: 200,   // 攻撃力 34 → 24（ダメージを10下げた）
-            size: 56, speed: 150, detectionRange: 4000, attackRange: 70,
-            isBoss: true, poiseRatio: 0.12, knockbackScale: 0.5
+            size: 56, speed: 165, detectionRange: 4000, attackRange: 70,   // 歩く・走る速さ 150 → 165
+            isBoss: true, knockbackScale: 0.5
         },
         look: { key: 'black_corrupted_wolf', body: '#2b2433', dark: '#16111c', outline: '#07050a', snout: '#3d3346', eye: '#d47bff', head: 0.42, ear: 0.44, tail: true, glowEyes: true, miasma: true, cracks: true,
             sprite: {
@@ -111,7 +118,8 @@ const BOSS_DATA = [
                          corruptionAttack: ['bite', null], stun: ['leapPrepare', 2], hit: ['leapPrepare', 0], death: ['leapPrepare', 0] },
                 speed: { walk: 0.15, run: 0.09, shadowDash: 0.05, howl: 0.16 }
             } },
-        attackInterval: 2.2,   // 攻撃と攻撃の間をゆっくりに（前は 0.75）
+        attackInterval: 2.0,   // 攻撃と攻撃の間（2.2 → 2.0 で少し早く）
+        ultimate: 'corruptionWave', // 必殺技：最終強化の侵蝕波動（広がる紫の輪）
         phases: [
             { hp: 1.0, label: '通常', speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0, dodgeChance: 0.2, aura: 0,
               attacks: { bite: 3, claw: 3, leap: 3 } },
@@ -120,17 +128,17 @@ const BOSS_DATA = [
             { hp: 0.25, label: '最終強化', speedMul: 1.35, intervalMul: 0.75, recoverMul: 0.65, dodgeChance: 0.45, aura: 2, transition: 'howl',
               banner: '星喰いの暴走！', attacks: { tripleClaw: 3, doubleBite: 2, shadowLeap: 3, corruptionShot: 2, corruptionWave: 2 } }
         ],
-        // 全体的に溜め・攻撃の後の隙を長く、範囲を小さく
+        // 範囲は小さめ。連続攻撃（噛みつき・爪）は前より4回多く、全体の溜め・隙・動きを約1割早く
         attacks: {
-            bite:           { range: [0, 260], windup: 0.42, damage: 1.0, hits: 2, radius: 32, recover: 0.8 },
-            doubleBite:     { range: [0, 280], windup: 0.36, damage: 0.9, hits: 3, radius: 32, recover: 0.8 },
-            claw:           { range: [0, 260], windup: 0.46, damage: 1.1, hits: 2, reach: 68, spread: 1.6, recover: 0.85 },
-            tripleClaw:     { range: [0, 280], windup: 0.38, damage: 0.9, hits: 5, reach: 72, spread: 1.6, recover: 0.85 },
-            leap:           { range: [140, 460], prepare: 0.75, time: 0.52, damage: 1.3, radius: 52, recover: 0.9 },
-            shadowDash:     { range: [0, 700], prepare: 0.4, time: 0.26, dist: 260, recover: 0.35 },
-            shadowLeap:     { range: [0, 700], prepare: 0.36, time: 0.24, dist: 240, leapPrepare: 0.42, leapTime: 0.48, damage: 1.3, radius: 54, recover: 0.85 },
-            corruptionShot: { range: [160, 900], windup: 0.78, damage: 0.9, count: 5, spread: 0.32, speed: 210, recover: 0.8 },
-            corruptionWave: { range: [0, 400], windup: 1.25, damage: 1.3, maxRadius: 260, time: 0.85, band: 28, recover: 1.0 }
+            bite:           { range: [0, 260], windup: 0.38, damage: 1.0, hits: 6, radius: 32, recover: 0.72 },
+            doubleBite:     { range: [0, 280], windup: 0.32, damage: 0.9, hits: 7, radius: 32, recover: 0.72 },
+            claw:           { range: [0, 260], windup: 0.41, damage: 1.1, hits: 6, reach: 68, spread: 1.6, recover: 0.76 },
+            tripleClaw:     { range: [0, 280], windup: 0.34, damage: 0.9, hits: 9, reach: 72, spread: 1.6, recover: 0.76 },
+            leap:           { range: [140, 460], prepare: 0.68, time: 0.47, damage: 1.3, radius: 52, recover: 0.8 },
+            shadowDash:     { range: [0, 700], prepare: 0.36, time: 0.24, dist: 260, recover: 0.32 },
+            shadowLeap:     { range: [0, 700], prepare: 0.32, time: 0.22, dist: 240, leapPrepare: 0.38, leapTime: 0.44, damage: 1.3, radius: 54, recover: 0.76 },
+            corruptionShot: { range: [160, 900], windup: 0.7, damage: 0.9, count: 5, spread: 0.32, speed: 230, recover: 0.72 },
+            corruptionWave: { range: [0, 400], windup: 1.12, damage: 1.3, maxRadius: 260, time: 0.78, band: 28, recover: 0.9 }
         },
         motions: {
             // 下・上向き：歩き・走り・噛みつき・跳びかかりの溜め・跳びかかり・遠吠え・ひっかき の絵がある（ほかは横向きの絵を使う）
@@ -153,7 +161,9 @@ const BOSS_DATA = [
         features: ['古代遺跡を守る魔導機械', '高い防御力', '強力な範囲攻撃', '魔法陣による特殊攻撃', '上級者向けのボス'],
         ai: 'MagicGolemAI',
         theme: { color: '#7fd6ff', banner: 'golem', flash: '#7fe6ff', arenaTint: 'rgba(20, 50, 120, 0.1)', vignette: 'rgba(5, 10, 40, 0.55)' },
-        bgm: 'bgm_boss_golem',
+        // 形態ごとに曲が変わる（[第1形態, 第2形態（HP50%以下）, 第3形態（HP25%以下）]）。機械の咆哮が終わってから次の曲
+        bgm: ['bgm_boss_golem', 'bgm_boss_golem_p2', 'bgm_boss_golem_p3'],
+        introSE: 'boss_intro',  // 名前が出た時の音（モンスター召喚）。この後に起動の音が鳴る
         coins: 30,
         playerLevel: 15,      // 推奨レベル：この戦いは主人公をこのレベルの強さで始める（data/player_stats_table.json）
         elements: { weak: ['水'], resist: ['炎', '風', '雷'] },
@@ -161,10 +171,11 @@ const BOSS_DATA = [
             enemyId: 'boss_003', name: '魔道ゴーレム', displayName: '魔道ゴーレム',
             hp: 2200, attack: 40, defense: 30, magicDefense: 12, exp: 400,
             size: 80, speed: 52, detectionRange: 4000, attackRange: 110,   // 歩く速さ 40 → 52
-            isBoss: true, poiseRatio: 0.1, knockbackScale: 0.15
+            isBoss: true, knockbackScale: 0.15
         },
         look: { key: 'magic_golem', golem: true },
         attackInterval: 1.2,   // 前は 1.6（少し早く次の攻撃へ）
+        ultimate: 'magicCannon', // 必殺技：最終強化の魔法陣砲撃（光の柱が次々に落ちる）
         // HP50%・25%を切った時、イノシシ・狼より大きく硬くなる（受けるダメージ 0.85→0.7、0.7→0.55）
         phaseBuff: [
             { attack: 1.0,  damageTaken: 1.0 },

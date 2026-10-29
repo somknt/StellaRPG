@@ -28,12 +28,56 @@
 
 
 --------------------------------------------------------------------
-いま置いてある音（2026/10/28。ダウンロードした時の名前 → ゲームの名前）
+いま置いてある音（2026/10/29。ダウンロードした時の名前 → ゲームの名前）
+  ダウンロードした名前のファイルはそのまま残し、ゲームの名前のコピーを作ってある
 --------------------------------------------------------------------
   bgm/
     イノシシBGM          → bgm_boss_boar      巨大森イノシシ戦
     狼BGM                → bgm_boss_wolf      黒蝕狼戦
-  se/
+    魔道ゴーレムノーマル → bgm_boss_golem     魔道ゴーレム戦・第1形態
+    魔道ゴーレム第2形態  → bgm_boss_golem_p2  魔道ゴーレム戦・第2形態（HP50%以下）
+    魔道ゴーレムBGM第三形態 → bgm_boss_golem_p3 魔道ゴーレム戦・第3形態（HP25%以下）
+    酒場BGM（se/にあった） → bgm_select      モンスター選択・主人公選択・マイベスト
+    jingle_12（se/にあった）→ jingle_victory  GAME CLEAR（オルガン）
+    jingle_11（se/にあった）→ jingle_defeat   GAME OVER（和風）
+
+  ボス戦の BGM は「BATTLE START」の文字が出てから流れる（開始の演出の間はボスの声だけ）
+  形態が変わる時（HP50%・25%）は BGM を止めて、ボスの咆哮・遠吠え・機械の咆哮だけを大きく鳴らし、
+  声が終わってから次の曲（イノシシ・狼は同じ曲の続き、ゴーレムは次の形態の曲）
+
+  se/（2026/10/29 に足した物）
+    打撃4・打撃3 (1)     → attack_hit・attack_hit_2   ナイフが敵に当たる（ランダム）
+    打撃2・打撃6         → damage・damage_2           主人公がダメージを受ける（ランダム）
+    会心の一撃1          → magic_weak         有利属性で当たった
+    打撃5                → magic_resist       不利属性で当たった（低く・小さく）
+    爆発2                → magic_fire_hit     ファイヤーボールが当たって爆発
+    強風3                → magic_wind_hit     竜巻が敵を巻きこむ
+    大砲2                → magic_earth        ストーンキャノンを撃つ
+    破壊音_短い          → magic_earth_hit    岩が当たって砕ける
+    衝撃                 → battle_start       BATTLE START
+    モンスター召喚       → boss_intro         ボスの名前が出る（魔道ゴーレム）
+    めまい               → boss_dizzy         ボスが目を回す（イノシシの激突・ゴーレムの振り回しの後）
+    振り回す2            → boar_tusk          イノシシの牙
+    地響き2短            → boar_charge・golem_thud  突進の地響き・ゴーレムの叩きつけと衝撃波
+    破壊音2              → boar_crash         突進で壁に激突
+    発砲1                → boar_stomp         イノシシの踏みつけ
+    斬撃4                → wolf_bite          狼の噛みつき
+    斬撃6・斬撃7         → wolf_claw・wolf_claw_2  狼の爪（ランダム）
+    打撃1                → wolf_leap          狼の飛びかかりの着地
+    暗黒エネルギー       → wolf_shot          侵蝕弾
+    不気味な出現音3      → wolf_wave          侵蝕波動（必殺技）
+    大型ロボットの駆動音7 → golem_boot        ゴーレムが起動する
+    警報3                → golem_roar         ゴーレムの機械の咆哮（形態が変わる時）
+    ロボットアーム5・4   → golem_punch・golem_punch_2  ゴーレムの拳（ランダム）
+    振り回す1・3         → golem_swing・golem_swing_2  ゴーレムの腕の振り回し（ランダム）
+    エネルギーを発射1    → golem_shot         星力弾
+    エネルギーを集める   → golem_charge       胸の魔導核に力をためる
+    ビーム発射音         → golem_rune         危険床がはじける
+    電撃魔法1            → golem_beam         魔法陣砲撃の光の柱（必殺技）
+    収束                 → golem_shield       星の盾
+    大型ロボットの足音   → golem_step         ゴーレムの足音
+
+  se/（前からある物）
     斬撃1・斬撃2         → attack・attack_2   ナイフを振る（ランダム）
     回避                 → dodge              回避
     高速移動             → just_dodge         ジャスト回避
@@ -84,7 +128,8 @@ BGM（bgm/ フォルダ）  ※ループする曲。ジングルは1回だけ流
     ui_error.mp3         選べない（今後実装予定のボスなど）
     ui_start.mp3         タイトルで決定（ない時は ui_select）
     ui_pause.mp3         一時停止・再開
-    target_lock.mp3      PC で敵をクリックしてターゲットにした（ない時は ui_move を高くして鳴らす）
+    target_lock.mp3      敵をターゲット（ロックオン）にした（ない時は ui_move を高くして鳴らす）
+    target_unlock.mp3    ターゲット（ロックオン）を解除した（ない時は ui_move を低くして鳴らす）
     coin_get.mp3         バトルコインをもらった・結果画面（ない時は ui_select を高くして鳴らす）
 
 【主人公】

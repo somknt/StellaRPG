@@ -21,6 +21,9 @@ class InputManager {
         this.isLeftMouseClicked = false;
         this.isRightClicked = false;
         this.leftMouseHeld = false; // マウスの左ボタンを押したまま（長押しで連続攻撃。タッチの画面タップは入れない）
+        this.isMiddleClicked = false; // マウスのホイールを押した（PC：ターゲットの切りかえ）
+        this.screenTapped = false;  // スマホでゲーム画面（ボタン・スティック以外）をタップした（敵をターゲットにする）。位置は mousePos
+        this.keyDownAt = {};        // キーを押し始めた時刻（長押しの判定。heldFor）
         this.paletteOpen = false;   // 魔法パレットを開いている間 true（攻撃・回避をしない）
         
         // スマホのバーチャルスティック（-1〜1）
@@ -67,13 +70,8 @@ class InputManager {
         }
         
         // キャンバス座標に変換（CSSで拡大縮小されていてもズレないように）
-        const updateMousePos = (e) => {
-            const rect = canvas.getBoundingClientRect();
-            this.mousePos.x = (e.clientX - rect.left) * (canvas.width / rect.width);
-            this.mousePos.y = (e.clientY - rect.top) * (canvas.height / rect.height);
-            this.mouseX = this.mousePos.x;
-            this.mouseY = this.mousePos.y;
-        };
+        this.canvas = canvas;
+        const updateMousePos = (e) => this.setPointerPos(e.clientX, e.clientY);
         
         // タッチ操作ボタン/スティックの上の操作は「画面クリック」として扱わない
         // （一時停止ボタンや結果画面のボタンを押した時も、攻撃にならないようにする）
@@ -100,11 +98,19 @@ class InputManager {
                 this.isMouseClicked = true;
                 // 攻撃に使うのはマウスの左クリックだけ（スマホで画面をタップしても攻撃しない）
                 if (e.pointerType === 'mouse') { this.isLeftMouseClicked = true; this.leftMouseHeld = true; }
+                // スマホで画面をタップした：その場所の敵をターゲットにする（もう一度タップで解除。game.js）
+                else if (e.pointerType === 'touch') this.screenTapped = true;
+            }
+            if (e.button === 1 && e.pointerType === 'mouse') {
+                this.isMiddleClicked = true; // ホイールのクリック：ターゲットの切りかえ（PC）
+                e.preventDefault();
             }
             if (e.button === 2) {
                 this.isRightClicked = true;
             }
         });
+        // ホイールのクリックで画面のスクロールが始まらないように
+        window.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
         
         window.addEventListener('pointerup', (e) => {
             this.mouseButtons[e.button] = false;
@@ -119,13 +125,36 @@ class InputManager {
         window.addEventListener('contextmenu', (e) => e.preventDefault());
     }
     
+    // 画面上の位置（clientX, clientY）を、キャンバスの座標にして mousePos に入れる（CSSで拡大縮小されていてもズレないように）
+    setPointerPos(clientX, clientY) {
+        const canvas = this.canvas;
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        this.mousePos.x = (clientX - rect.left) * (canvas.width / rect.width);
+        this.mousePos.y = (clientY - rect.top) * (canvas.height / rect.height);
+        this.mouseX = this.mousePos.x;
+        this.mouseY = this.mousePos.y;
+    }
+    
+    // スマホ：スティックの場所を、動かさずに短くタップした（touch_controls.js から）。画面のタップと同じに扱う
+    registerTap(clientX, clientY) {
+        this.setPointerPos(clientX, clientY);
+        this.screenTapped = true;
+    }
+    
     // ---- キー入力の共通処理（キーボードとスマホのボタンの両方から呼ぶ） ----
     pressKey(code) {
         // 押しっぱなしのリピートは「押された瞬間」にしない
         if (!this.keys[code]) {
             this.pressedKeys[code] = true;
+            this.keyDownAt[code] = performance.now();
         }
         this.keys[code] = true;
+    }
+    
+    // そのキーを押し続けている時間（ミリ秒。押していなければ 0）
+    heldFor(code) {
+        return this.keys[code] ? performance.now() - (this.keyDownAt[code] || performance.now()) : 0;
     }
     
     releaseKey(code) {
@@ -218,6 +247,8 @@ class InputManager {
         this.isMouseClicked = false;
         this.isLeftMouseClicked = false;
         this.isRightClicked = false;
+        this.isMiddleClicked = false;
+        this.screenTapped = false;
     }
     
     // このフレームのクリックを「使用済み」にする（魔法パレットを決定したクリックで攻撃しないように）
@@ -225,6 +256,8 @@ class InputManager {
         this.isMouseClicked = false;
         this.isLeftMouseClicked = false;
         this.isRightClicked = false;
+        this.isMiddleClicked = false;
+        this.screenTapped = false;
     }
     
     // 互換用（旧コードから呼ばれても問題ないよう何もしない）

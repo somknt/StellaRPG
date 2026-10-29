@@ -131,6 +131,7 @@ class MagicGolemAI extends BossAI {
         this.stepTimer -= dt;
         if (this.stepTimer <= 0) {
             this.stepTimer = 0.62 / this.P.speedMul;
+            playSE('golem_step');
             this.dust(this.feet(), 3, 'rgba(190, 180, 210, 0.6)');
             this.events.push({ type: 'shake', power: 1.2, time: 0.12 });
         }
@@ -155,11 +156,11 @@ class MagicGolemAI extends BossAI {
             const d = Math.hypot(dx, dy);
             const hit = h.kind === 'ellipse' ? d <= h.r + pr : Math.abs(d - this.ringRadius(h)) <= h.band / 2 + pr;
             if (!hit) continue;
-            // ジャスト回避の無敵中にふれた攻撃は、使ったことにする（無敵が切れた瞬間に当たらないように）
-            if (player.isGuarded && player.isGuarded() && !player.isDodging) { h.used = true; continue; }
-            // 当たった攻撃の中心から外へ少しノックバック（中心にいる時はゴーレムから外へ）
-            const dealt = player.takeDamage(h.damage, d > 0.5 ? new Vector2(c.x, c.y - 28) : this.e.position);
-            if (dealt > 0) { h.used = true; this.events.push({ type: 'hit', power: h.shake || 5 }); }
+            // ジャスト回避の無敵中・必殺技の後の無敵中にふれた攻撃は、使ったことにする（無敵が切れた瞬間に当たらないように）
+            if (BossAI.skipHit(player)) { h.used = true; continue; }
+            // 飛ばされる時は、当たった攻撃の中心から外へ（中心にいる時はゴーレムから外へ）。必殺技（魔法陣砲撃）は1秒無敵
+            const dealt = player.takeDamage(h.damage, d > 0.5 ? new Vector2(c.x, c.y - 28) : this.e.position, h.ult ? { ult: true } : null);
+            if (dealt > 0) { h.used = true; this.events.push({ type: 'hit', power: (h.shake || 5) + (h.ult ? 3 : 0) }); }
         }
         super.checkHits(player);
     }
@@ -229,7 +230,7 @@ class MagicGolemAI extends BossAI {
             this.jitter = p > 0.6 ? 1.5 : 0;
         });
         // 回転：まわり（足元の楕円）に当たり判定。1回転ごとに出し直す
-        this.addFx({ type: 'circleWarn', warn: true, follow: true, feet: true, r: a.radius, life: time }); // 回っている間も範囲を見せる
+        this.addFx({ type: 'circleWarn', warn: true, live: true, follow: true, feet: true, r: a.radius, life: time }); // 回っている間も範囲を見せる（濃いまま）
         const turn = time / spins;
         let box = null, done = -1, nextSlash = 0;
         yield* this.sleep(time, (p, dt) => {
@@ -258,6 +259,7 @@ class MagicGolemAI extends BossAI {
         if (box) box.life = 0;
         this.superArmor = false;
         // 目が回ってふらつく
+        playSE('boss_dizzy', { dur: Math.max(0.6, a.dizzy || 0.8) + 0.3 });
         yield* this.sleep(a.dizzy || 0.8, (p) => {
             this.face(this.facing);
             this.pose.spin = Math.max(0, 1 - p * 3);
@@ -325,6 +327,7 @@ class MagicGolemAI extends BossAI {
         const p3 = this.phase.index >= 2;
         const pillars = p3 && this.stage ? this.stage.getRunePillars() : [];
         this.addFx({ type: 'coreCharge', warn: true, follow: true, life: a.windup });
+        playSE('golem_charge', { dur: a.windup + 0.1 }); // 胸の魔導核に力がたまる（溜めの間だけ）
         if (pillars.length) {
             this.stage.flashPillars(1);
             for (const pl of pillars) this.addFx({ type: 'pillarCharge', warn: true, x: pl.position.x, y: pl.position.y, life: a.windup + 0.2 });
@@ -363,6 +366,7 @@ class MagicGolemAI extends BossAI {
     *act_hazardFloor(a) {
         this.motion = 'magicCharge';
         if (this.stage) this.stage.pulseCircle(1);
+        playSE('golem_charge', { dur: 0.6 });
         yield* this.sleep(0.45, (p) => { this.face(this.dirToPlayer()); this.pose.armsUp = p * 0.6; this.pose.charge = p; });
         const waves = a.waves || 1;
         for (let w = 0; w < waves; w++) {
@@ -401,6 +405,7 @@ class MagicGolemAI extends BossAI {
         this.motion = 'magicCharge';
         this.superArmor = true;
         if (this.stage) { this.stage.flashPillars(1); this.stage.pulseCircle(1); }
+        playSE('golem_charge', { dur: 0.65 });
         yield* this.sleep(0.5, (p) => { this.face(this.dirToPlayer()); this.pose.charge = p; this.pose.armsUp = p; this.pose.core = 1; this.jitter = 1; });
         this.motion = 'magicShot';
         for (let i = 0; i < a.count; i++) {
@@ -450,7 +455,7 @@ class MagicGolemAI extends BossAI {
         this.superArmor = true;
         this.invulnerable = true;
         yield* this.sleep(0.55, (p) => { this.face(this.dirToPlayer()); this.pose.core = 0.6 + 0.4 * p; this.pose.armsUp = p * 0.3; this.jitter = p; });
-        GolemSound.play('roar');
+        this.roarVoice('golem_roar');
         this.events.push({ type: 'shake', power: 10, time: 1.0 });
         this.roarBlast(); // 咆哮の衝撃で、必ず吹き飛ばされる
         if (this.stage) { this.stage.setStagePhase(index + 1); this.stage.pulseCircle(1); this.stage.flashPillars(1); }
@@ -515,17 +520,20 @@ class MagicGolemAI extends BossAI {
             const rx = f.r, ry = f.r * 0.62;
             ctx.save();
             if (f.age < f.trigger) {
-                // 予告：魔法陣が点滅しながら、だんだん速く・明るくなる（色は全ボス共通の攻撃範囲の色）
+                // 予告：魔法陣が点滅しながら、だんだん速く・明るくなる。中が満ちていき、出る直前はふちが白と赤で点滅する
+                // （色は全ボス共通の攻撃範囲の赤。BossAI.warnLook）
                 const q = f.age / f.trigger;
+                const L = BossAI.warnLook(q, this.time);
                 const blink = 0.5 + 0.5 * Math.sin(this.time * (8 + 16 * q));
                 const col = this.warnColor;
-                ctx.beginPath(); ctx.ellipse(p.x, p.y, rx, ry, 0, 0, Math.PI * 2);
-                ctx.globalAlpha = 0.14 + 0.12 * q;
+                const shape = () => { ctx.beginPath(); ctx.ellipse(p.x, p.y, rx, ry, 0, 0, Math.PI * 2); };
+                shape();
+                ctx.globalAlpha = L.fill;
                 ctx.fillStyle = col;
                 ctx.fill();
                 ctx.save();
                 ctx.clip();
-                ctx.globalAlpha = 0.3 + 0.4 * q * blink + 0.1;
+                ctx.globalAlpha = 0.45 + 0.45 * q * blink;
                 if (img) {
                     // 魔法陣の模様も同じ色で塗って描く
                     ctx.imageSmoothingEnabled = true;
@@ -533,13 +541,10 @@ class MagicGolemAI extends BossAI {
                 }
                 ctx.restore();
                 // 中が満ちていく（あと何秒かがわかる）
-                ctx.globalAlpha = 0.35;
+                ctx.globalAlpha = L.inner * 0.8;
                 ctx.fillStyle = col;
                 ctx.beginPath(); ctx.ellipse(p.x, p.y, rx * q, ry * q, 0, 0, Math.PI * 2); ctx.fill();
-                ctx.globalAlpha = 0.6 + 0.4 * blink;
-                ctx.strokeStyle = q > 0.75 ? '#ffffff' : col;
-                ctx.lineWidth = f.big ? 4 : 3;
-                ctx.beginPath(); ctx.ellipse(p.x, p.y, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
+                BossAI.strokeWarn(ctx, f.big ? { ...L, width: L.width + 1 } : L, shape);
             } else {
                 // 発動：強く光って消える
                 const q = Math.min(1, (f.age - f.trigger) / (f.life - f.trigger));

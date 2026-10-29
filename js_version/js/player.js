@@ -143,6 +143,7 @@ class Player {
         this.hitChainTimer = 0;
         this.hitFlash = 0;       // 当たった瞬間に体を赤く光らせる残り時間
         this.hitStun = 0;        // 飛ばされた後、攻撃・詠唱ができない残り時間
+        this.invincibleTime = 0; // ボスの必殺技に当たった後の無敵の残り時間（Player.ULT_HIT。この間は点滅する）
         this.attackCancelled = false; // 近接攻撃がキャンセルされた（game.js が攻撃の先行入力を消す）
         
         // ノックバック（敵の咆哮などで飛ばされる）。飛ばされている間は動けない
@@ -202,6 +203,7 @@ class Player {
         }
         if (this.hitFlash > 0) this.hitFlash = Math.max(0, this.hitFlash - deltaTime);
         if (this.hitStun > 0) this.hitStun = Math.max(0, this.hitStun - deltaTime);
+        if (this.invincibleTime > 0) this.invincibleTime = Math.max(0, this.invincibleTime - deltaTime);
         if (this.justGuardTime > 0) {
             this.justGuardTime -= deltaTime;
         }
@@ -392,6 +394,11 @@ class Player {
     // ジャスト回避の無敵中か（この間は ダメージ・吹き飛ばし・咆哮の風圧 を全部受けない。攻撃・魔法はできる）
     isGuarded() {
         return this.justGuardTime > 0;
+    }
+    
+    // ボスの必殺技に当たった後の無敵中か（この間はダメージを受けない。ボスの攻撃の当たり判定は使ったことにする）
+    isInvincible() {
+        return this.invincibleTime > 0;
     }
     
     // ---------- スタミナ ----------
@@ -751,32 +758,41 @@ class Player {
     }
     
     // from：攻撃が来た所（ワールド座標）。飛ばされる時はその反対へ（なければ向いている方の後ろへ）
-    // 当たった後の無敵時間はない（次の攻撃にもすぐ当たる）
+    // opts.ult：ボスの必殺技（boss_data.js の ultimate）の当たり
+    // ふつうの攻撃は、当たった後の無敵時間はない（次の攻撃にもすぐ当たる）
     //   1回だけ当たった時：ダメージだけ（その場で動ける。近接攻撃も続けられる）
     //   続けて当たった時（Player.HIT_CHAIN）：少し飛ばされて、近接攻撃がキャンセルされる
     //   詠唱中に当たった時：1回でも少し飛ばされて、魔法がキャンセルされる（使った MP は戻らない）
-    takeDamage(damage, from = null) {
+    // 必殺技に当たった時：少し飛ばされて、Player.ULT_HIT.invincible 秒の無敵（点滅する。続けて何発も当たらない）
+    takeDamage(damage, from = null, opts = null) {
         // 回避中は無敵。攻撃を避けたらジャスト回避成立
         if (this.isDodging) {
             this.dodgedAttack = true;
             return 0;
         }
-        if (this.justGuardTime > 0) return 0;
+        if (this.justGuardTime > 0 || this.invincibleTime > 0) return 0;
         
         const actualDamage = Math.max(1, damage - this.defense);
         this.currentHP = Math.max(0, this.currentHP - actualDamage);
         this.hitFlash = Player.HIT_FLASH.time;
         
+        const ult = !!(opts && opts.ult);
         this.hitChain = this.hitChainTimer > 0 ? this.hitChain + 1 : 1;
         this.hitChainTimer = Player.HIT_CHAIN.window;
         const chanting = this.isChanting;
-        if (chanting || this.hitChain >= Player.HIT_CHAIN.count) {
+        if (ult || chanting || this.hitChain >= Player.HIT_CHAIN.count) {
             if (chanting) this.cancelChant();
             this.cancelAttack();
+            const K = ult ? Player.ULT_HIT : Player.HIT_KNOCK;
             let away = from ? this.position.sub(from) : null;
             if (!away || away.length() < 0.01) away = this.directionToVector(this.direction).mult(-1);
-            this.knockback(away, Player.HIT_KNOCK.dist, Player.HIT_KNOCK.time, true);
-            this.hitStun = Player.HIT_KNOCK.stun;
+            this.knockback(away, K.dist, K.time, true);
+            this.hitStun = K.stun;
+            if (ult) {
+                this.invincibleTime = Player.ULT_HIT.invincible;
+                this.hitChain = 0;
+                this.hitChainTimer = 0;
+            }
         }
         
         // ダメージ効果音
@@ -924,6 +940,9 @@ class Player {
         }
         
         ctx.save();
+        
+        // ボスの必殺技に当たった後の無敵中は、うすく点滅する（無敵なのが分かるように）
+        if (this.invincibleTime > 0 && Math.floor(this.invincibleTime * 12) % 2 === 0) ctx.globalAlpha = 0.3;
         
         // 回避中は少し伸び縮みさせて「シュッ」と動いた感じを出す
         let drawW = this.drawSize, drawH = this.drawSize;
@@ -1211,6 +1230,8 @@ Player.CHANT_TIME_MUL = 1.3;
 // 敵の攻撃に当たって飛ばされる時（続けて当たった時・詠唱中に当たった時）
 // dist：飛ばされる距離 px / time：秒（この間は動けない） / stun：この秒数は攻撃・詠唱ができない
 Player.HIT_KNOCK = { dist: 40, time: 0.2, stun: 0.3 };
+// ボスの必殺技（boss_data.js の ultimate）に当たった時：少し飛ばされて、invincible 秒の無敵（点滅する）
+Player.ULT_HIT = { dist: 60, time: 0.25, stun: 0.35, invincible: 1.0 };
 // 続けて当たった：前に当たってから window 秒以内に次が当たると「続けて」。count 回目から飛ばされる
 Player.HIT_CHAIN = { window: 1.0, count: 2 };
 // 当たった瞬間の赤い光（time：秒 / alpha：濃さ）

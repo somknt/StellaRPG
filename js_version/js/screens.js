@@ -575,12 +575,13 @@ class ScreenManager {
         for (const el of this.root.querySelectorAll('.screen')) el.classList.toggle('active', el.id === def.id);
         if (this.toastEl) this.toastEl.classList.remove('show');
         this.root.classList.add('open');
+        const prev = this.current;
         this.current = name;
         this.game.gameState = name;
         const el = this.$(def.id);
         if (name === 'title') this.bg.logoTime = 0; // ロゴの登場をもう一度
         if (name === 'hero_select') this.enterHero();
-        if (name === 'monster_select') this.enterMonster();
+        if (name === 'monster_select') this.enterMonster(prev);
         if (name === 'ranking') this.enterRanking();
         if (name === 'settings') this.refreshSettings();
         // 最初の項目を選んだ状態にする（戻ってきた時は前に選んでいた所）
@@ -633,9 +634,13 @@ class ScreenManager {
             return;
         }
         if (this.nav) this.nav.handle(input);
-        // マイベスト：キーボードでモンスターの札を選んだら、そのモンスターの記録に切りかえる
-        if (this.current === 'ranking' && this.nav && this.nav.current && this.nav.current.dataset.boss
-            && this.nav.current.dataset.boss !== this.rankingBoss) this.showRanking(this.nav.current.dataset.boss);
+        // マイベスト：キーボード（←→）やマウスを重ねてモンスターの札を選んだら、そのモンスターの記録に切りかえる
+        // 選んでいる札が変わった時だけ切りかえる（スマホでタップした札を、前に選んでいた札に戻さないように）
+        if (this.current === 'ranking' && this.nav && this.nav.index !== this.rankingNavIndex) {
+            this.rankingNavIndex = this.nav.index;
+            const cur = this.nav.current;
+            if (cur && cur.dataset.boss && cur.dataset.boss !== this.rankingBoss) this.showRanking(cur.dataset.boss);
+        }
     }
     
     draw(ctx) {
@@ -752,10 +757,13 @@ class ScreenManager {
         this.go('hero_select');
     }
     
-    enterMonster() {
-        // 前に選んだボスのカードを選んだ状態に
+    // from：前の画面。マイベストから戻った時は、左上のマイベストのボタンを選んだ状態に（それ以外は前に選んだボスのカード）
+    enterMonster(from = null) {
         const cards = [...this.root.querySelectorAll('#monster-cards .boss-card')];
-        cards.forEach(c => c.classList.toggle('focused', c.dataset.id === (this.selectedBoss || BOSS_DATA[0].id)));
+        const rankBtn = this.$('monster-ranking');
+        const onRank = from === 'ranking' && !!rankBtn;
+        if (rankBtn) rankBtn.classList.toggle('focused', onRank);
+        cards.forEach(c => c.classList.toggle('focused', !onRank && c.dataset.id === (this.selectedBoss || BOSS_DATA[0].id)));
         // 記録（バトルの後に変わる）：持っているコイン・CLEAR の印・ベストタイム
         const R = window.BattleRecords;
         if (!R) return;
@@ -786,6 +794,7 @@ class ScreenManager {
     // ボスごとに、クリアタイムの速い順（battle_records.js の MAX_RECORDS 件まで）
     enterRanking() {
         const R = window.BattleRecords;
+        this.rankingNavIndex = -1; // UINav を作った後の最初の update で、選んでいる札を覚える
         const bosses = BOSS_DATA.filter(b => b.status === 'playable');
         if (!this.rankingBoss || !bosses.some(b => b.id === this.rankingBoss)) {
             this.rankingBoss = bosses.some(b => b.id === this.selectedBoss) ? this.selectedBoss : (bosses[0] && bosses[0].id);
@@ -800,7 +809,16 @@ class ScreenManager {
                 t.dataset.nav = '';
                 t.dataset.boss = b.id;
                 t.innerHTML = `${b.name}${R && R.isCleared(b.id) ? '<small>CLEAR</small>' : ''}`;
-                t.addEventListener('click', (e) => { e.preventDefault(); if (!this.busy) { pressEffect(t); this.showRanking(b.id); } });
+                t.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if (this.busy) return;
+                    pressEffect(t);
+                    // 押した札を「選んでいる札」にもする（スマホのタップ。キーボードの←→もここから続く）
+                    const nav = this.nav;
+                    const i = nav ? nav.items.indexOf(t) : -1;
+                    if (i >= 0) { nav.setIndex(i); this.rankingNavIndex = i; }
+                    this.showRanking(b.id);
+                });
                 // 画面を開いた時は、選んでいるモンスターの札から（UINav は focused の付いた項目から始める）
                 t.classList.toggle('focused', b.id === this.rankingBoss);
                 tabs.appendChild(t);

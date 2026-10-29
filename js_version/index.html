@@ -151,9 +151,9 @@
                 <h3>操作方法</h3>
                 <p><strong>WASD</strong>: 移動</p>
                 <p><strong>左クリック</strong>: 攻撃（長押しで連続）</p>
-                <p><strong>敵をクリック</strong>: ターゲット</p>
+                <p><strong>敵をクリック</strong>: ターゲット（F / ホイール押しで解除）</p>
                 <p><strong>右クリック</strong>: 回避</p>
-                <p><strong>Q</strong>: 魔法（詠唱→発動）</p>
+                <p><strong>Q</strong>: 魔法（長押しでカーソルの方へ）</p>
                 <p><strong>E</strong>: 魔法パレット（マウスで選ぶ）</p>
                 <p><strong>Esc / P</strong>: 一時停止</p>
                 <p><strong>F1</strong>: ヘルプ表示/非表示</p>
@@ -207,10 +207,11 @@
             <div class="screen" id="scr-monster">
                 <!-- 右上：持っているバトルコイン（ボスを倒すともらえる） -->
                 <div class="coin-box"><i class="coin-icon"></i><span>バトルコイン</span><b id="coin-count">0</b></div>
+                <!-- 左上：マイベスト（ボスごとのクリアタイムの記録） -->
+                <button class="ranking-open ui-btn" id="monster-ranking" type="button" data-nav><i class="best-icon">★</i><span>マイベスト<small>クリアタイムの記録</small></span></button>
                 <h2 class="screen-title">対戦モンスター選択</h2>
                 <div id="monster-cards"></div>
                 <div class="screen-buttons">
-                    <button class="menu-item ui-btn" id="monster-ranking" type="button" data-nav>マイベスト</button>
                     <button class="menu-item ui-btn back" id="monster-back" type="button" data-nav>戻る</button>
                 </div>
                 <p class="screen-hint pc-only">←→ で選んで Enter で決定 ／ Esc で戻る</p>
@@ -298,9 +299,10 @@
                         <dl class="set-help" data-tab="keyboard">
                             <dt>WASD / 矢印</dt><dd>移動（バトルでは常にダッシュ）</dd>
                             <dt>左クリック / Space</dt><dd>通常攻撃（ナイフ。長押し・連打で連続攻撃。敵の方を向いて斬る）</dd>
-                            <dt>敵をクリック</dt><dd>その敵をターゲットにする（いつもその敵の方を向く）</dd>
+                            <dt>敵をクリック</dt><dd>その敵をターゲット（ロックオン）にする。いつもその敵の方を向き、攻撃も魔法もその敵へ</dd>
+                            <dt>F / ホイール押し</dt><dd>ターゲットの解除（ターゲットがいない時は、カーソルの下か近くの敵をターゲットに）</dd>
                             <dt>右クリック / C</dt><dd>回避（スタミナを使う）</dd>
-                            <dt>Q</dt><dd>魔法陣（詠唱 → 発動）</dd>
+                            <dt>Q</dt><dd>魔法陣（詠唱 → 発動）。1回押しはターゲット・近くの敵を自動でねらう。長押しするとマウスカーソルの方へ</dd>
                             <dt>E</dt><dd>魔法パレット（マウスで選ぶ）</dd>
                             <dt>1〜5</dt><dd>魔法の切り替え</dd>
                             <dt>Esc / P</dt><dd>一時停止</dd>
@@ -309,8 +311,9 @@
                         <dl class="set-help" data-tab="touch">
                             <dt>画面の左半分</dt><dd>スティックで移動（常にダッシュ）</dd>
                             <dt>攻撃ボタン</dt><dd>通常攻撃（ナイフ。長押し・連打で連続攻撃。近くの敵の方を向いて斬る）</dd>
+                            <dt>敵をタップ</dt><dd>その敵をターゲット（ロックオン）にする。もう一度タップで解除</dd>
                             <dt>回避ボタン</dt><dd>回避（スタミナを使う）</dd>
-                            <dt>魔法ボタン</dt><dd>魔法陣（詠唱 → 発動）</dd>
+                            <dt>魔法ボタン</dt><dd>魔法陣（詠唱 → 発動）。1回押しはターゲット・近くの敵を自動でねらう。長押しでスライドすると、向き・落とす場所を決められる</dd>
                             <dt>属性ボタン</dt><dd>長押しでパレット、指を滑らせて選ぶ</dd>
                             <dt>右上の Ⅱ</dt><dd>一時停止</dd>
                             <dt>⛶</dt><dd>全画面表示</dd>

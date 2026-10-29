@@ -71,7 +71,7 @@ class BossAI {
         this.scaleX = 1;
         this.scaleY = 1;
         this.jitter = 0;
-        this.warnColor = BossAI.WARN_COLOR; // 攻撃範囲の予告の色（全ボス共通の薄い赤）
+        this.warnColor = BossAI.WARN_COLOR; // 攻撃範囲の予告の色（全ボス共通のはっきりした赤）
         this.airborne = false;      // true の間は宙に浮いている（狼の飛びかかり）。体当たり・体の押し出しはしない
     }
     
@@ -290,6 +290,13 @@ class BossAI {
         yield* this.sleep(t * this.P.recoverMul * BossAI.TUNING.recover, () => this.face(this.dirToPlayer()));
     }
     
+    // 形態が変わる時の大きな声（咆哮・遠吠え・機械の咆哮）。BossBattle に知らせて、声が終わってから次の BGM を流す
+    roarVoice(key) {
+        if (key === 'golem_roar' && window.GolemSound) GolemSound.play('roar'); // ファイルがない時はコードで作った機械の音
+        else playSE(key);
+        this.events.push({ type: 'roar', key });
+    }
+    
     // 咆哮・遠吠えの風圧：範囲の中のプレイヤーを必ず吹き飛ばす（回避中・無敵中でも飛ばされる。ダメージはない）
     roarBlast(dist = BossAI.TUNING.roarKnock) {
         const p = this.player;
@@ -322,10 +329,25 @@ class BossAI {
     // ---------- 当たり判定 ----------
     // kind：'circle'（x,y,r） / 'arc'（扇：r, ang, spread） / 'ring'（輪：r0→r1 に広がる, band=太さ）
     // follow：true ならボスの位置についていく（fwd＝向きの方へずらす距離）
+    // ult：必殺技（boss_data.js の ultimate）の当たり。今の攻撃が必殺技なら自動で付く（主人公は少し飛ばされて1秒無敵になる）
     addHitbox(h) {
-        const box = { age: 0, life: 0.1, used: false, ...h };
+        const box = { age: 0, life: 0.1, used: false, ult: this.isUltimate(), ...h };
         this.hitboxes.push(box);
         return box;
+    }
+    
+    // 今の攻撃（name を省略したら、いま出している攻撃）が、このボスの必殺技か
+    isUltimate(name = this.actionName) {
+        const u = this.def.ultimate;
+        if (!u || !name) return false;
+        return Array.isArray(u) ? u.includes(name) : u === name;
+    }
+    
+    // この当たり判定を、主人公に当てずに「使ったこと」にするか
+    // （ジャスト回避の無敵中・必殺技の後の無敵中にふれた攻撃。無敵が切れた瞬間に当たらないように）
+    static skipHit(player) {
+        if (player.isGuarded && player.isGuarded() && !player.isDodging) return true;
+        return !!(player.isInvincible && player.isInvincible());
     }
     
     hitboxCenter(h) {
@@ -356,15 +378,15 @@ class BossAI {
                 hit = Math.abs(d - r) <= h.band / 2 + pr;
             }
             if (!hit) continue;
-            // ジャスト回避の無敵中にふれた攻撃は、使ったことにする（無敵が切れた瞬間に当たらないように）
-            if (player.isGuarded && player.isGuarded() && !player.isDodging) { h.used = true; continue; }
-            // 当たった攻撃の中心から外へ少しノックバック（中心にいる時はボスから外へ）
-            const dealt = player.takeDamage(h.damage, d > 0.01 ? c : this.e.position);
+            // ジャスト回避の無敵中・必殺技の後の無敵中にふれた攻撃は、使ったことにする（無敵が切れた瞬間に当たらないように）
+            if (BossAI.skipHit(player)) { h.used = true; continue; }
+            // 飛ばされる時は、当たった攻撃の中心から外へ（中心にいる時はボスから外へ）
+            const dealt = player.takeDamage(h.damage, d > 0.01 ? c : this.e.position, h.ult ? { ult: true } : null);
             if (dealt > 0) {
                 h.used = true;
-                this.events.push({ type: 'hit', power: h.shake || 4 });
-                // knock：当たったらプレイヤーを外へ飛ばす（侵蝕波動など）
-                if (h.knock && player.knockback) player.knockback(d > 0.01 ? v : this.facing, h.knock, 0.28, true);
+                this.events.push({ type: 'hit', power: (h.shake || 4) + (h.ult ? 3 : 0) });
+                // knock：当たったらプレイヤーを外へ飛ばす（必殺技は Player.ULT_HIT の少しのノックバックだけ）
+                if (h.knock && !h.ult && player.knockback) player.knockback(d > 0.01 ? v : this.facing, h.knock, 0.28, true);
             }
         }
     }
@@ -410,50 +432,47 @@ class BossAI {
             ctx.save();
             switch (f.type) {
                 case 'circleWarn': {
-                    // 予告の円：外側の線 + 中が時間とともに満ちていく（攻撃範囲の予告は全ボス共通の色）
-                    const col = this.warnColor;
-                    ctx.globalAlpha = 0.16 + 0.12 * Math.sin(this.time * 18);
+                    // 予告の円：中が時間とともに満ちていき、攻撃が出る直前はふちが白と赤で点滅する（全ボス共通の赤。BossAI.warnLook）
+                    // live：攻撃している間ずっと出す範囲（ゴーレムの腕の振り回しの回転中）。満ちていかず、濃いまま
+                    const col = this.warnColor, L = BossAI.warnLook(t, this.time, f.live);
+                    const rx = f.r, ry = f.r * 0.62;
+                    const shape = () => { ctx.beginPath(); ctx.ellipse(p.x, p.y, rx, ry, 0, 0, Math.PI * 2); };
                     ctx.fillStyle = col;
-                    ctx.beginPath(); ctx.ellipse(p.x, p.y, f.r, f.r * 0.62, 0, 0, Math.PI * 2); ctx.fill();
-                    ctx.globalAlpha = 0.45;
-                    ctx.beginPath(); ctx.ellipse(p.x, p.y, f.r * t, f.r * 0.62 * t, 0, 0, Math.PI * 2); ctx.fill();
-                    ctx.globalAlpha = 0.9;
-                    ctx.strokeStyle = col; ctx.lineWidth = 3;
-                    ctx.beginPath(); ctx.ellipse(p.x, p.y, f.r, f.r * 0.62, 0, 0, Math.PI * 2); ctx.stroke();
+                    ctx.globalAlpha = L.fill; shape(); ctx.fill();
+                    if (!f.live) { ctx.globalAlpha = L.inner; ctx.beginPath(); ctx.ellipse(p.x, p.y, rx * t, ry * t, 0, 0, Math.PI * 2); ctx.fill(); }
+                    BossAI.strokeWarn(ctx, L, shape);
                     break;
                 }
                 case 'laneWarn': {
-                    // 突進・影の移動の予告：進む方向の帯
-                    const col = this.warnColor;
+                    // 突進・影の移動の予告：進む方向の帯（中が先へ満ちていく）と矢印
+                    const col = this.warnColor, L = BossAI.warnLook(t, this.time);
+                    const w = f.width;
                     ctx.translate(p.x, p.y + (f.dy || 0));
                     ctx.rotate(f.ang);
-                    ctx.globalAlpha = 0.15 + 0.3 * t;
                     ctx.fillStyle = col;
-                    ctx.fillRect(0, -f.width / 2, f.len * t, f.width);
-                    ctx.globalAlpha = 0.75;
-                    ctx.strokeStyle = col; ctx.lineWidth = 2;
-                    ctx.setLineDash([10, 6]);
-                    ctx.strokeRect(0, -f.width / 2, f.len, f.width);
+                    ctx.globalAlpha = L.fill; ctx.fillRect(0, -w / 2, f.len, w);
+                    ctx.globalAlpha = L.inner; ctx.fillRect(0, -w / 2, f.len * t, w);
+                    BossAI.strokeWarn(ctx, L, () => { ctx.beginPath(); ctx.rect(0, -w / 2, f.len, w); });
                     // 矢印
-                    ctx.setLineDash([]);
-                    ctx.globalAlpha = 0.5 + 0.5 * t;
-                    ctx.fillStyle = col;
+                    ctx.globalAlpha = 0.7 + 0.3 * t;
+                    ctx.fillStyle = L.line;
+                    ctx.strokeStyle = BossAI.WARN_DARK; ctx.lineWidth = 2;
                     for (let i = 1; i <= 3; i++) {
                         const ax = f.len * (i / 4);
-                        ctx.beginPath(); ctx.moveTo(ax + 12, 0); ctx.lineTo(ax - 6, -f.width * 0.28); ctx.lineTo(ax - 6, f.width * 0.28); ctx.closePath(); ctx.fill();
+                        ctx.beginPath(); ctx.moveTo(ax + 12, 0); ctx.lineTo(ax - 6, -w * 0.28); ctx.lineTo(ax - 6, w * 0.28); ctx.closePath();
+                        ctx.stroke(); ctx.fill();
                     }
                     break;
                 }
                 case 'arcWarn': {
-                    const col = this.warnColor;
-                    ctx.globalAlpha = 0.2 + 0.35 * t;
+                    // 扇の予告（牙・爪・拳）：中が外へ満ちていく
+                    const col = this.warnColor, L = BossAI.warnLook(t, this.time);
+                    const a0 = f.ang - f.spread / 2, a1 = f.ang + f.spread / 2;
+                    const fan = (r) => { ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.arc(p.x, p.y, r, a0, a1); ctx.closePath(); };
                     ctx.fillStyle = col;
-                    ctx.beginPath();
-                    ctx.moveTo(p.x, p.y);
-                    ctx.arc(p.x, p.y, f.r * (0.5 + 0.5 * t), f.ang - f.spread / 2, f.ang + f.spread / 2);
-                    ctx.closePath(); ctx.fill();
-                    ctx.globalAlpha = 0.8; ctx.strokeStyle = col; ctx.lineWidth = 2;
-                    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.arc(p.x, p.y, f.r, f.ang - f.spread / 2, f.ang + f.spread / 2); ctx.closePath(); ctx.stroke();
+                    ctx.globalAlpha = L.fill; fan(f.r); ctx.fill();
+                    ctx.globalAlpha = L.inner; fan(f.r * t); ctx.fill();
+                    BossAI.strokeWarn(ctx, L, () => fan(f.r));
                     break;
                 }
                 case 'shock': {
@@ -584,17 +603,20 @@ class BossAI {
                     break;
                 }
                 case 'flash': {
-                    // 攻撃直前の体の光（予告）。画像があれば体の形のまま光らせる
+                    // 攻撃直前の体の光（予告）。画像があれば体の形のまま光らせる。出る直前は白と赤で点滅する
+                    const L = BossAI.warnLook(t, this.time);
+                    const col = L.hot && L.line === '#ffffff' ? '#ffffff' : (f.color || this.warnColor);
+                    const a = L.hot ? 0.8 : 0.3 + 0.45 * t;
                     const img = this.hasArt && this.e.getEnemyImage();
                     if (img) {
                         const size = this.e.size * (this.e._drawMul || 1.5);
                         const s = this.e.position.sub(cam);
-                        ctx.globalAlpha = 0.2 + 0.4 * t;
-                        ctx.drawImage(Enemy.getWhiteSilhouette(img, f.color || this.warnColor), s.x - size / 2, s.y - size / 2 - this.lift, size, size);
+                        ctx.globalAlpha = a;
+                        ctx.drawImage(Enemy.getWhiteSilhouette(img, col), s.x - size / 2, s.y - size / 2 - this.lift, size, size);
                         break;
                     }
-                    ctx.globalAlpha = 0.25 + 0.35 * t;
-                    ctx.fillStyle = f.color || this.warnColor;
+                    ctx.globalAlpha = a;
+                    ctx.fillStyle = col;
                     ctx.beginPath(); ctx.ellipse(p.x, p.y, this.e.size * 0.62, this.e.size * 0.48, 0, 0, Math.PI * 2); ctx.fill();
                     break;
                 }
@@ -634,8 +656,37 @@ class BossAI {
 // behindRange ：この距離（× Enemy.SCALE.range）より近くで後ろに回られたら、すぐ振り向いて攻撃
 // roarRange / roarKnock：咆哮・遠吠えでプレイヤーが必ず吹き飛ばされる範囲と距離(px)
 BossAI.TUNING = { interval: 0.35, recover: 0.55, behindRange: 300, roarRange: 330, roarKnock: 260 };
-// 攻撃範囲の予告（円・扇・突進の帯・ゴーレムの危険床）の色。全ボス共通の薄い赤
-BossAI.WARN_COLOR = '#ff7a7a';
+// 攻撃範囲の予告（円・扇・突進の帯・ゴーレムの危険床・体の光）の色。全ボス共通のはっきりした赤
+// WARN_DARK：ふちの下に敷く濃い色（明るい地面でも見えるように）
+// WARN_HOT ：溜めの最後のこの割合は「もうすぐ来る」（中が濃くなり、ふちが白と赤ですばやく点滅する）
+BossAI.WARN_COLOR = '#ff2020';
+BossAI.WARN_DARK = '#4a0000';
+BossAI.WARN_HOT = 0.22;
+// 予告の見た目。t：溜めの進み具合（0→1。1 になった瞬間に攻撃が出る） / live：攻撃している間ずっと出す範囲
+// 戻り値：fill（範囲全体の濃さ）/ inner（満ちていく部分の濃さ）/ line（ふちの色）/ width（ふちの太さ）/ hot（もうすぐ来る）
+BossAI.warnLook = function (t, time, live = false) {
+    if (live) return { fill: 0.36 + 0.06 * Math.sin(time * 10), inner: 0, line: BossAI.WARN_COLOR, width: 4, hot: false };
+    const hot = t >= 1 - BossAI.WARN_HOT;
+    const flick = hot && Math.sin(time * 42) > 0;
+    return {
+        fill: (hot ? 0.42 : 0.22 + 0.12 * t) + 0.05 * Math.sin(time * 14),
+        inner: hot ? 0.72 : 0.5,
+        line: flick ? '#ffffff' : BossAI.WARN_COLOR,
+        width: hot ? 5 : 4,
+        hot
+    };
+};
+// 予告のふち：下に濃い色の太い線、その上に赤（点滅中は白）の線。path() で形を作る
+BossAI.strokeWarn = function (ctx, L, path) {
+    ctx.globalAlpha = 0.6;
+    ctx.strokeStyle = BossAI.WARN_DARK;
+    ctx.lineWidth = L.width + 4;
+    path(); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = L.line;
+    ctx.lineWidth = L.width;
+    path(); ctx.stroke();
+};
 // フェーズごとの強化（[通常, HP50%以下, HP25%以下]）。boss_data.js に phaseBuff があるボス（魔道ゴーレム）はそちらを使う
 // attack：攻撃力の倍率 / damageTaken：受けるダメージの倍率（0.85 なら 15% 減る＝防御力アップ）
 BossAI.PHASE_BUFF = [
@@ -799,6 +850,7 @@ class ForestBoarAI extends BossAI {
         this.fxImg('dust_cloud', { x: hit.x, y: hit.y + this.e.size * 0.3, w: this.e.size * 1.4, s0: 0.6, s1: 1.3, life: 0.8, hold: 0.3, alpha: 0.85 });
         const stun = this.phase.index === 2 ? 1.4 : 1.9;
         this.e.crashTimer = stun;
+        playSE('boss_dizzy', { dur: stun }); // 目を回している間
         yield* this.sleep(0.2, (p) => { this.e.velocity = dir.mult(-160 * this.SP * (1 - p)); }); // 跳ね返る
         yield* this.sleep(stun, (p) => { this.scaleY = 0.96 + Math.sin(p * 30) * 0.02; });
     }
@@ -847,7 +899,7 @@ class ForestBoarAI extends BossAI {
         this.invulnerable = true;
         yield* this.sleep(0.35, (p) => { this.face(this.dirToPlayer()); this.scaleY = 1 - 0.06 * p; });
         this.events.push({ type: 'shake', power: 10, time: 0.9 });
-        playSE('boar_roar');
+        this.roarVoice('boar_roar');
         this.roarBlast(); // 吠えた瞬間の風圧で、必ず吹き飛ばされる
         let next = 0;
         yield* this.sleep(1.2, (p, dt) => {
@@ -1150,7 +1202,7 @@ class BlackWolfAI extends BossAI {
         this.invulnerable = true;
         yield* this.sleep(0.3, (p) => { this.scaleY = 1 - 0.08 * p; });
         this.events.push({ type: 'shake', power: 7, time: 0.8 });
-        playSE('wolf_howl');
+        this.roarVoice('wolf_howl');
         this.roarBlast(); // 遠吠えの風圧で、必ず吹き飛ばされる
         let next = 0;
         yield* this.sleep(1.2, (p, dt) => {

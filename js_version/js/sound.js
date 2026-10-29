@@ -21,6 +21,7 @@ class SoundManager {
         this.bgmUrls = {};       // BGM：名前 → ファイルの場所
         this.loaded = false;     // 全部のファイルを探し終わったか
         this.bgm = null;         // 今流れている BGM { key, slot, vol, ended }
+        this.pausedBGM = null;   // pauseBGM で止めている BGM（続きから流せる）
         this.bgmSlots = [];      // BGM を流す <audio> 2つ（切りかえの時に重ねてフェードする。最初のタップで使えるようにする）
         this.wantBGM = null;     // 流したい BGM（音が有効になる前・読み込みの前に頼まれた物）
         this.bgmVolume = 0.6;
@@ -203,10 +204,17 @@ class SoundManager {
                     slot.gain.connect(this.bgmGain);
                 } catch (err) { slot.gain = null; }
             }
-            // ジングル（1回だけの曲）が終わった
+            // 曲が終わった：頭の無音を飛ばす曲（start）は、無音の後からくり返す。ジングル（1回だけの曲）はそこで終わり
             el.addEventListener('ended', () => {
                 const b = this.bgm;
-                if (b && b.slot === slot) { b.ended = true; this.bgm = null; }
+                if (!b || b.slot !== slot) return;
+                if (b.loopFrom !== null && b.loopFrom !== undefined) {
+                    try { el.currentTime = b.loopFrom; } catch (err) { /* 先頭から */ }
+                    if (!this.muted) el.play().catch(() => {});
+                    return;
+                }
+                b.ended = true;
+                this.bgm = null;
             });
             this.bgmSlots.push(slot);
         }
@@ -318,11 +326,23 @@ class SoundManager {
     
     // ---------- BGM ----------
     // 同じ曲がもう流れていれば何もしない（画面を移っても曲が途切れない）。ない曲なら今の曲を止める
-    playBGM(key) {
+    // opts.resume：pauseBGM で止めた曲と同じなら、止めた所から続きを流す（ボスの形態が変わっても同じ曲の時）
+    playBGM(key, opts = {}) {
         this.wantBGM = key;
         if (!this.loaded) return;                 // 探し終わったら流す
         const k = this.resolve(key);
         if (this.bgm && this.bgm.key === k && !this.bgm.ended) return;
+        const paused = this.pausedBGM;
+        this.pausedBGM = null;
+        if (opts.resume && paused && paused.key === k && this.unlocked && !this.bgm) {
+            // 止めた所から続ける
+            paused.slot.token++;
+            this.lastSlot = paused.slot;
+            this.bgm = paused;
+            if (!this.muted) paused.slot.el.play().catch(() => {});
+            this.fadeBGMTo(paused, 1, 0.8);
+            return;
+        }
         this.fadeOutBGM(0.6);
         if (!k || !this.unlocked) return;         // 画面をさわった時に流す
         this.makeBGMSlots();
@@ -332,9 +352,17 @@ class SoundManager {
         this.lastSlot = slot;
         slot.token++;                             // 前の曲の「あとで止める」を取り消す
         const el = slot.el;
-        el.loop = e.loop !== false;
+        // 頭の無音を飛ばす曲（start）は、自分でくり返す（ended で start の位置に戻す。くり返すたびに無音が入らないように）
+        const loopFrom = e.loop !== false && e.start ? e.start : null;
+        el.loop = e.loop !== false && loopFrom === null;
         el.src = this.bgmUrls[k];
-        const b = { key: k, slot, vol: e.volume !== undefined ? e.volume : 1, ended: false };
+        // start：曲の頭の無音を飛ばす（秒）。読み込みの前に入れた位置は使われないことがあるので、読めた時にもう一度入れる
+        if (e.start) {
+            const at = e.start, t = slot.token;
+            try { el.currentTime = at; } catch (err) { /* 読めてから入れる */ }
+            el.addEventListener('loadedmetadata', () => { if (slot.token === t && el.currentTime < at) el.currentTime = at; }, { once: true });
+        }
+        const b = { key: k, slot, vol: e.volume !== undefined ? e.volume : 1, ended: false, loopFrom };
         this.bgm = b;
         if (slot.gain) slot.gain.gain.value = 0;
         // 流れなかった時（まだ音が有効でない）は、次に画面をさわった時にもう一度流す（bindUnlock）
@@ -367,7 +395,33 @@ class SoundManager {
     
     stopBGM() {
         this.wantBGM = null;
+        this.pausedBGM = null;
         this.fadeOutBGM(0.3);
+    }
+    
+    // BGM を一時的に止める（ボスの形態が変わる時：BGM を消して、吠える声だけにする）
+    // 止めた所は覚えておき、playBGM(同じ曲, { resume: true }) で続きから流せる
+    // （止めている間は、画面をさわっても BGM が流れ出さないように wantBGM を消す）
+    pauseBGM(fade = 0.3) {
+        this.wantBGM = null;
+        const b = this.bgm;
+        if (!b) return;
+        this.bgm = null;
+        this.pausedBGM = b;
+        this.fadeBGMTo(b, 0, fade);
+        const slot = b.slot, t = slot.token;
+        setTimeout(() => { if (slot.token === t) slot.el.pause(); }, fade * 1000 + 60);
+    }
+    
+    // 効果音の長さ（秒。頭の無音を除く。ランダムの物は1つ目）。読み込めていない時は 0
+    durationOf(key) {
+        const k = this.resolve(key);
+        const list = k && this.buffers[k];
+        if (!list || !list.length) return 0;
+        const e0 = this.entries[key] || {};
+        const rate = e0.rate || 1;
+        const len = list[0].buf.duration - list[0].start - (e0.offset || 0);
+        return Math.max(0, e0.dur ? Math.min(e0.dur, len / rate) : len / rate);
     }
     
     // 一時停止中は BGM を小さくする（on：true で小さく / false で元に戻す）
@@ -425,19 +479,22 @@ SoundManager.SILENT_WAV = (() => {
 // loop：false なら1回だけ（ジングル） / volume：音量の倍率（ファイルごとの大きさのちがいをそろえる）
 // rate：再生の速さ（1 より小さいと低く重い音、大きいと高く軽い音） / dur：この秒数で切る（長い音）
 // gap：同じ音を続けて鳴らせる間隔（秒。連続ヒットでうるさくならないように） / vary：鳴らすたびの高さのゆらぎ
-// ★ = ファイルを置いてある音（2026/10/28）。それ以外は、置けばその音に変わる
+// ★ = ファイルを置いてある音（2026/10/29。もとのファイル名は assets/sounds/📋ここに音声ファイルを置いてください.txt）。それ以外は、置けばその音に変わる
+// start（BGM）：曲の頭の無音を飛ばす秒数 / offset（効果音）：頭から飛ばす秒数（だんだん大きくなる音を、すぐ大きく鳴らす）
 SoundManager.LIST = [
     // ===== BGM（assets/sounds/bgm/）=====
     { key: 'bgm_title',      bgm: true, label: 'タイトル・メインメニュー・設定' },
-    { key: 'bgm_select',     bgm: true, label: 'モンスター選択・主人公選択', fallback: 'bgm_title' },
+    { key: 'bgm_select',     bgm: true, label: 'モンスター選択・主人公選択・マイベスト', fallback: 'bgm_title', volume: 0.6, start: 0.25 },   // ★ 酒場BGM
     { key: 'bgm_boss',       bgm: true, label: 'ボス戦（3体共通。ボスごとの曲がない時に使う）' },
     { key: 'bgm_boss_boar',  bgm: true, label: '巨大森イノシシ戦', fallback: 'bgm_boss', volume: 0.75 },   // ★ イノシシBGM
     { key: 'bgm_boss_wolf',  bgm: true, label: '黒蝕狼戦', fallback: 'bgm_boss', volume: 0.75 },           // ★ 狼BGM
-    { key: 'bgm_boss_golem', bgm: true, label: '魔道ゴーレム戦', fallback: 'bgm_boss' },
+    { key: 'bgm_boss_golem',    bgm: true, label: '魔道ゴーレム戦・第1形態', fallback: 'bgm_boss', volume: 0.75, start: 0.75 },          // ★ 魔道ゴーレムノーマル
+    { key: 'bgm_boss_golem_p2', bgm: true, label: '魔道ゴーレム戦・第2形態（HP50%以下）', fallback: 'bgm_boss_golem', volume: 0.8, start: 1.95 }, // ★ 魔道ゴーレム第2形態
+    { key: 'bgm_boss_golem_p3', bgm: true, label: '魔道ゴーレム戦・第3形態（HP25%以下）', fallback: 'bgm_boss_golem_p2', volume: 0.8, start: 1.95 }, // ★ 魔道ゴーレムBGM第三形態
     { key: 'bgm_battle',     bgm: true, label: 'フリーバトル（スライム・ウサギ）', fallback: 'bgm_boss' },
     { key: 'bgm_field',      bgm: true, label: '村・フィールド（ストーリー用）', fallback: 'bgm_title' },
-    { key: 'jingle_victory', bgm: true, label: '勝利（1回だけ流れる短い曲）', loop: false },
-    { key: 'jingle_defeat',  bgm: true, label: '敗北（1回だけ流れる短い曲）', loop: false },
+    { key: 'jingle_victory', bgm: true, label: '勝利（GAME CLEAR。1回だけ流れる短い曲）', loop: false, volume: 0.9 },   // ★ jingle_12（オルガン）
+    { key: 'jingle_defeat',  bgm: true, label: '敗北（GAME OVER。1回だけ流れる短い曲）', loop: false, volume: 0.9 },    // ★ jingle_11（和風）
     
     // ===== メニュー（assets/sounds/se/）=====
     { key: 'ui_move',   label: 'メニューのカーソル移動', volume: 0.3, gap: 0.05, vary: 0 },              // ★ 選択6
@@ -445,18 +502,19 @@ SoundManager.LIST = [
     { key: 'ui_cancel', label: '戻る', volume: 0.35, vary: 0 },                                           // ★ キャンセル
     { key: 'ui_error',  label: '選べない（今後実装予定のボスなど）', fallback: 'ui_cancel', volume: 0.35, rate: 0.7, vary: 0 },
     { key: 'ui_start',  label: 'タイトルで決定（Press Enter）', fallback: 'ui_select', vary: 0 },
-    { key: 'ui_pause',  label: '一時停止・再開', volume: 0.55, vary: 0 },
-    { key: 'target_lock', label: 'PC で敵をクリックしてターゲットにした', fallback: 'ui_move', volume: 0.5, rate: 1.3, vary: 0 },
-    { key: 'coin_get',  label: 'バトルコインをもらった（結果画面）', fallback: 'ui_select', volume: 0.6, rate: 1.4, vary: 0 },                                 // ★ 確認2
+    { key: 'ui_pause',  label: '一時停止・再開', volume: 0.55, vary: 0 },                                 // ★ 確認2
+    { key: 'target_lock', label: '敵をターゲット（ロックオン）にした', fallback: 'ui_move', volume: 0.5, rate: 1.3, vary: 0 },
+    { key: 'target_unlock', label: 'ターゲット（ロックオン）を解除した', fallback: 'ui_move', volume: 0.4, rate: 0.85, vary: 0 },
+    { key: 'coin_get',  label: 'バトルコインをもらった（結果画面）', fallback: 'ui_select', volume: 0.6, rate: 1.4, vary: 0 },
     
     // ===== 主人公 =====
     { key: 'attack',       label: 'ナイフを振る（attack_2 とランダム）', volume: 0.7, gap: 0.08 },        // ★ 斬撃1・斬撃2
-    { key: 'attack_hit',   label: 'ナイフが敵に当たる' },
+    { key: 'attack_hit',   label: 'ナイフが敵に当たる（attack_hit_2 とランダム）', volume: 0.38, gap: 0.05 }, // ★ 打撃4・打撃3 (1)
     { key: 'dodge',        label: '回避（ローリング）', volume: 0.75 },                                    // ★ 回避
     { key: 'just_dodge',   label: 'ジャスト回避が決まった（スローになる）', volume: 0.9, vary: 0 },       // ★ 高速移動
-    { key: 'damage',       label: '主人公がダメージを受ける' },
+    { key: 'damage',       label: '主人公がダメージを受ける（damage_2 とランダム）', volume: 1.0, gap: 0.06 }, // ★ 打撃2・打撃6
     { key: 'chant',        label: '魔法の詠唱（詠唱の間だけ鳴る。chant_2 とランダム）', volume: 0.55, vary: 0.02 }, // ★ 魔法詠唱1・2
-    { key: 'chant_cancel', label: '回避で詠唱をキャンセル' },
+    { key: 'chant_cancel', label: '詠唱をキャンセル（回避・攻撃に当たった時）' },
     { key: 'magic_switch', label: '魔法の切りかえ（1〜5キー・パレット）', fallback: 'ui_move', volume: 0.22, rate: 1.25, gap: 0.05, vary: 0 },
     { key: 'levelup',      label: 'レベルアップ（ストーリー用）', vary: 0 },
     { key: 'heal',         label: '回復（ストーリー用）' },
@@ -465,51 +523,55 @@ SoundManager.LIST = [
     { key: 'magic',           label: '魔法の発動（属性ごとの音がない時に使う）' },
     { key: 'magic_hit',       label: '魔法が当たる（属性ごとの音がない時に使う）' },
     { key: 'magic_fire',      label: 'ファイヤーボールを撃つ', fallback: 'magic', volume: 0.8 },                       // ★ 着火1
-    { key: 'magic_fire_hit',  label: 'ファイヤーボールが当たって爆発', fallback: 'magic_fire', volume: 0.7, rate: 0.75, dur: 0.7 },
+    { key: 'magic_fire_hit',  label: 'ファイヤーボールが当たって爆発', fallback: 'magic_fire', volume: 0.72, dur: 0.9 },  // ★ 爆発2
     { key: 'magic_water',     label: 'ウォーターボールを撃つ', fallback: 'magic', volume: 1, dur: 0.9 },              // ★ ぴちょん単発
     { key: 'magic_water_hit', label: 'ウォーターボールが当たって水しぶき', fallback: 'magic_water', volume: 0.9, rate: 0.75, dur: 0.8 },
     { key: 'magic_wind',      label: 'テンペストの竜巻が出る', fallback: 'magic', volume: 0.75 },                      // ★ 強風2
-    { key: 'magic_wind_hit',  label: '竜巻が敵を巻きこむ（何度も当たる）', fallback: 'magic_hit', gap: 0.35, volume: 0.6 },
-    { key: 'magic_earth',     label: 'ストーンキャノンを撃つ', fallback: 'dodge', volume: 0.85, rate: 0.6 },
-    { key: 'magic_earth_hit', label: '岩が当たって砕ける', fallback: 'magic_hit' },
+    { key: 'magic_wind_hit',  label: '竜巻が敵を巻きこむ（何度も当たる）', fallback: 'magic_hit', gap: 0.35, volume: 0.65 },   // ★ 強風3
+    { key: 'magic_earth',     label: 'ストーンキャノンを撃つ', fallback: 'dodge', volume: 0.44 },                      // ★ 大砲2
+    { key: 'magic_earth_hit', label: '岩が当たって砕ける', fallback: 'magic_hit', volume: 1.0, dur: 0.9 },              // ★ 破壊音_短い
     { key: 'magic_thunder',   label: 'ライトニングの雷が落ちる', fallback: 'magic', volume: 0.75 },                   // ★ 雷4
-    { key: 'magic_weak',      label: '有利属性で当たった（よく効いた）', gap: 0.3, vary: 0 },
-    { key: 'magic_resist',    label: '不利属性で当たった（効きにくい）', gap: 0.3, vary: 0 },
+    { key: 'magic_weak',      label: '有利属性で当たった（よく効いた）', volume: 0.7, gap: 0.3, vary: 0 },          // ★ 会心の一撃1
+    { key: 'magic_resist',    label: '不利属性で当たった（効きにくい）', volume: 0.4, rate: 0.75, gap: 0.3, vary: 0 }, // ★ 打撃5（低く）
     
     // ===== ボス戦（共通）=====
-    { key: 'boss_intro',   label: 'ボスの名前が出る（ボスごとの鳴き声がない時）', vary: 0 },
-    { key: 'battle_start', label: 'BATTLE START（フリーバトルのウェーブ開始も）', fallback: 'ui_pause', volume: 0.7, rate: 0.9, vary: 0 },
-    { key: 'boss_phase',   label: 'ボスが強化される（HP50%・25%）', vary: 0 },
+    { key: 'boss_intro',   label: 'ボスの名前が出る（ボスごとの鳴き声がない時。魔道ゴーレム）', volume: 0.85, vary: 0 },     // ★ モンスター召喚
+    { key: 'battle_start', label: 'BATTLE START（フリーバトルのウェーブ開始も）', fallback: 'ui_pause', volume: 0.8, vary: 0 }, // ★ 衝撃
+    { key: 'boss_phase',   label: 'ボスが強化される（HP50%・25%。この後にボスが吠える）', vary: 0 },
     { key: 'boss_down',    label: 'ボスを倒した', volume: 0.85, vary: 0 },                                          // ★ 完了2
+    { key: 'boss_dizzy',   label: 'ボスが目を回す（イノシシが壁に激突・ゴーレムの振り回しの後）', volume: 0.7, dur: 1.6, vary: 0 }, // ★ めまい
     
     // ===== 巨大森イノシシ =====
-    { key: 'boar_cry',    label: '鳴き声（名前が出た時）', volume: 1, vary: 0.03 },                                 // ★ イノシシの鳴き声
-    { key: 'boar_roar',   label: '咆哮（強化の時）', volume: 1, vary: 0 },                                          // ★ ライオンの鳴き声2
+    // 鳴き声・咆哮は元の音が小さいので大きく（咆哮の間は BGM を止めるので、声だけがはっきり聞こえる）
+    { key: 'boar_cry',    label: '鳴き声（名前が出た時）', volume: 2.4, vary: 0.03 },                               // ★ イノシシの鳴き声
+    { key: 'boar_roar',   label: '咆哮（強化の時）', volume: 2.4, vary: 0 },                                        // ★ ライオンの鳴き声2
     { key: 'boar_snort',  label: '突進の前に鼻を鳴らして地面をかく（溜めの間だけ鳴る）', volume: 1.2, vary: 0.03 },  // ★ イノシシが鼻をフンフン
-    { key: 'boar_tusk',   label: '牙で突き上げる', fallback: 'attack', volume: 0.75, rate: 0.65 },
-    { key: 'boar_charge', label: '突進を始める' },
-    { key: 'boar_crash',  label: '突進で壁に激突（目を回す）', fallback: 'boar_cry', volume: 1, rate: 0.85 },
-    { key: 'boar_stomp',  label: '踏みつけ' },
+    { key: 'boar_tusk',   label: '牙で突き上げる', fallback: 'attack', volume: 0.65, rate: 0.85 },                  // ★ 振り回す2（低く）
+    { key: 'boar_charge', label: '突進を始める（地響き）', volume: 0.7, offset: 1.2, dur: 1.2 },                     // ★ 地響き2短
+    { key: 'boar_crash',  label: '突進で壁に激突（目を回す）', fallback: 'boar_cry', volume: 1.1 },                 // ★ 破壊音2
+    { key: 'boar_stomp',  label: '踏みつけ', volume: 0.6 },                                                         // ★ 発砲1（低い衝撃）
     
     // ===== 黒蝕狼 =====
-    { key: 'wolf_howl', label: '遠吠え（名前が出た時・強化の時）', volume: 1, vary: 0 },                             // ★ オオカミの遠吠え
-    { key: 'wolf_bite', label: '噛みつき', fallback: 'attack', volume: 0.55, rate: 1.35 },
-    { key: 'wolf_claw', label: '爪でひっかく', fallback: 'attack', volume: 0.65, rate: 1.1 },
-    { key: 'wolf_leap', label: '飛びかかりの着地' },
+    { key: 'wolf_howl', label: '遠吠え（名前が出た時・強化の時。元の音が小さいので大きく）', volume: 3.0, vary: 0 }, // ★ オオカミの遠吠え
+    { key: 'wolf_bite', label: '噛みつき', fallback: 'attack', volume: 0.85, rate: 1.15 },                          // ★ 斬撃4（高く）
+    { key: 'wolf_claw', label: '爪でひっかく（wolf_claw_2 とランダム）', fallback: 'attack', volume: 0.9 },          // ★ 斬撃6・斬撃7
+    { key: 'wolf_leap', label: '飛びかかりの着地', volume: 1.0, rate: 0.85 },                                       // ★ 打撃1（低く）
     { key: 'wolf_dash', label: '影の高速移動・回避', fallback: 'dodge', volume: 0.6, rate: 0.85, gap: 0.15 },
-    { key: 'wolf_shot', label: '侵蝕弾を撃つ' },
-    { key: 'wolf_wave', label: '侵蝕波動（広がる輪）' },
+    { key: 'wolf_shot', label: '侵蝕弾を撃つ', volume: 1.0, dur: 1.2 },                                             // ★ 暗黒エネルギー
+    { key: 'wolf_wave', label: '侵蝕波動（必殺技。広がる紫の輪）', volume: 1.0, dur: 2.2 },                          // ★ 不気味な出現音3
     
-    // ===== 魔道ゴーレム（boot・roar・thud はファイルがない間、機械の音をプログラムで作って鳴らす）=====
-    { key: 'golem_boot',   label: '起動する（戦いの始まり）', vary: 0 },
-    { key: 'golem_roar',   label: '機械の咆哮（強化の時）', vary: 0 },
-    { key: 'golem_thud',   label: '地面の叩きつけ・踏みつけ（衝撃波）' },
-    { key: 'golem_punch',  label: '拳で殴る', fallback: 'attack', volume: 0.75, rate: 0.55 },
-    { key: 'golem_swing',  label: '腕を振り回す（1回転ごと）', fallback: 'attack', volume: 0.8, rate: 0.45 },
-    { key: 'golem_shot',   label: '星力弾を撃つ' },
-    { key: 'golem_rune',   label: '危険床（床の魔法陣）が光ってはじける', gap: 0.12 },
-    { key: 'golem_beam',   label: '魔法陣砲撃の光の柱が落ちる', fallback: 'golem_rune' },
-    { key: 'golem_shield', label: '星の盾を張る' },
+    // ===== 魔道ゴーレム（boot・roar・thud はファイルがない時、機械の音をプログラムで作って鳴らす）=====
+    { key: 'golem_boot',   label: '起動する（戦いの始まり）', volume: 1.0, vary: 0 },                               // ★ 大型ロボットの駆動音7
+    { key: 'golem_roar',   label: '機械の咆哮（強化の時。警報のように鳴りひびく）', volume: 1.15, dur: 3.2, vary: 0 }, // ★ 警報3
+    { key: 'golem_thud',   label: '地面の叩きつけ・踏みつけ（衝撃波）', volume: 0.85, offset: 1.2, dur: 1.3 },        // ★ 地響き2短
+    { key: 'golem_punch',  label: '拳で殴る（golem_punch_2 とランダム）', fallback: 'attack', volume: 0.9 },          // ★ ロボットアーム5・4
+    { key: 'golem_swing',  label: '腕を振り回す（1回転ごと。golem_swing_2 とランダム）', fallback: 'attack', volume: 0.8, rate: 0.8 }, // ★ 振り回す1・3
+    { key: 'golem_shot',   label: '星力弾を撃つ', volume: 0.75, offset: 0.3, dur: 1.2 },                             // ★ エネルギーを発射1
+    { key: 'golem_charge', label: '胸の魔導核に力をためる（星力弾・危険床・魔法陣砲撃の溜め）', volume: 0.6, vary: 0 }, // ★ エネルギーを集める
+    { key: 'golem_rune',   label: '危険床（床の魔法陣）が光ってはじける', volume: 0.65, gap: 0.12 },                  // ★ ビーム発射音
+    { key: 'golem_beam',   label: '魔法陣砲撃（必殺技）の光の柱が落ちる', fallback: 'golem_rune', volume: 0.4, dur: 1.4 }, // ★ 電撃魔法1
+    { key: 'golem_shield', label: '星の盾を張る', volume: 1.0, dur: 1.6 },                                          // ★ 収束
+    { key: 'golem_step',   label: '重い足音（歩いている間）', volume: 0.5, gap: 0.25 },                               // ★ 大型ロボットの足音
     
     // ===== ふつうの敵（フリーバトル）=====
     { key: 'enemy_defeat', label: '敵が倒れて星になる', gap: 0.08 }

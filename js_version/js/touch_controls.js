@@ -11,6 +11,8 @@ const TouchControls = {
     LOGICAL_W: 1280,
     LOGICAL_H: 720,
     AIM_SLIDE_PX: 16,   // 攻撃・魔法ボタンを押したまま、これ以上指を動かしたら「その向きをねらう」
+    TAP_MS: 350,        // スティックの場所で、これより短く押して離したら「タップ」（敵をターゲットにする）
+    TAP_MOVE_PX: 14,    // タップの間に指がこれ以上動いたら、スティックの操作とみなす
     
     init(input) {
         this.input = input;
@@ -97,10 +99,13 @@ const TouchControls = {
             this.input.setStick(0, 0);
         };
         
+        // 動かさずに短くタップした時は、画面のタップとして扱う（スティックの場所にいる敵もターゲットにできる）
+        let tapStart = null;
         zone.addEventListener('pointerdown', (e) => {
             if (activeId !== null) return;
             activeId = e.pointerId;
             zone.setPointerCapture(e.pointerId);
+            tapStart = { x: e.clientX, y: e.clientY, t: performance.now(), moved: false };
             
             // 触った場所にスティックを出す
             const size = base.offsetWidth;
@@ -119,6 +124,7 @@ const TouchControls = {
             let dx = e.clientX - center.x;
             let dy = e.clientY - center.y;
             const len = Math.hypot(dx, dy);
+            if (tapStart && len > this.TAP_MOVE_PX) tapStart.moved = true;
             if (len > radius) {
                 dx = dx / len * radius;
                 dy = dy / len * radius;
@@ -128,8 +134,13 @@ const TouchControls = {
             e.preventDefault();
         });
         
-        const end = (e) => { if (e.pointerId === activeId) reset(); };
-        zone.addEventListener('pointerup', end);
+        const end = (e) => { if (e.pointerId === activeId) { tapStart = null; reset(); } };
+        zone.addEventListener('pointerup', (e) => {
+            if (e.pointerId !== activeId) return;
+            const tap = tapStart;
+            if (tap && !tap.moved && performance.now() - tap.t <= this.TAP_MS) this.input.registerTap(tap.x, tap.y);
+            end(e);
+        });
         zone.addEventListener('pointercancel', end);
         zone.addEventListener('lostpointercapture', end);
         

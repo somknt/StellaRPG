@@ -106,8 +106,49 @@ class BossBattle {
         if (this.ui.hud) this.ui.hud.classList.remove('show');
         if (this.ui.name) this.ui.name.textContent = def.name;
         this.updateHUD(0, true);
-        // ボスごとの BGM（boss_data.js の bgm。ファイルがなければ共通の bgm_boss）
-        playBGM(def.bgm || 'bgm_boss');
+        // BGM：開始演出の間は流さない（ボスの鳴き声だけ）。BATTLE START の文字が出てから流す（BossBattle.MUSIC.afterStart）
+        this.musicTimer = 0;
+        this.phaseMusic = null;
+        if (window.soundManager) soundManager.stopBGM();
+    }
+    
+    // そのフェーズ（0 = 最初）の BGM。boss_data.js の bgm が配列なら形態ごとの曲（魔道ゴーレム）、文字なら全部同じ曲
+    bgmFor(index) {
+        const b = this.def.bgm;
+        if (Array.isArray(b)) return b[Math.min(index, b.length - 1)] || 'bgm_boss';
+        return b || 'bgm_boss';
+    }
+    
+    // BGM の切りかえ（毎フレーム）
+    //   musicTimer：BATTLE START から少し待って、最初の曲を流す
+    //   phaseMusic：形態が変わった時。BGM を止めて、ボスが吠え終わって（演出が終わって）から次の曲を流す
+    //               同じ曲のボス（イノシシ・狼）は止めた所から続ける
+    updateMusic(dt) {
+        if (this.isOver) return;
+        if (this.musicTimer > 0) {
+            this.musicTimer -= dt;
+            if (this.musicTimer <= 0 && !this.phaseMusic) playBGM(this.bgmFor(this.ai.phase ? this.ai.phase.index : 0));
+        }
+        const pm = this.phaseMusic;
+        if (!pm) return;
+        pm.t += dt;
+        const roaring = this.ai.actionName === 'transition';
+        const voiceDone = pm.roarAt === null ? pm.t >= BossBattle.MUSIC.noRoarWait : pm.t >= pm.roarAt + pm.roarLen;
+        if ((!roaring && voiceDone && pm.t >= BossBattle.MUSIC.minSilence) || pm.t >= BossBattle.MUSIC.maxSilence) {
+            this.phaseMusic = null;
+            this.musicTimer = 0;
+            const key = this.bgmFor(pm.index);
+            if (window.soundManager) soundManager.playBGM(key, { resume: !!pm.prevKey });
+        }
+    }
+    
+    // ボスAIが吠えた（形態が変わる時の咆哮・遠吠え・機械の咆哮）。声が終わるまで次の曲を待つ
+    onRoar(key) {
+        const pm = this.phaseMusic;
+        if (!pm) return;
+        pm.roarAt = pm.t;
+        const len = window.soundManager ? soundManager.durationOf(key) : 0;
+        pm.roarLen = Math.min(BossBattle.MUSIC.maxRoar, len > 0 ? len * BossBattle.MUSIC.roarTail : BossBattle.MUSIC.noFileRoar);
     }
     
     // 開始演出を飛ばす（Enter・クリック・タップ）
@@ -134,10 +175,12 @@ class BossBattle {
         // ボスAIからの知らせ（フェーズ移行・画面の揺れ）
         for (const ev of this.ai.events) {
             if (ev.type === 'phase') this.onPhaseChange(ev.index);
+            else if (ev.type === 'roar') this.onRoar(ev.key);
             else if (ev.type === 'shake') game.addShake(ev.power, ev.time || 0.25);
             else if (ev.type === 'hit') game.addShake(ev.power, 0.2);
         }
         this.ai.events = [];
+        this.updateMusic(dt);
         if (!this.boss.isAlive()) this.ai.updateFx(dt); // 倒れた後も演出は消えるまで動かす
         
         if (this.state === 'intro') this.updateIntro(dt);
@@ -189,6 +232,7 @@ class BossBattle {
             this.step = 4;
             this.showBanner('BATTLE START', '', 'start');
             playSE('battle_start');
+            this.musicTimer = BossBattle.MUSIC.afterStart; // 文字が出てから BGM を流す
             if (!this.def.countdown) this.beginFight();
         }
         if (this.step === 4 && this.def.countdown) {
@@ -214,6 +258,11 @@ class BossBattle {
         this.flash = 0.5;
         this.game.addShake(8, 0.5);
         playSE('boss_phase');
+        // BGM を止めて、ボスの声だけにする。吠え終わったら次の曲（updateMusic）
+        const sm = window.soundManager;
+        const prevKey = sm && (sm.bgm ? sm.bgm.key : sm.pausedBGM ? sm.pausedBGM.key : null);
+        if (sm) sm.pauseBGM(BossBattle.MUSIC.fadeOut);
+        this.phaseMusic = { index, t: 0, roarAt: null, roarLen: 0, prevKey: prevKey && sm.resolve(this.bgmFor(index)) === prevKey ? prevKey : null };
     }
     
     onDefeat() {
@@ -391,6 +440,8 @@ class BossBattle {
     
     stop() {
         this.state = 'idle';
+        this.musicTimer = 0;
+        this.phaseMusic = null;
         this.hideResult();
         this.hidePause();
         this.clearBanner();
@@ -400,5 +451,14 @@ class BossBattle {
         document.body.dataset.boss = '';
     }
 }
+
+// BGM の流れ方（秒）
+// afterStart ：BATTLE START の文字が出てから、最初の曲を流すまで
+// 形態が変わった時：fadeOut 秒で BGM を消す → ボスが吠える（声だけ）→ 声と演出が終わったら次の曲
+//   minSilence：最低でもこの秒数は無音 / maxSilence：これより長くは待たない（声がとても長い時など）
+//   roarTail  ：声の長さのこの割合まで聞いたら次の曲（声の最後の小さくなる所に曲を重ねる）
+//   maxRoar   ：声を待つのはここまで / noFileRoar：声のファイルがない時（コードで作った音）の長さ
+//   noRoarWait：吠えないまま演出が終わった時に待つ秒数
+BossBattle.MUSIC = { afterStart: 0.7, fadeOut: 0.25, minSilence: 1.2, maxSilence: 6, roarTail: 0.85, maxRoar: 3.5, noFileRoar: 1.5, noRoarWait: 1.2 };
 
 window.BossBattle = BossBattle;

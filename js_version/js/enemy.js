@@ -84,13 +84,12 @@ class Enemy {
         }
         
         // ノックバック（ひるみ）
-        // 受けたダメージが「ひるみ値」までたまると、大きく飛ばされて少しの間動けなくなる
-        this.poiseThreshold = Math.max(1, this.maxHP * (enemyData.poiseRatio || 0.3)); // 最大HPの3割（ボスは別の値）
+        // 主人公の攻撃が続けて当たり、Enemy.STAGGER.hits 回目になった時だけ、大きく飛ばされて少しの間動けなくなる
+        // （それまでは何回当たっても飛ばされない。Enemy.STAGGER.window 秒あくと数え直し）
         this.knockbackScale = enemyData.knockbackScale ?? 1; // 飛ばされる距離の倍率（重いボスは小さく）
         this.ai = null;                // ボスAI（boss_ai.js）。ある時はこちらが動きを決める
-        this.poiseDamage = 0;          // たまっているダメージ
-        this.poiseTimer = 0;           // しばらく攻撃されないと、たまった分が消える
-        this.poiseResetTime = 2.5;
+        this.comboHits = 0;            // 主人公の攻撃が続けて当たった回数
+        this.lastComboAt = -1e9;       // 最後に当たった時刻（performance.now()）
         this.staggerTimer = 0;         // 動けない残り時間
         this.knockDir = new Vector2(0, 0);
         this.knockDist = 0;            // 飛ばされる距離
@@ -142,10 +141,6 @@ class Enemy {
         this.target = player;
         
         if (this.attackTimer > 0) this.attackTimer -= deltaTime;
-        if (this.poiseDamage > 0) {
-            this.poiseTimer += deltaTime;
-            if (this.poiseTimer >= this.poiseResetTime) this.poiseDamage = 0;
-        }
         
         // ノックバック中：AI は止めて、後ろへすべるように飛ばされる
         if (this.staggerTimer > 0 || this.knockTime < this.knockDuration) {
@@ -478,8 +473,8 @@ class Enemy {
     }
     
     // 攻撃を受けて押し出される
-    // heavy = true：ひるみ画像を出して大きく飛ばす（ひるみ値がたまった時・水/土の魔術）
-    // heavy = false：小さく押し出すだけ（ナイフの1回1回）
+    // heavy = true：ひるみ画像を出して大きく飛ばす（続けて Enemy.STAGGER.hits 回当たった時）
+    // heavy = false：小さく押し出すだけ（今は使っていない）
     applyKnockback(direction, distance, heavy = true) {
         let dir = direction && direction.length() > 0.01 ? direction.normalize() : this.awayFromTarget();
         if (this.ai) {
@@ -572,9 +567,11 @@ class Enemy {
     }
     
     // direction: 攻撃の向き（ひるんだ時に飛ばされる方向）
-    // canStagger: false にすると、ひるみ値をためない（残り火・竜巻の継続ダメージ）
+    // canStagger: false にすると、続けて当たった回数に数えない（残り火・竜巻の継続ダメージ）
     // kind：'magic' の時は魔法防御（magicDefense。敵データにある時だけ。魔道ゴーレムなど）で減らす
-    takeDamage(damage, direction = null, canStagger = true, kind = '') {
+    // knock：この攻撃でノックバックする時の距離（水・土の魔法は大きく飛ばす）。飛ぶのは続けて当たった回数が
+    //        Enemy.STAGGER.hits になった時だけ
+    takeDamage(damage, direction = null, canStagger = true, kind = '', knock = 0) {
         // ボスの影の高速移動・回避・咆哮の間はダメージを受けない
         if (this.ai && this.ai.invulnerable && this.isAlive()) {
             return { damage: 0, position: this.position.clone(), staggered: true };
@@ -588,7 +585,7 @@ class Enemy {
         this.hitFlashColor = '#ffffff';
         if (this.isSlime) this.provoked = true; // 攻撃されたら怒る
         
-        // ひるみ値がたまったら大きくノックバック
+        // 続けて Enemy.STAGGER.hits 回当たったら大きくノックバック（それまでは飛ばされない）
         let staggered = false;
         if (!this.isAlive() && !this.dying) {
             // 倒れた：最後に大きくノックバックしてから、星になって消える
@@ -599,11 +596,12 @@ class Enemy {
             this.startKnockback(dir, 70 * Math.max(0.6, this.knockbackScale), 0.3, this.isBoss ? 0.6 : 0.38, true);
             staggered = true;
         } else if (canStagger && this.isAlive()) {
-            this.poiseDamage += actualDamage;
-            this.poiseTimer = 0;
-            if (this.poiseDamage >= this.poiseThreshold) {
-                this.poiseDamage = 0;
-                this.applyKnockback(direction, 80, true);
+            const now = performance.now();
+            this.comboHits = now - this.lastComboAt <= Enemy.STAGGER.window * 1000 ? this.comboHits + 1 : 1;
+            this.lastComboAt = now;
+            if (this.comboHits >= Enemy.STAGGER.hits) {
+                this.comboHits = 0;
+                this.applyKnockback(direction, Math.max(Enemy.STAGGER.dist, knock || 0), true);
                 staggered = true;
             }
         }
@@ -647,12 +645,12 @@ class Enemy {
             ctx.save();
             ctx.translate(screenPos.x, screenPos.y + this.size * 0.35);
             ctx.rotate(ang);
-            ctx.globalAlpha = 0.18 + 0.25 * t;
-            ctx.fillStyle = '#ff3a2a';
+            ctx.globalAlpha = 0.28 + 0.35 * t;
+            ctx.fillStyle = '#ff2020';
             ctx.fillRect(0, -this.size * 0.4, len * t, this.size * 0.8);
-            ctx.globalAlpha = 0.6;
-            ctx.strokeStyle = '#ff6a50';
-            ctx.lineWidth = 2;
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = t > 0.78 && Math.sin(performance.now() / 1000 * 42) > 0 ? '#ffffff' : '#ff2020';
+            ctx.lineWidth = 3;
             ctx.strokeRect(0, -this.size * 0.4, len, this.size * 0.8);
             ctx.restore();
         }
@@ -736,10 +734,12 @@ class Enemy {
             ctx.globalAlpha = 1;
         }
         
-        // かみつきの溜め：体が赤く光る（予告） / かみついた瞬間：前に白い牙の跡
+        // かみつきの溜め：体が赤く光る（予告。出る直前は白く点滅） / かみついた瞬間：前に白い牙の跡
         if (this.attackWindup > 0) {
-            ctx.globalAlpha = 0.25 + 0.3 * (1 - this.attackWindup / this.attackWindupTime);
-            ctx.fillStyle = '#ff3030';
+            const t = 1 - this.attackWindup / this.attackWindupTime;
+            const hot = t > 0.78 && Math.sin(performance.now() / 1000 * 42) > 0;
+            ctx.globalAlpha = 0.35 + 0.4 * t;
+            ctx.fillStyle = hot ? '#ffffff' : '#ff2020';
             ctx.beginPath();
             ctx.ellipse(screenPos.x, screenPos.y, this.size * 0.6, this.size * 0.45, 0, 0, Math.PI * 2);
             ctx.fill();
@@ -1056,6 +1056,10 @@ Enemy.BOSS_TURN_MARGIN = 1.3;
 // 侵蝕弾の画像（assets/effects/boss/corrupt_shot.png）で、光る玉の中心がある横の位置（左から何割か）
 Enemy.SHOT_ORB_X = 0.4;
 
+// 敵のノックバック（ひるみ）：主人公の攻撃が続けて hits 回当たった時だけ、dist(px) 大きく飛ばされる（ボスは攻撃も止まる）
+// window：次の攻撃がこの秒数以内に当たると「続けて」。あくと数え直し。残り火・竜巻の継続ダメージは数えない
+Enemy.STAGGER = { hits: 5, window: 1.2, dist: 80 };
+
 // 体当たりのダメージ（全員の敵・ボス）
 // reach：敵の体の大きさのどこまでを「体」とするか / player：主人公の体の半径(px) / damage：敵の攻撃力に掛ける倍率
 // cooldown：同じ敵の体当たりが次に当たるまでの秒数（主人公には無敵時間がないので、ふれ続けても毎フレームは減らない）
@@ -1363,9 +1367,8 @@ class EnemySpawner {
                 if (dot < cosHalf) continue;
             }
             
-            const result = enemy.takeDamage(attack.damage, attack.aim);
-            // ひるまなかった時は、小さく押し出すだけ
-            if (!result.staggered) enemy.applyKnockback(attack.aim, attack.knockback, false);
+            // 飛ばされるのは、続けて当たった回数が Enemy.STAGGER.hits になった時だけ（1回ごとの押し出しはしない）
+            const result = enemy.takeDamage(attack.damage, attack.aim, true, '', attack.knockback);
             hits.push({ enemy, ...result });
         }
         
