@@ -5,10 +5,12 @@
 //     フェーズ2：＋連続拳・星力弾・範囲衝撃波・危険床・防御
 //     フェーズ3：＋3連続拳・魔法陣砲撃（石柱と連動）・広範囲衝撃波・連続危険床
 // - ステージ（ruins_map.js の RuinsMap）と連動：フェーズで魔法陣・石柱・星晶石の光り方が変わる。攻撃の予兆で魔法陣が光る
-// - 見た目：画像がない間は Enemy.drawGolem（下）でコードで描く仮の姿。
-//   画像を置けば assets/enemies/magic_golem/<モーション>_<向き>_<1〜3>.png が使われる（Enemy.getEnemyImage）
-//   モーション名：idle / activate / walk / turn / punch / armSwing / slam / stomp / magicCharge / magicShot / shockwave /
-//                 shield / phaseChange / hit / stun / breakdown / death
+// - 見た目：assets/enemies/magic_golem/<モーション>_<向き>_<1〜3>.png（art_source/bosses/tools/cut.ps1 で切り出した物。
+//   Enemy.getBossSprite）。コマは攻撃側で this.frame に入れる。画像が読めない時は Enemy.drawGolem（下）でコードで描く
+//   モーション名：idle / activate / walk / turn / punch / punch2 / armSwing / slam / stomp / magicCharge / magicShot / shockwave /
+//                 shield / phaseChange / hit / stun / breakdown / death（絵の対応は boss_data.js の look.sprite）
+// - エフェクト：assets/effects/boss/golem_*.png（星力の溜め・星力弾・結晶・地面の輪・拳の軌跡・星の光・砲撃の光の柱）。
+//   画像がない時はコードで描く
 
 // ---------- 機械の音 ----------
 // assets/sounds/se/golem_boot・golem_roar・golem_thud があればそのファイルを鳴らす。ない間は Web Audio で作った音
@@ -76,12 +78,14 @@ class MagicGolemAI extends BossAI {
         super(enemy, def);
         this.introMode = null;   // 'activate'：開始の演出で、その場で起動する
         this.introT = 0;
-        this.stepTimer = 0;
+        this.stepFrame = 0;      // 歩きの絵の今のコマ（足音を鳴らすため）
         this.resetPose();
     }
     
     // 見た目のポーズ（毎フレーム 0 に戻し、攻撃側で決める。Enemy.drawGolem が使う）
+    // frame：画像のコマ（0〜2）。null なら時間でくり返す（毎フレーム null に戻し、攻撃側で決める）
     resetPose() {
+        this.frame = null;
         // spin：両腕を横にまっすぐ広げる（腕の振り回し）
         this.pose = { armL: 0, armR: 0, armsUp: 0, slam: 0, shield: 0, charge: 0, stomp: 0, kneel: 0, dormant: 0, spin: 0,
             core: 0.45 + (this.phase ? this.phase.index : 0) * 0.2 };
@@ -91,6 +95,8 @@ class MagicGolemAI extends BossAI {
     get stage() { return this.map && this.map.setStagePhase ? this.map : null; }
     // pose は update の最初に resetPose で戻している（BossAI に null にさせない）
     clearFramePose() {}
+    // 画像のコマは pose ではなく frame（Enemy.getBossSprite）
+    get spriteFrame() { return this.frame; }
     
     update(dt) {
         this.resetPose();
@@ -115,7 +121,9 @@ class MagicGolemAI extends BossAI {
         }
         super.update(dt);
         if (!this.active && this.introMode === 'activate' && this.e.isAlive()) {
-            this.motion = this.pose.dormant > 0.02 ? 'activate' : 'idle';
+            // 絵：うずくまって眠る → 起き上がる途中 → 立ち上がって胸を張る（咆哮の後まで）
+            this.motion = this.pose.dormant > 0.02 || this.introT < 2.5 ? 'activate' : 'idle';
+            if (this.motion === 'activate') this.frame = this.pose.dormant > 0.6 ? 0 : this.pose.dormant > 0.05 ? 1 : 2;
         }
     }
     
@@ -136,13 +144,16 @@ class MagicGolemAI extends BossAI {
         if (Math.abs(diff) > 1.0) { sp *= 0.35; this.motion = 'turn'; }
         else this.motion = 'walk';
         this.e.velocity = this.facing.mult(sp);
-        // 足音：砂ぼこりと小さな揺れ
-        this.stepTimer -= dt;
-        if (this.stepTimer <= 0) {
-            this.stepTimer = 0.62 / this.P.speedMul;
-            playSE('golem_step');
-            this.dust(this.feet(), 3, 'rgba(190, 180, 210, 0.6)');
-            this.events.push({ type: 'shake', power: 1.2, time: 0.12 });
+        // 足音：歩きの絵の足が地面につくコマ（1→2→1→3 の2・4コマ目）に変わった時に、砂ぼこりと小さな揺れ
+        const S = this.def.look && this.def.look.sprite;
+        const step = Math.floor(this.motionTime / ((S && S.speed && S.speed[this.motion]) || 0.3));
+        if (step !== this.stepFrame) {
+            this.stepFrame = step;
+            if (step % 2 === 1) {
+                playSE('golem_step');
+                this.dust(this.feet(), 3, 'rgba(190, 180, 210, 0.6)');
+                this.events.push({ type: 'shake', power: 1.2, time: 0.12 });
+            }
         }
     }
     
@@ -192,7 +203,8 @@ class MagicGolemAI extends BossAI {
     // 拳（hits 回まで続けて殴る。左右の拳を交互に）
     *punches(a, hits) {
         for (let i = 0; i < hits; i++) {
-            this.motion = 'punch';
+            // 絵：2発目ごとに反対の腕（punch2）。コマは 溜め → 打つ → 構え直す
+            this.motion = i % 2 === 0 ? 'punch' : 'punch2';
             const dir = this.dirToPlayer();
             this.face(dir);
             const ang = Math.atan2(dir.y, dir.x);
@@ -205,6 +217,7 @@ class MagicGolemAI extends BossAI {
             // 拳を引いて力をためる
             yield* this.sleep(windup, (p) => {
                 this.face(dir);
+                this.frame = 0;
                 this.pose[arm] = -0.6 * p;
                 this.pose.core += 0.2 * p;
                 this.jitter = p > 0.65 ? 1.2 : 0;
@@ -212,10 +225,14 @@ class MagicGolemAI extends BossAI {
             this.e.moveBy(dir.mult(22));
             this.addHitbox({ kind: 'arc', follow: true, ang, r, spread: 1.15, damage: this.dmg(a.damage), life: 0.12, shake: 6 });
             playSE('golem_punch');
-            this.addFx({ type: 'slash', follow: true, ang, r: r * 0.82, spread: 1.0, life: 0.22, color: '#c8f4ff', reverse: i % 2 === 1 });
+            // 拳の軌跡：光の弧の画像を、ふくらんだ側が外になるように打つ向きと直角に置く（2発目は左右反転）
+            const back = i % 2 === 1;
+            const sl = this.fxImg('golem_slash', { follow: true, ang, fwd: r * 0.55, dy: -this.e.size * 0.12, w: r * 0.95,
+                rot: ang + (back ? 0.95 : 2.19), flip: back, s0: 0.85, s1: 1.1, life: 0.26, hold: 0.35, add: true, ground: false });
+            if (!sl) this.addFx({ type: 'slash', follow: true, ang, r: r * 0.82, spread: 1.0, life: 0.22, color: '#c8f4ff', reverse: back });
             this.events.push({ type: 'shake', power: 3, time: 0.15 });
-            yield* this.sleep(0.2 * fo, () => { this.face(dir); this.pose[arm] = 1; });
-            yield* this.sleep(0.08 * fo, () => { this.pose[arm] = 0.6; });
+            yield* this.sleep(0.2 * fo, () => { this.face(dir); this.frame = 1; this.pose[arm] = 1; });
+            yield* this.sleep(0.08 * fo, () => { this.frame = 2; this.pose[arm] = 0.6; });
         }
         yield* this.recover(a.recover);
     }
@@ -233,9 +250,11 @@ class MagicGolemAI extends BossAI {
         const ang0 = Math.atan2(this.facing.y, this.facing.x);
         this.addFx({ type: 'circleWarn', warn: true, follow: true, feet: true, r: a.radius, life: a.windup });
         // 両腕を広げ、回る向きと逆に上半身をひねって力をためる
+        // 絵（正面だけ）：ひねって構える → 両腕を広げて回る → 目を回す
         yield* this.sleep(a.windup, (p) => {
             const tw = ang0 - 0.9 * (1 - (1 - p) * (1 - p));
             this.face(new Vector2(Math.cos(tw), Math.sin(tw)));
+            this.frame = 0;
             this.pose.spin = Math.min(1, p * 1.6);
             this.pose.core += 0.3 * p;
             this.jitter = p > 0.6 ? 1.5 : 0;
@@ -254,6 +273,9 @@ class MagicGolemAI extends BossAI {
             }
             const ang = ang0 - 0.9 + Math.PI * 2 * spins * p;
             this.face(new Vector2(Math.cos(ang), Math.sin(ang)));
+            this.frame = 1;
+            // 正面の絵のまま回るので、横幅を少し伸び縮みさせて回っているように見せる
+            this.scaleX = 0.84 + 0.16 * Math.abs(Math.sin(ang));
             this.pose.spin = 1;
             // 回りながらゆっくりプレイヤーへ近づく
             const to = this.toPlayer();
@@ -273,6 +295,7 @@ class MagicGolemAI extends BossAI {
         playSE('boss_dizzy', { dur: Math.max(0.6, a.dizzy || 0.8) + 0.3 });
         yield* this.sleep(a.dizzy || 0.8, (p) => {
             this.face(this.facing);
+            this.frame = 2;
             this.pose.spin = Math.max(0, 1 - p * 3);
             this.pose.core = 0.25 + Math.random() * 0.2;
             this.jitter = 2 * (1 - p);
@@ -288,22 +311,25 @@ class MagicGolemAI extends BossAI {
         this.face(dir);
         const at = this.feet().add(dir.mult(this.e.size * 0.4 + a.reach));
         this.addFx({ type: 'circleWarn', warn: true, x: at.x, y: at.y, r: a.radius, life: a.windup });
+        // 絵：両腕を振り上げる → たたきつける → 腕がめりこんで抜けない
         yield* this.sleep(a.windup, (p) => {
             this.face(dir);
+            this.frame = 0;
             this.pose.armsUp = 1 - (1 - p) * (1 - p);
             this.scaleY = 1 + 0.05 * p;
             this.jitter = p > 0.7 ? 1.5 : 0;
         });
         this.addHitbox({ kind: 'ellipse', x: at.x, y: at.y, r: a.radius * 0.95, damage: this.dmg(a.damage), life: 0.1, shake: 9 });
-        this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 20, r1: a.radius * 1.15, life: 0.45, width: 12, color: '#c8f4ff' });
+        this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 20, r1: a.radius * 1.15, life: 0.45, width: 12, color: '#c8f4ff', ring: 'golem' });
         this.addFx({ type: 'crack', x: at.x, y: at.y, r: a.radius * 0.75, life: 1.6, seed: Math.random() * 6, color: 'rgba(40, 30, 60, 1)' });
+        this.crystalBurst(at, a.radius * 1.5, 0.6);
         this.dust(at, 12, 'rgba(190, 180, 210, 0.7)');
         this.events.push({ type: 'shake', power: 8, time: 0.35 });
         GolemSound.play('thud');
-        yield* this.sleep(0.2, () => { this.face(dir); this.pose.slam = 1; this.scaleY = 0.95; });
+        yield* this.sleep(0.2, () => { this.face(dir); this.frame = 1; this.pose.slam = 1; this.scaleY = 0.95; });
         this.superArmor = false;
         // 腕が地面にめりこんで動けない（攻撃のチャンス）
-        yield* this.sleep(a.stuck || 0.6, () => { this.face(dir); this.pose.slam = 1; });
+        yield* this.sleep(a.stuck || 0.6, () => { this.face(dir); this.frame = 2; this.pose.slam = 1; });
         yield* this.recover(a.recover);
     }
     
@@ -316,11 +342,13 @@ class MagicGolemAI extends BossAI {
             const at = this.feet();
             this.addFx({ type: 'circleWarn', warn: true, x: at.x, y: at.y, r: a.maxRadius, life: windup });
             if (this.stage) this.stage.pulseCircle(0.6);
-            yield* this.sleep(windup, (p) => { this.face(this.dirToPlayer()); this.pose.stomp = p; this.pose.core += 0.3 * p; this.jitter = p > 0.6 ? 1.5 : 0; });
+            // 絵：足を少し上げる → ひざの高さまで上げる → 踏みおろす（shockwave = 踏みつけの3コマ目）
+            yield* this.sleep(windup, (p) => { this.face(this.dirToPlayer()); this.frame = p < 0.4 ? 0 : 1; this.pose.stomp = p; this.pose.core += 0.3 * p; this.jitter = p > 0.6 ? 1.5 : 0; });
             this.motion = 'shockwave';
             this.addHitbox({ kind: 'ering', x: at.x, y: at.y, r0: 30, r1: a.maxRadius, band: a.band, damage: this.dmg(a.damage), life: a.time, shake: 7 });
-            this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 30, r1: a.maxRadius, life: a.time, width: a.band, color: 'rgba(110, 210, 255, 0.85)' });
+            this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 30, r1: a.maxRadius, life: a.time, width: a.band, color: 'rgba(110, 210, 255, 0.85)', ring: 'golem' });
             this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 16, r1: a.maxRadius * 0.82, life: a.time * 1.1, width: 6, color: '#e6fbff' });
+            this.crystalBurst(at, this.e.size * 0.95, 0.45, 0.85);
             this.dust(at, 8, 'rgba(190, 180, 210, 0.7)');
             this.events.push({ type: 'shake', power: 7, time: 0.35 });
             GolemSound.play('thud');
@@ -337,13 +365,14 @@ class MagicGolemAI extends BossAI {
         this.motion = 'magicCharge';
         const p3 = this.phase.index >= 2;
         const pillars = p3 && this.stage ? this.stage.getRunePillars() : [];
-        this.addFx({ type: 'coreCharge', warn: true, follow: true, life: a.windup });
+        this.coreChargeFx(a.windup);
         playSE('golem_charge', { dur: a.windup + 0.1 }); // 胸の魔導核に力がたまる（溜めの間だけ）
         if (pillars.length) {
             this.stage.flashPillars(1);
             for (const pl of pillars) this.addFx({ type: 'pillarCharge', warn: true, x: pl.position.x, y: pl.position.y, life: a.windup + 0.2 });
         }
-        yield* this.sleep(a.windup, (p) => { this.face(this.dirToPlayer()); this.pose.charge = p; this.pose.core = 0.6 + 0.4 * p; this.jitter = p > 0.7 ? 1 : 0; });
+        // 絵（正面だけ）：両方の拳を胸の前に寄せて力をためる → 胸を突き出して撃つ
+        yield* this.sleep(a.windup, (p) => { this.face(this.dirToPlayer()); this.frame = 0; this.pose.charge = p; this.pose.core = 0.6 + 0.4 * p; this.jitter = p > 0.7 ? 1 : 0; });
         this.motion = 'magicShot';
         const volleys = p3 ? 2 : 1;
         const shot = (typeof Enemy !== 'undefined' && Enemy.SCALE.shot) || 1;
@@ -351,7 +380,8 @@ class MagicGolemAI extends BossAI {
             const dir = this.dirToPlayer();
             const ang = Math.atan2(dir.y, dir.x) + (v % 2 ? a.spread / 2 : 0);
             const count = a.count + (p3 ? 2 : 0) - v;
-            const from = this.corePos().add(dir.mult(this.e.size * 0.25));
+            // 胸の核から出る（少しだけ撃つ向きへ出す）
+            const from = this.corePos().add(dir.mult(this.e.size * 0.1));
             for (let i = 0; i < count; i++) {
                 const k = count === 1 ? 0 : i / (count - 1) - 0.5;
                 const aa = ang + k * a.spread * (count - 1);
@@ -368,7 +398,7 @@ class MagicGolemAI extends BossAI {
             }
             this.addFx({ type: 'shock', x: from.x, y: from.y, r0: 6, r1: 50, life: 0.25, width: 5, color: '#c8f4ff' });
             playSE('golem_shot');
-            yield* this.sleep(0.4, () => { this.pose.charge = 1; });
+            yield* this.sleep(0.4, () => { this.frame = 1; this.pose.charge = 1; });
         }
         yield* this.recover(a.recover);
     }
@@ -378,12 +408,13 @@ class MagicGolemAI extends BossAI {
         this.motion = 'magicCharge';
         if (this.stage) this.stage.pulseCircle(1);
         playSE('golem_charge', { dur: 0.6 });
-        yield* this.sleep(0.45, (p) => { this.face(this.dirToPlayer()); this.pose.armsUp = p * 0.6; this.pose.charge = p; });
+        // 絵（正面だけ）：力をためる → 両腕を空へ掲げて魔法陣を呼ぶ
+        yield* this.sleep(0.45, (p) => { this.face(this.dirToPlayer()); this.frame = p < 0.5 ? 0 : 2; this.pose.armsUp = p * 0.6; this.pose.charge = p; });
         const waves = a.waves || 1;
         for (let w = 0; w < waves; w++) {
             for (const c of this.hazardSpots(a.count, a.radius)) this.runeFloor(c, a.radius, a.windup, this.dmg(a.damage));
             if (this.stage) this.stage.pulseCircle(0.8);
-            yield* this.sleep(w < waves - 1 ? a.between : a.windup + 0.15, () => { this.face(this.dirToPlayer()); this.pose.armsUp = 0.6; this.pose.charge = 1; });
+            yield* this.sleep(w < waves - 1 ? a.between : a.windup + 0.15, () => { this.face(this.dirToPlayer()); this.frame = 2; this.pose.armsUp = 0.6; this.pose.charge = 1; });
         }
         yield* this.recover(a.recover);
     }
@@ -417,28 +448,37 @@ class MagicGolemAI extends BossAI {
         this.superArmor = true;
         if (this.stage) { this.stage.flashPillars(1); this.stage.pulseCircle(1); }
         playSE('golem_charge', { dur: 0.65 });
-        yield* this.sleep(0.5, (p) => { this.face(this.dirToPlayer()); this.pose.charge = p; this.pose.armsUp = p; this.pose.core = 1; this.jitter = 1; });
+        this.coreChargeFx(0.5);
+        // 絵（正面だけ）：力をためる → 両腕を空へ掲げて光の柱を呼び続ける
+        yield* this.sleep(0.5, (p) => { this.face(this.dirToPlayer()); this.frame = 0; this.pose.charge = p; this.pose.armsUp = p; this.pose.core = 1; this.jitter = 1; });
         this.motion = 'magicShot';
         for (let i = 0; i < a.count; i++) {
             const pl = this.player.position;
             this.runeFloor(new Vector2(pl.x, pl.y + 28), a.radius, a.windup, this.dmg(a.damage), true);
             if (this.stage) this.stage.flashPillars(0.8);
-            yield* this.sleep(a.between, () => { this.face(this.dirToPlayer()); this.pose.armsUp = 1; this.pose.core = 1; });
+            yield* this.sleep(a.between, () => { this.face(this.dirToPlayer()); this.frame = 2; this.pose.armsUp = 1; this.pose.core = 1; });
         }
-        yield* this.sleep(Math.max(0, a.windup - a.between) + 0.2, () => { this.pose.armsUp = 1; this.pose.core = 1; });
+        yield* this.sleep(Math.max(0, a.windup - a.between) + 0.2, () => { this.frame = 2; this.pose.armsUp = 1; this.pose.core = 1; });
         this.superArmor = false;
         yield* this.breakdown(a.breakdown || 1.6);
         yield* this.recover(a.recover);
     }
     
     // 機能停止（力を使いすぎて片ひざをつく）。この間は攻撃のチャンス
+    // 絵：起動の絵（正面）を使う。光が消えてうずくまる（1コマ目）← → ひざをつきかける・起き上がりかける（2コマ目）
     *breakdown(t) {
         this.motion = 'breakdown';
         yield* this.sleep(t, (p, dt) => {
             const down = Math.min(1, p * 6) * (p > 0.85 ? (1 - p) / 0.15 : 1);
+            this.frame = down > 0.6 ? 0 : 1;
             this.pose.kneel = down;
             this.pose.core = 0.12 + Math.random() * 0.2;
-            if (Math.random() < dt * 8) this.addFx({ type: 'spark', x: this.e.position.x + (Math.random() - 0.5) * this.e.size * 0.8, y: this.e.position.y - Math.random() * this.e.size * 0.5, life: 0.4 });
+            if (Math.random() < dt * 8) {
+                // 体から火花（星の光）がはじける
+                const x = this.e.position.x + (Math.random() - 0.5) * this.e.size * 0.8, y = this.e.position.y - Math.random() * this.e.size * 0.5;
+                const sp = this.fxImg('golem_spark', { x, y, w: 16 + Math.random() * 14, s0: 1, s1: 0.4, vy: -30, life: 0.4, hold: 0.3, add: true, ground: false });
+                if (!sp) this.addFx({ type: 'spark', x, y, life: 0.4 });
+            }
         });
     }
     
@@ -448,15 +488,16 @@ class MagicGolemAI extends BossAI {
         this.invulnerable = true;
         this.addFx({ type: 'barrier', follow: true, life: a.time + 0.45 });
         playSE('golem_shield');
-        yield* this.sleep(a.time, (p) => { this.face(this.dirToPlayer()); this.pose.shield = Math.min(1, p * 5); });
+        // 絵（正面だけ）：腕を寄せる → 胸の前で交差して固める → 腕を開いて押し返す
+        yield* this.sleep(a.time, (p) => { this.face(this.dirToPlayer()); this.frame = p < 0.15 ? 0 : 1; this.pose.shield = Math.min(1, p * 5); });
         const at = this.feet();
         this.addFx({ type: 'circleWarn', warn: true, x: at.x, y: at.y, r: a.maxRadius, life: 0.45 });
-        yield* this.sleep(0.45, () => { this.pose.shield = 1; this.jitter = 1.5; });
+        yield* this.sleep(0.45, () => { this.frame = 1; this.pose.shield = 1; this.jitter = 1.5; });
         this.invulnerable = false;
         this.addHitbox({ kind: 'ering', x: at.x, y: at.y, r0: 20, r1: a.maxRadius, band: a.band, damage: this.dmg(a.damage), life: 0.45, shake: 6 });
-        this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 20, r1: a.maxRadius, life: 0.45, width: a.band, color: 'rgba(150, 225, 255, 0.85)' });
+        this.addFx({ type: 'shock', x: at.x, y: at.y, r0: 20, r1: a.maxRadius, life: 0.45, width: a.band, color: 'rgba(150, 225, 255, 0.85)', ring: 'golem' });
         this.events.push({ type: 'shake', power: 5, time: 0.25 });
-        yield* this.sleep(0.3);
+        yield* this.sleep(0.3, () => { this.frame = 2; });
         yield* this.recover(a.recover);
     }
     
@@ -465,7 +506,8 @@ class MagicGolemAI extends BossAI {
         this.motion = 'phaseChange';
         this.superArmor = true;
         this.invulnerable = true;
-        yield* this.sleep(0.55, (p) => { this.face(this.dirToPlayer()); this.pose.core = 0.6 + 0.4 * p; this.pose.armsUp = p * 0.3; this.jitter = p; });
+        // 絵（正面だけ）：体を丸めて力をためる → 胸を張って咆哮 → 全身の模様がいちばん強く光る
+        yield* this.sleep(0.55, (p) => { this.face(this.dirToPlayer()); this.frame = 0; this.pose.core = 0.6 + 0.4 * p; this.pose.armsUp = p * 0.3; this.jitter = p; });
         this.roarVoice('golem_roar');
         this.events.push({ type: 'shake', power: 10, time: 1.0 });
         this.roarBlast(); // 咆哮の衝撃で、必ず吹き飛ばされる
@@ -473,6 +515,8 @@ class MagicGolemAI extends BossAI {
         let next = 0;
         yield* this.sleep(1.4, (p, dt) => {
             this.face(this.dirToPlayer());
+            // 最終強化（フェーズ3）は、いちばん強く光る絵と咆哮の絵が入れかわって点滅する
+            this.frame = p < 0.2 ? 1 : index >= 2 ? (Math.sin(this.time * 18) > 0 ? 2 : 1) : 2;
             this.pose.core = index >= 2 ? (Math.sin(this.time * 40) > 0 ? 1 : 0.35) : 1;
             this.pose.armsUp = 0.75;
             this.scaleY = 1.04; this.jitter = 2;
@@ -498,13 +542,32 @@ class MagicGolemAI extends BossAI {
                 if (Math.hypot(p.x - pl.x, (p.y - pl.y - 28) / 0.62) < r + 120) continue;
                 this.runeFloor(p, r, 1.3, this.dmg(1.0));
             }
-            yield* this.sleep(0.5, () => { this.pose.armsUp = 0.6; this.pose.charge = 1; });
+            yield* this.sleep(0.5, () => { this.frame = 2; this.pose.armsUp = 0.6; this.pose.charge = 1; });
         }
         this.invulnerable = false;
     }
     
-    // 胸の魔導核の位置（ワールド）
-    corePos() { return new Vector2(this.e.position.x, this.e.position.y - this.e.size * 0.13 - this.lift); }
+    // 胸の魔導核の位置（ワールド）。画像では、魔法の絵（正面・反転しない）の核の位置
+    // （magic_down_1〜3 の核は 360 の絵の (196, 144) あたり＝中心から右へ size×0.09、上へ size×0.21）
+    corePos() {
+        const art = this.hasArt;
+        return new Vector2(this.e.position.x + (art ? this.e.size * 0.09 : 0), this.e.position.y - this.e.size * (art ? 0.21 : 0.13) - this.lift);
+    }
+    
+    // 胸の魔導核に星力が集まる（画像：golem_charge_1〜4 で大きくなる。ない時はコードで描く魔法陣）
+    coreChargeFx(life) {
+        const c = this.corePos();
+        const f = this.fxImg(['golem_charge_1', 'golem_charge_2', 'golem_charge_3', 'golem_charge_4'],
+            { follow: true, dx: c.x - this.e.position.x, dy: c.y - this.e.position.y, w: this.e.size * 0.85, s0: 0.75, s1: 1, life, hold: 0.85, alpha: 0.95, add: true, ground: false, warn: true });
+        if (!f) this.addFx({ type: 'coreCharge', warn: true, follow: true, life });
+    }
+    
+    // 地面から星晶石の結晶が飛び出す（画像：golem_crystal_1〜4。画像の下のはしの輪が地面＝at）
+    // ゴーレムの足元か奥（画面の上）なら体の後ろ、手前なら体の前に描く（足元の結晶が体をつき抜けて見えないように）
+    crystalBurst(at, w, life, alpha = 1) {
+        return this.fxImg(['golem_crystal_1', 'golem_crystal_2', 'golem_crystal_3', 'golem_crystal_4'],
+            { x: at.x, y: at.y, dy: -w * 0.42, w, life, hold: 0.55, alpha, add: true, ground: at.y < this.feet().y + 8 });
+    }
     
     // ---------- 描画 ----------
     drawGround(ctx, cam) {
@@ -570,6 +633,49 @@ class MagicGolemAI extends BossAI {
             }
             ctx.restore();
         }
+        // ゴーレムより奥の危険床の結晶・光の柱（体の後ろに見えるように、ここで描く）
+        for (const f of this.fx) {
+            if (f.type !== 'runeFloor' || !this.runeBehind(f)) continue;
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            this.drawRuneBurst(ctx, cam, f);
+            ctx.restore();
+        }
+    }
+    
+    // 危険床がゴーレムの足元より奥（画面の上）にあるか
+    runeBehind(f) { return f.y < this.feet().y; }
+    
+    // 危険床の発動（結晶・砲撃の光の柱）。ctx は呼ぶ側で save / restore する
+    drawRuneBurst(ctx, cam, f) {
+        if (f.age < f.trigger) return;
+        const q = Math.min(1, (f.age - f.trigger) / (f.life - f.trigger));
+        const p = new Vector2(f.x, f.y).sub(cam);
+        const crystal = !f.big && BossAI.fxImage('golem_crystal_1');
+        const beam = f.big && BossAI.fxImage('golem_beam');
+        if (crystal) {
+            // 危険床：地面から結晶が飛び出す（画像の下のはしの輪が魔法陣の中心）
+            const img = BossAI.fxImage(`golem_crystal_${Math.min(4, 1 + Math.floor(q * 4))}`) || crystal;
+            const w = f.r * 1.7;
+            ctx.globalAlpha = q < 0.55 ? 1 : 1 - (q - 0.55) / 0.45;
+            ctx.drawImage(img, p.x - w / 2, p.y - w * 0.92, w, w);
+        } else if (beam) {
+            // 魔法陣砲撃：光の柱（横向きの光線の画像を縦に立てる。左のはしの輪が地面の魔法陣に重なる）
+            const len = f.r * 2.7 * (1 + q * 0.08), th = len * 1.2 * (1 - q * 0.35);
+            ctx.globalAlpha = q < 0.4 ? 1 : 1 - (q - 0.4) / 0.6;
+            ctx.translate(p.x, p.y);
+            ctx.rotate(-Math.PI / 2);
+            ctx.drawImage(beam, -len * 0.07, -th / 2, len, th);
+        } else {
+            // 光の柱（砲撃は太く高い）
+            const w = f.r * (f.big ? 0.9 : 0.55) * (1 - q * 0.5), h = (f.big ? 420 : 170) * (1 - q * 0.3);
+            const g = ctx.createLinearGradient(0, p.y - h, 0, p.y);
+            g.addColorStop(0, 'rgba(120, 210, 255, 0)');
+            g.addColorStop(0.7, `rgba(170, 235, 255, ${0.7 * (1 - q)})`);
+            g.addColorStop(1, `rgba(240, 252, 255, ${0.9 * (1 - q)})`);
+            ctx.fillStyle = g;
+            ctx.fillRect(p.x - w / 2, p.y - h, w, h);
+        }
     }
     
     drawAbove(ctx, cam) {
@@ -579,17 +685,9 @@ class MagicGolemAI extends BossAI {
             const t = Math.min(1, f.age / f.life);
             ctx.save();
             ctx.globalCompositeOperation = 'lighter';
-            if (f.type === 'runeFloor' && f.age >= f.trigger) {
-                // 光の柱（砲撃は太く高い）
-                const q = Math.min(1, (f.age - f.trigger) / (f.life - f.trigger));
-                const p = new Vector2(f.x, f.y).sub(cam);
-                const w = f.r * (f.big ? 0.9 : 0.55) * (1 - q * 0.5), h = (f.big ? 420 : 170) * (1 - q * 0.3);
-                const g = ctx.createLinearGradient(0, p.y - h, 0, p.y);
-                g.addColorStop(0, 'rgba(120, 210, 255, 0)');
-                g.addColorStop(0.7, `rgba(170, 235, 255, ${0.7 * (1 - q)})`);
-                g.addColorStop(1, `rgba(240, 252, 255, ${0.9 * (1 - q)})`);
-                ctx.fillStyle = g;
-                ctx.fillRect(p.x - w / 2, p.y - h, w, h);
+            if (f.type === 'runeFloor') {
+                // 体より手前（足元より下）の危険床だけここで描く。奥の物は drawGround で体の後ろに描く
+                if (!this.runeBehind(f)) this.drawRuneBurst(ctx, cam, f);
             } else if (f.type === 'coreCharge') {
                 // 胸の前に魔法陣が開く
                 const p = this.corePos().sub(cam);
@@ -603,6 +701,13 @@ class MagicGolemAI extends BossAI {
                 g.addColorStop(1, 'rgba(90, 190, 255, 0)');
                 ctx.fillStyle = g;
                 ctx.fillRect(p.x - r * 1.4, p.y - r * 1.4, r * 2.8, r * 2.8);
+            } else if (f.type === 'pillarCharge' && BossAI.fxImage('golem_charge_1')) {
+                // 石柱に星力が集まる（胸の溜めと同じ画像を小さく）
+                const p = new Vector2(f.x, f.y).sub(cam);
+                const img = BossAI.fxImage(`golem_charge_${Math.min(4, 1 + Math.floor(t * 4))}`);
+                const w = 70 + t * 30;
+                ctx.globalAlpha = t < 0.85 ? 0.95 : 0.95 * (1 - t) / 0.15;
+                if (img) ctx.drawImage(img, p.x - w / 2, p.y - w / 2, w, w);
             } else if (f.type === 'pillarCharge') {
                 const p = new Vector2(f.x, f.y).sub(cam);
                 const r = 14 + t * 18;

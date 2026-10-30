@@ -160,6 +160,101 @@ Save-Row $s 4 $K2 $out 'leap_up' 'feet' $null @(0, 1, 2) $fit
 $s = Get-Frames 'wolf_howl_up.png' 1 3; Save-Row $s 0 $KB $out 'howl_up' 'feet' $null @(0, 1, 2) $fit
 $s = Get-Frames 'wolf_claw_up.png' 1 3; Save-Row $s 0 $KB $out 'claw_up' 'feet' $null @(0, 1, 2) $fit
 
+# ---------------- magic golem ----------------
+# sheets (5 rows x 3 frames):
+#   golem_side_A (right) / golem_down_A / golem_up_A : walk, idle, punch, slam, stomp
+#   golem_down_B (front only)                       : armSwing, magic, shield, activate, phaseChange
+# The golem is the biggest boss: 360 px frames with the feet line at 274 (the same pixel size as 320 / 254 at draw 1.875,
+# with 20 px more room on every side for the arms). boss_data.js: look.sprite.draw = 2.109375
+$FS = 360; $FOOT = 274
+# center x of each column (average of the walk and idle frames: the side sheet is not an even 3-column grid)
+function Get-ColX($sheet, $rows) {
+    $xs = @()
+    foreach ($c in 0, 1, 2) {
+        $t = 0.0
+        foreach ($r in $rows) {
+            $l = $sheet.frames["$r,$c"]
+            $x0 = ($l | ForEach-Object { $_.X } | Measure-Object -Minimum).Minimum
+            $x1 = ($l | ForEach-Object { $_.X + $_.W } | Measure-Object -Maximum).Maximum
+            $t += ($x0 + $x1) / 2
+        }
+        $xs += $t / $rows.Count
+    }
+    return $xs
+}
+# frames given as "row,col" -> <name>_1.. png. Each frame stands on the feet line, and its x is
+#   $sheet.center["row,col"] (the body center line in sheet px) when given, else the center of its column
+function Save-Cells($sheet, $cells, $k, $outDir, $names, $mirror = $null) {
+    for ($i = 0; $i -lt $cells.Count; $i++) {
+        $key = $cells[$i]
+        $list = $sheet.frames[$key]
+        if (-not $list) { throw "$($sheet.file): no frame at $key" }
+        $c = [int]($key.Split(',')[1])
+        $x0 = ($list | ForEach-Object { $_.X } | Measure-Object -Minimum).Minimum
+        $y0 = ($list | ForEach-Object { $_.Y } | Measure-Object -Minimum).Minimum
+        $x1 = ($list | ForEach-Object { $_.X + $_.W } | Measure-Object -Maximum).Maximum
+        $y1 = ($list | ForEach-Object { $_.Y + $_.H } | Measure-Object -Maximum).Maximum
+        $cx = if ($sheet.center -and $sheet.center.ContainsKey($key)) { $sheet.center[$key] } else { $sheet.colX[$c] }
+        $px = $FS / 2 + ($x0 - $cx) * $k
+        $fy = $FOOT - ($y1 - $y0) * $k
+        $w = ($x1 - $x0) * $k; $h = ($y1 - $y0) * $k
+        if ($px -lt 0 -or $fy -lt 0 -or $px + $w -gt $FS) { Write-Warning ("{0} {1}: outside the frame ({2:N0},{3:N0} {4:N0}x{5:N0})" -f $sheet.file, $key, $px, $fy, $w, $h) }
+        $fr = New-Object Frame $FS
+        foreach ($p in $list) { $fr.Put($p.Bmp, $px + ($p.X - $x0) * $k, $fy + ($p.Y - $y0) * $k, $k) }
+        foreach ($n in @($names)) { $fr.Save("$outDir/$($n)_$($i + 1).png", $false) }
+        if ($mirror) { foreach ($n in @($mirror)) { $fr.Save("$outDir/$($n)_$($i + 1).png", $true) } }
+        $fr.Dispose()
+    }
+}
+function Row-Cells($row, $order = @(0, 1, 2)) { return @($order | ForEach-Object { "$row,$_" }) }
+
+$out = "$root/js_version/assets/enemies/magic_golem"
+New-Item -ItemType Directory -Force $out | Out-Null
+Get-ChildItem "$out/*.png" -ErrorAction SilentlyContinue | Remove-Item
+# scale: the standing walk frame is about 203 px tall in the frame (190 px on the screen, the hero is 90 px)
+$KA = 0.735   # 1024 x 1536 sheets
+$KS = 0.93    # side sheet (drawn smaller on its sheet)
+# The frames are not always in the middle of their cells, so each frame is placed by its body center line ($sheet.center, sheet px,
+# measured on the sheets): the middle of the feet when both feet are on the ground (then the feet do not slide between frames),
+# else the glowing chest core (front; side: core - 36 = where the feet are in the idle frames) / the glowing rune (back)
+$side = Get-Frames 'golem_side_A.png' 5 3; $side.colX = Get-ColX $side @(0, 1)
+$side.center = @{ '0,0' = 360.5; '0,1' = 760.5; '0,2' = 1167; '1,0' = 359; '1,1' = 754.5; '1,2' = 1177; '2,0' = 364.5; '2,1' = 754; '2,2' = 1166
+                  '3,0' = 371.5; '3,1' = 754.5; '3,2' = 1155.5; '4,0' = 355; '4,1' = 734; '4,2' = 1153.5 }
+Save-Cells $side (Row-Cells 0) $KS $out 'right' 'left'
+Save-Cells $side (Row-Cells 1) $KS $out 'idle_right' 'idle_left'
+Save-Cells $side (Row-Cells 2) $KS $out 'punch_right' 'punch_left'
+Save-Cells $side (Row-Cells 3) $KS $out 'slam_right' 'slam_left'
+Save-Cells $side (Row-Cells 4) $KS $out 'stomp_right' 'stomp_left'
+# front: the punch row is drawn hit / guard / pulled back -> pulled back, hit, guard
+# punch2 (the other arm, used for every second punch) = the punch mirrored
+$s = Get-Frames 'golem_down_A.png' 5 3; $s.colX = Get-ColX $s @(0, 1)
+$s.center = @{ '0,0' = 183; '0,1' = 515.5; '0,2' = 863.5; '1,0' = 160.5; '1,1' = 515.5; '1,2' = 861; '2,0' = 176.5; '2,1' = 493; '2,2' = 832.5
+               '3,0' = 161; '3,1' = 498.5; '3,2' = 844; '4,0' = 185; '4,1' = 496; '4,2' = 837.5 }
+Save-Cells $s (Row-Cells 0) $KA $out 'down'
+Save-Cells $s (Row-Cells 1) $KA $out 'idle_down'
+Save-Cells $s (Row-Cells 2 @(2, 0, 1)) $KA $out 'punch_down' 'punch2_down'
+Save-Cells $s (Row-Cells 3) $KA $out 'slam_down'
+Save-Cells $s (Row-Cells 4) $KA $out 'stomp_down'
+# back: the slam row has only arms-up pictures -> arms up, then the low crouch of the stomp row (fists in the ground)
+$s = Get-Frames 'golem_up_A.png' 5 3; $s.colX = Get-ColX $s @(0, 1)
+$s.center = @{ '0,0' = 202; '0,1' = 528.5; '0,2' = 866; '1,0' = 172; '1,1' = 503; '1,2' = 848.5; '2,0' = 167.5; '2,1' = 483.5; '2,2' = 841.5
+               '3,1' = 496; '4,0' = 180.5; '4,1' = 511; '4,2' = 853 }
+Save-Cells $s (Row-Cells 0) $KA $out 'up'
+Save-Cells $s (Row-Cells 1) $KA $out 'idle_up'
+Save-Cells $s (Row-Cells 2) $KA $out 'punch_up' 'punch2_up'
+Save-Cells $s @('3,1', '4,0', '4,0') $KA $out 'slam_up'
+Save-Cells $s (Row-Cells 4) $KA $out 'stomp_up'
+# front only (the other directions use these too: look.sprite.front in boss_data.js)
+$s = Get-Frames 'golem_down_B.png' 5 3; $s.colX = Get-ColX $s @(2, 3)
+$s.center = @{ '0,0' = 163.5; '0,1' = 521; '0,2' = 830; '1,0' = 162.5; '1,1' = 511; '1,2' = 865.5; '2,0' = 156.5; '2,1' = 479; '2,2' = 837.5
+               '3,0' = 158.5; '3,1' = 501.5; '3,2' = 844.5; '4,0' = 170; '4,1' = 497.5; '4,2' = 840 }
+Save-Cells $s (Row-Cells 0) $KA $out 'armSwing_down'
+Save-Cells $s (Row-Cells 1) $KA $out 'magic_down'
+Save-Cells $s (Row-Cells 2) $KA $out 'shield_down'
+Save-Cells $s (Row-Cells 3) $KA $out 'activate_down'
+Save-Cells $s (Row-Cells 4) $KA $out 'phaseChange_down'
+$FS = 320; $FOOT = 254
+
 # ---------------- effects ----------------
 $fxDir = "$root/js_version/assets/effects/boss"
 New-Item -ItemType Directory -Force $fxDir | Out-Null
@@ -200,6 +295,33 @@ function Save-FxRow($file, $name, $size) {
         $fr.Save("$fxDir/$($name)_$($c + 1).png", $false); $fr.Dispose()
     }
 }
+# pieces of one big effect sheet (many effects on one picture). $rects: @(x0, y0, x1, y1) per frame
+#   = every piece whose center is inside the rect. Saved in a $S square: $name.png (1 rect) or $name_<n>.png
+#   $k > 0: the same scale for every frame (the picture grows from frame to frame) / $k = 0: each frame fills the square
+#   $anchor 'center' / 'bottom' (the bottom of the picture on the bottom of the square: things that rise from the ground)
+$fxSheets = @{}
+function Save-FxPick($file, $name, $rects, $S, $k = 0, $anchor = 'center') {
+    if (-not $fxSheets[$file]) { $sh = [Sheet]::Load("$src/$file"); $fxSheets[$file] = @($sh.Parts(20, 2, 40)) }
+    $parts = $fxSheets[$file]
+    for ($i = 0; $i -lt $rects.Count; $i++) {
+        $r = $rects[$i]
+        $ps = @($parts | Where-Object { $_.Cx -ge $r[0] -and $_.Cx -lt $r[2] -and $_.Cy -ge $r[1] -and $_.Cy -lt $r[3] })
+        if (-not $ps.Count) { throw "$file : nothing in rect $($r -join ',')" }
+        $x0 = ($ps | ForEach-Object { $_.X } | Measure-Object -Minimum).Minimum
+        $y0 = ($ps | ForEach-Object { $_.Y } | Measure-Object -Minimum).Minimum
+        $x1 = ($ps | ForEach-Object { $_.X + $_.W } | Measure-Object -Maximum).Maximum
+        $y1 = ($ps | ForEach-Object { $_.Y + $_.H } | Measure-Object -Maximum).Maximum
+        $kk = if ($k -gt 0) { $k } else { ($S - 4) / [math]::Max($x1 - $x0, $y1 - $y0) }
+        if (($x1 - $x0) * $kk -gt $S -or ($y1 - $y0) * $kk -gt $S) { Write-Warning "$name $($i + 1): bigger than the square" }
+        $ox = ($S - ($x1 - $x0) * $kk) / 2
+        $oy = if ($anchor -eq 'bottom') { $S - 2 - ($y1 - $y0) * $kk } else { ($S - ($y1 - $y0) * $kk) / 2 }
+        $fr = New-Object Frame $S
+        foreach ($p in $ps) { $fr.Put($p.Bmp, $ox + ($p.X - $x0) * $kk, $oy + ($p.Y - $y0) * $kk, $kk) }
+        $fn = if ($rects.Count -eq 1) { $name } else { "$($name)_$($i + 1)" }
+        $fr.Save("$fxDir/$fn.png", $false); $fr.Dispose()
+    }
+}
+
 Save-Fx 'fx_dust.png' 'dust_cloud' 220
 Save-Fx 'fx_rock_burst.png' 'rock_burst' 240
 Save-Fx 'fx_corrupt_shot.png' 'corrupt_shot' 160
@@ -207,4 +329,18 @@ Save-Fx 'fx_claw_slash.png' 'claw_slash' 220
 Save-Fx 'fx_bite.png' 'bite_fangs' 200
 Save-FxRow 'fx_boar_ring.png' 'boar_ring' 300
 Save-FxRow 'fx_corrupt_ring.png' 'corrupt_ring' 300
+# magic golem (fx_golem.png: cyan star power and crystals)
+#   golem_charge_1-4 : the star power gathering in the chest core (grows)
+#   golem_shot       : star power bullet with rock pieces (flies to the right)
+#   golem_crystal_1-4: crystals bursting out of the ground (slam, rune floor)
+#   golem_ring_1-3   : ring on the ground (shock waves)
+#   golem_slash      : the swing of the fist / golem_spark: small star light / golem_beam: beam (rune cannon pillar)
+$G = 'fx_golem.png'
+Save-FxPick $G 'golem_charge' @(@(285, 0, 410, 240), @(565, 0, 745, 240), @(940, 0, 1195, 240), @(1195, 0, 1536, 240)) 304 1
+Save-FxPick $G 'golem_shot' @(, @(425, 240, 612, 400)) 200
+Save-FxPick $G 'golem_crystal' @(@(296, 405, 470, 672), @(470, 405, 673, 672), @(673, 405, 898, 672), @(898, 405, 1130, 672)) 250 1 'bottom'
+Save-FxPick $G 'golem_ring' @(@(20, 675, 165, 860), @(165, 675, 335, 860), @(335, 675, 515, 860)) 300
+Save-FxPick $G 'golem_slash' @(, @(290, 915, 468, 1020)) 220
+Save-FxPick $G 'golem_spark' @(, @(30, 835, 125, 946)) 64
+Save-FxPick $G 'golem_beam' @(, @(860, 805, 1530, 1022)) 420
 "done"

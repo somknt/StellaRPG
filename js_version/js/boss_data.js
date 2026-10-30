@@ -174,7 +174,21 @@ const BOSS_DATA = [
             size: 80, speed: 52, detectionRange: 4000, attackRange: 110,   // 歩く速さ 40 → 52
             isBoss: true, knockbackScale: 0.15
         },
-        look: { key: 'magic_golem', golem: true },
+        // 画像は 360×360（足元は上から274px。イノシシ・狼の 320×320 と同じ1ドットの大きさで、まわりに 20px ずつ余白）
+        // 画像が読めない時は Enemy.drawGolem（golem_ai.js）のコードで描く姿
+        // front：正面の絵しかないモーション（どの向きでも正面の絵） / fallback：横向きの絵がない拳の2発目は、1発目の絵
+        // コマは攻撃側で決める（MagicGolemAI.frame）。待機・歩きなどは時間でくり返す
+        look: { key: 'magic_golem', golem: true,
+            sprite: {
+                draw: 2.109375,
+                front: ['armSwing', 'magic', 'shield', 'activate', 'phaseChange'],
+                fallback: { punch2: 'punch' },
+                // 歩き：立つ → 手前の足 → 立つ → 奥の足（足が地面につく2・4コマ目で足音。MagicGolemAI.idleMove） / 待機：息をするように行って戻る
+                cycle: { walk: [0, 1, 0, 2], idle: [0, 1, 2, 1] },
+                alias: { detect: ['idle', null], turn: ['walk', null], magicCharge: ['magic', null], magicShot: ['magic', null],
+                         shockwave: ['stomp', 2], breakdown: ['activate', null], stun: ['idle', 0], hit: ['idle', 0], death: ['activate', 0] },
+                speed: { idle: 0.3, walk: 0.3, turn: 0.4, detect: 0.25 }
+            } },
         attackInterval: 1.2,   // 前は 1.6（少し早く次の攻撃へ）
         ultimate: 'magicCannon', // 必殺技：最終強化の魔法陣砲撃（光の柱が次々に落ちる）
         // HP50%・25%を切った時、イノシシ・狼より大きく硬くなる（受けるダメージ 0.85→0.7、0.7→0.55）
@@ -212,10 +226,12 @@ const BOSS_DATA = [
             magicCannon:   { range: [0, 1200], windup: 1.0, damage: 1.6, count: 4, radius: 86, between: 0.42, breakdown: 1.6, recover: 0.5 },
             shield:        { range: [0, 200],  time: 1.1, damage: 0.8, maxRadius: 140, band: 26, recover: 0.6 }
         },
+        // 4方向：歩き・待機・拳・叩きつけ・踏みつけ / 正面だけ：腕の振り回し・魔法・防御・起動・形態変化
+        // 機能停止・倒れる＝起動の絵（うずくまる） / 衝撃波＝踏みつけの3コマ目 / 拳の2発目＝拳の左右反転（横向きは1発目の絵）
         motions: {
-            idle: 'temp', activate: 'temp', walk: 'temp', turn: 'temp', punch: 'temp', armSwing: 'temp', slam: 'temp', stomp: 'temp',
-            magicCharge: 'temp', magicShot: 'temp', shockwave: 'temp', shield: 'temp', phaseChange: 'temp',
-            hit: 'temp', stun: 'temp', breakdown: 'temp', death: 'temp'
+            idle: 'done', activate: 'done', walk: 'done', turn: 'alt', punch: 'done', punch2: 'done', armSwing: 'done', slam: 'done', stomp: 'done',
+            magicCharge: 'done', magicShot: 'done', shockwave: 'alt', shield: 'done', phaseChange: 'done',
+            hit: 'alt', stun: 'alt', breakdown: 'alt', death: 'alt'
         }
     },
     {

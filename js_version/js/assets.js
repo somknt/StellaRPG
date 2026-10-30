@@ -268,7 +268,7 @@ AssetManager.RUINS_ART_READY = [
     'ruins_rubble', 'ruins_rubble_b', 'ruins_rubble_c', 'ruins_block', 'ruins_block_small',
     'ruins_waterfall', 'ruins_waterfall_small', 'ruins_sparkles'
 ];
-AssetManager.BEAST_SPRITES_READY = ['giant_forest_boar', 'black_corrupted_wolf'];  // 例: ['grass_wolf', 'corrupted_wolf', 'forest_boar']
+AssetManager.BEAST_SPRITES_READY = ['giant_forest_boar', 'black_corrupted_wolf', 'magic_golem'];  // 例: ['grass_wolf', 'corrupted_wolf', 'forest_boar']
 // ボスのモーション画像（art_source/bosses/tools/cut.ps1 で切り出した物）。
 // モーション名: 画像がある向き（ない向きは Enemy.getEnemyImage が横向きか歩きの絵で代わりに出す）
 AssetManager.BOSS_MOTION_SPRITES_READY = {
@@ -279,12 +279,22 @@ AssetManager.BOSS_MOTION_SPRITES_READY = {
     black_corrupted_wolf: {
         run: ['right', 'left', 'down', 'up'], bite: ['right', 'left', 'down', 'up'], claw: ['right', 'left', 'down', 'up'],
         leapPrepare: ['right', 'left', 'down', 'up'], leap: ['right', 'left', 'down', 'up'], howl: ['right', 'left', 'down', 'up']
+    },
+    // 魔道ゴーレム：拳の2発目（punch2）は正面・背中だけ。腕の振り回し・魔法・防御・起動・形態変化は正面だけ（boss_data.js の look.sprite）
+    magic_golem: {
+        idle: ['right', 'left', 'down', 'up'], punch: ['right', 'left', 'down', 'up'], punch2: ['down', 'up'],
+        slam: ['right', 'left', 'down', 'up'], stomp: ['right', 'left', 'down', 'up'],
+        armSwing: ['down'], magic: ['down'], shield: ['down'], activate: ['down'], phaseChange: ['down']
     }
 };
 // ボス戦のエフェクト画像（assets/effects/boss/<名前>.png）。_1〜_3 は3コマの物
 AssetManager.BOSS_FX_READY = [
     'dust_cloud', 'rock_burst', 'corrupt_shot', 'claw_slash', 'bite_fangs',
-    'boar_ring_1', 'boar_ring_2', 'boar_ring_3', 'corrupt_ring_1', 'corrupt_ring_2', 'corrupt_ring_3'
+    'boar_ring_1', 'boar_ring_2', 'boar_ring_3', 'corrupt_ring_1', 'corrupt_ring_2', 'corrupt_ring_3',
+    // 魔道ゴーレム（星力の溜め・星力弾・地面から出る結晶・地面の輪・拳の軌跡・星の光・砲撃の光の柱）
+    'golem_charge_1', 'golem_charge_2', 'golem_charge_3', 'golem_charge_4', 'golem_shot',
+    'golem_crystal_1', 'golem_crystal_2', 'golem_crystal_3', 'golem_crystal_4',
+    'golem_ring_1', 'golem_ring_2', 'golem_ring_3', 'golem_slash', 'golem_spark', 'golem_beam'
 ];
 
 // グローバルインスタンス

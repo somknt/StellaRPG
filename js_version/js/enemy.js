@@ -841,19 +841,24 @@ class Enemy {
         return null;
     }
     
-    // ボスの絵：AI のモーション（look.sprite.alias で代わりの絵に置きかえ）と、コマ（ai.pose か時間でくり返し）から選ぶ
+    // ボスの絵：AI のモーション（look.sprite.alias で代わりの絵に置きかえ）と、コマ（ai.spriteFrame か時間でくり返し）から選ぶ
+    // look.sprite.front：正面の絵しかないモーション（どの向きでも正面の絵） / look.sprite.fallback：絵がない時に使うモーション
     // 下・上向きの絵がないモーションは、攻撃なら横向き（左右は向いている方）、待機などは下・上向きの歩きの絵
     getBossSprite(look) {
         const A = window.assetManager, sp = look.sprite, ai = this.ai;
         const motion = ai.motion || 'idle';
         const [name, fixed] = (sp.alias && sp.alias[motion]) || [motion, null];
         const speed = (sp.speed && (sp.speed[motion] || sp.speed[name])) || 0.15;
-        const frame = fixed != null ? fixed : ai.pose != null ? ai.pose : Math.floor(ai.motionTime / speed) % 3;
+        // cycle：時間でくり返す時のコマの順番（例：歩きは 1→2→1→3）。書いていないモーションは 1→2→3
+        const af = ai.spriteFrame, seq = sp.cycle && (sp.cycle[motion] || sp.cycle[name]);
+        const n = Math.floor(ai.motionTime / speed);
+        const frame = fixed != null ? fixed : af != null ? af : seq ? seq[n % seq.length] : n % 3;
         const file = (n, d, f) => A.get(n === 'walk' ? `${look.key}_${d}_${f + 1}` : `${look.key}_${n}_${d}_${f + 1}`);
-        const dir = this.direction;
+        const dir = sp.front && sp.front.includes(name) ? 'down' : this.direction;
         const vertical = dir === 'up' || dir === 'down';
         const still = Enemy.BOSS_STILL_MOTIONS.includes(motion);
         let img = file(name, dir, frame);
+        if (!img && sp.fallback && sp.fallback[name]) img = file(sp.fallback[name], dir, frame);
         if (!img && vertical) {
             if (still) img = file('walk', dir, 0);
             else {
@@ -1055,6 +1060,8 @@ Enemy.BOSS_STILL_MOTIONS = ['idle', 'detect', 'stun', 'hit', 'death'];
 Enemy.BOSS_TURN_MARGIN = 1.3;
 // 侵蝕弾の画像（assets/effects/boss/corrupt_shot.png）で、光る玉の中心がある横の位置（左から何割か）
 Enemy.SHOT_ORB_X = 0.4;
+// 星力弾の画像（assets/effects/boss/golem_shot.png。光る玉は右のはし）で、光る玉の中心の横の位置
+Enemy.STAR_SHOT_ORB_X = 0.86;
 
 // 敵のノックバック（ひるみ）：主人公の攻撃が続けて hits 回当たった時だけ、dist(px) 大きく飛ばされる（ボスは攻撃も止まる）
 // window：次の攻撃がこの秒数以内に当たると「続けて」。あくと数え直し。残り火・竜巻の継続ダメージは数えない
@@ -1304,8 +1311,10 @@ class EnemySpawner {
             const pulse = 1 + Math.sin(p.age * 20) * 0.15;
             const r = p.radius * pulse;
             ctx.save();
-            // 侵蝕弾の画像：進む向きに回して描く（光る玉が当たり判定の位置に来るように）
-            const shot = p.kind === 'corrupt' && window.assetManager && window.assetManager.get('bossfx_corrupt_shot');
+            // 侵蝕弾・星力弾（魔道ゴーレム）の画像：進む向きに回して描く（光る玉が当たり判定の位置に来るように）
+            const star = p.kind === 'star';
+            const shot = window.assetManager && (p.kind === 'corrupt' ? window.assetManager.get('bossfx_corrupt_shot')
+                : star ? window.assetManager.get('bossfx_golem_shot') : null);
             if (shot) {
                 const w = p.radius * 9;
                 const h = w * shot.height / shot.width;
@@ -1313,11 +1322,12 @@ class EnemySpawner {
                 ctx.rotate(Math.atan2(p.velocity.y, p.velocity.x));
                 // 外側のうすい光
                 const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 2.2);
-                glow.addColorStop(0, 'rgba(230, 170, 255, 0.55)');
-                glow.addColorStop(1, 'rgba(90, 10, 140, 0)');
+                glow.addColorStop(0, star ? 'rgba(170, 235, 255, 0.55)' : 'rgba(230, 170, 255, 0.55)');
+                glow.addColorStop(1, star ? 'rgba(40, 120, 220, 0)' : 'rgba(90, 10, 140, 0)');
                 ctx.fillStyle = glow;
                 ctx.beginPath(); ctx.arc(0, 0, r * 2.2, 0, Math.PI * 2); ctx.fill();
-                ctx.drawImage(shot, -w * Enemy.SHOT_ORB_X, -h / 2, w, h);
+                if (star) ctx.globalCompositeOperation = 'lighter';
+                ctx.drawImage(shot, -w * (star ? Enemy.STAR_SHOT_ORB_X : Enemy.SHOT_ORB_X), -h / 2, w, h);
                 ctx.restore();
                 continue;
             }

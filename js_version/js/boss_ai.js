@@ -93,6 +93,8 @@ class BossAI {
     // モーションが変わったら、コマ送りの時間を0に戻す
     get motion() { return this._motion; }
     set motion(v) { if (v !== this._motion) { this._motion = v; this.motionTime = 0; } }
+    // 画像のコマ（0〜2。null なら時間でくり返す）。Enemy.getBossSprite が使う（ゴーレムは pose が体の形の値なので上書き）
+    get spriteFrame() { return this.pose; }
     // ボスの絵（画像）が読み込まれているか。仮の見た目用の動き（浮く・のびる）を控えめにする
     get hasArt() {
         const key = this.def.look && this.def.look.key;
@@ -627,7 +629,7 @@ class BossAI {
     }
     
     // エフェクト画像を出す。keys：画像の名前（複数ならコマ送り） / w：横幅 / s0→s1：大きさの変化
-    // rot：回転 / flip：左右反転 / flat：縦につぶす（地面に寝かせる） / hold：この割合まで濃いまま、その後消える
+    // dx・dy：位置のずれ / rot：回転 / flip：左右反転 / flat：縦につぶす（地面に寝かせる） / hold：この割合まで濃いまま、その後消える
     fxImg(keys, opt) {
         const list = Array.isArray(keys) ? keys : [keys];
         if (!BossAI.fxImage(list[0])) return null;
@@ -643,7 +645,7 @@ class BossAI {
         const w = f.w * s, h = w * img.height / img.width * (f.flat || 1);
         ctx.globalAlpha = (f.alpha || 1) * (t < f.hold ? 1 : 1 - (t - f.hold) / (1 - f.hold));
         if (f.add) ctx.globalCompositeOperation = 'lighter';
-        ctx.translate(p.x + (f.vx || 0) * f.age, p.y + (f.dy || 0) + (f.vy || 0) * f.age);
+        ctx.translate(p.x + (f.dx || 0) + (f.vx || 0) * f.age, p.y + (f.dy || 0) + (f.vy || 0) * f.age);
         if (f.rot) ctx.rotate(f.rot);
         if (f.flip) ctx.scale(-1, 1);
         ctx.drawImage(img, -w / 2, -h / 2, w, h);
