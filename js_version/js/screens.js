@@ -62,7 +62,8 @@ class UINav {
         // 音量・ON/OFF の項目は左右で値を変える
         if (cur && cur.dataset.adjust !== undefined && (left || right)) {
             cur.dispatchEvent(new CustomEvent('adjust', { detail: right ? 1 : -1 }));
-            playSE('ui_move'); // 効果音の音量を変えた時は、新しい音量で鳴る
+            // 確かめの音（data-sample）がある項目は、その音が新しい音量で鳴る。ない項目はカーソルの音
+            if (cur.dataset.sample === undefined) playSE('ui_move');
             return;
         }
         const before = this.index;
@@ -1016,6 +1017,11 @@ class ScreenManager {
     buildSettings() {
         const s = window.settings;
         const rows = this.root.querySelectorAll('.set-row[data-key]');
+        // 音量を変えた時：その種類の音を鳴らして、大きさを確かめられるようにする（data-sample。長い声は短く切る）
+        const sample = (row) => {
+            const k = row.dataset.sample;
+            if (k) playSE(k, { dur: ScreenManager.SAMPLE_DUR, gap: 0.12 });
+        };
         for (const row of rows) {
             const key = row.dataset.key;
             const type = row.dataset.type;
@@ -1023,6 +1029,7 @@ class ScreenManager {
                 if (type === 'volume') s.set(key, Math.round(Math.min(1, Math.max(0, s.get(key) + dir * 0.1)) * 10) / 10);
                 else s.set(key, !s.get(key));
                 this.refreshSettings();
+                if (type === 'volume') sample(row);
             };
             row.addEventListener('adjust', (e) => change(e.detail));
             row.addEventListener('click', (e) => {
@@ -1038,11 +1045,22 @@ class ScreenManager {
                             const v = Math.round(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * 10) / 10;
                             s.set(key, v);
                             this.refreshSettings();
+                            sample(row);
                         }
                     }
                 } else change(1); // Enter・クリックで ON/OFF
             });
         }
+        // 音量を最初の設定に戻す（表示の設定はそのまま）
+        const reset = this.$('settings-reset-volume');
+        if (reset) reset.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (this.busy) return;
+            pressEffect(reset);
+            s.resetVolumes();
+            this.refreshSettings();
+            this.toast('音量を最初の設定に戻しました');
+        });
         // 操作説明のタブ
         for (const tab of this.root.querySelectorAll('.set-tab')) {
             tab.addEventListener('click', (e) => {
@@ -1079,6 +1097,7 @@ class ScreenManager {
     }
 }
 ScreenManager.FADE_MS = 350;
+ScreenManager.SAMPLE_DUR = 0.8; // 設定で音量を変えた時に鳴らす、確かめの音の長さ（秒）
 
 window.UINav = UINav;
 window.ScreenManager = ScreenManager;

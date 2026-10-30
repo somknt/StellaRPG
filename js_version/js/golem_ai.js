@@ -27,14 +27,23 @@ const GolemSound = {
         return this.ac;
     },
     // kind：'boot'（起動） / 'roar'（フェーズ移行の咆哮に当たる機械音） / 'thud'（叩きつけ）
+    // 叩きつけと咆哮は、低い地響き（golem_rumble・golem_roar_rumble）を重ねて、重く響かせる
     play(kind) {
         const sm = window.soundManager;
-        if (sm && sm.has('golem_' + kind)) { sm.play('golem_' + kind); return; }
+        if (sm && sm.has('golem_' + kind)) {
+            sm.play('golem_' + kind);
+            if (kind === 'thud') sm.play('golem_rumble');
+            else if (kind === 'roar') sm.play('golem_roar_rumble');
+            return;
+        }
         if (sm && sm.muted) return;
         const ac = this.context();
         if (!ac || ac.state !== 'running') return;
-        const toSfx = !!(sm && sm.sfxGain && sm.ac === ac); // 効果音の音量につなぐ
-        const vol = (toSfx ? 1 : (sm ? sm.sfxVolume : 0.5)) * 0.45;
+        // 効果音の「敵の攻撃の音」（咆哮・起動は「敵の声」）の音量につなぐ
+        const cat = kind === 'thud' ? 'enemy' : 'voice';
+        const bus = sm && sm.ac === ac ? (sm.catGains && sm.catGains[cat]) || sm.sfxGain : null;
+        const toSfx = !!bus;
+        const vol = (toSfx ? 1 : (sm ? sm.volumes[cat] : 0.5)) * 0.45;
         const now = ac.currentTime;
         const len = kind === 'roar' ? 1.5 : kind === 'boot' ? 1.2 : 0.35;
         const out = ac.createGain();
@@ -44,7 +53,7 @@ const GolemSound = {
         const lp = ac.createBiquadFilter();
         lp.type = 'lowpass';
         lp.frequency.setValueAtTime(kind === 'thud' ? 260 : 700, now);
-        lp.connect(out); out.connect(toSfx ? sm.sfxGain : ac.destination);
+        lp.connect(out); out.connect(toSfx ? bus : ac.destination);
         const o = ac.createOscillator();
         o.type = 'sawtooth';
         const f0 = kind === 'boot' ? 40 : kind === 'roar' ? 70 : 90;
@@ -173,7 +182,7 @@ class MagicGolemAI extends BossAI {
                 f.fired = true;
                 this.events.push({ type: 'shake', power: f.big ? 8 : 4, time: 0.25 });
                 // 危険床がはじける音。砲撃の光の柱（big）は golem_beam（どちらもなければ大きい方だけ機械の音）
-                if (f.big) { if (!playSE('golem_beam')) GolemSound.play('thud'); }
+                if (f.big) { if (playSE('golem_beam')) playSE('golem_rumble'); else GolemSound.play('thud'); }
                 else playSE('golem_rune');
             }
         }
@@ -188,7 +197,9 @@ class MagicGolemAI extends BossAI {
             this.face(dir);
             const ang = Math.atan2(dir.y, dir.x);
             const arm = i % 2 === 0 ? 'armR' : 'armL';
-            const windup = i === 0 ? a.windup : a.windup * 0.7;
+            // chain：2発目からの溜めの倍率 / follow：拳を振り抜いて戻すまでの時間の倍率（boss_data.js）
+            const windup = i === 0 ? a.windup : a.windup * (a.chain || 0.7);
+            const fo = a.follow || 1;
             const r = a.reach + this.e.size * 0.3;
             this.addFx({ type: 'arcWarn', warn: true, follow: true, ang, r, spread: 1.15, life: windup });
             // 拳を引いて力をためる
@@ -203,8 +214,8 @@ class MagicGolemAI extends BossAI {
             playSE('golem_punch');
             this.addFx({ type: 'slash', follow: true, ang, r: r * 0.82, spread: 1.0, life: 0.22, color: '#c8f4ff', reverse: i % 2 === 1 });
             this.events.push({ type: 'shake', power: 3, time: 0.15 });
-            yield* this.sleep(0.2, () => { this.face(dir); this.pose[arm] = 1; });
-            yield* this.sleep(0.08, () => { this.pose[arm] = 0.6; });
+            yield* this.sleep(0.2 * fo, () => { this.face(dir); this.pose[arm] = 1; });
+            yield* this.sleep(0.08 * fo, () => { this.pose[arm] = 0.6; });
         }
         yield* this.recover(a.recover);
     }

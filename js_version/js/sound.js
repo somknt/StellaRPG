@@ -24,8 +24,10 @@ class SoundManager {
         this.pausedBGM = null;   // pauseBGM で止めている BGM（続きから流せる）
         this.bgmSlots = [];      // BGM を流す <audio> 2つ（切りかえの時に重ねてフェードする。最初のタップで使えるようにする）
         this.wantBGM = null;     // 流したい BGM（音が有効になる前・読み込みの前に頼まれた物）
-        this.bgmVolume = 0.6;
-        this.sfxVolume = 0.8;
+        // 音量（0〜1。設定の画面で変えられる。settings.js が入れる）
+        //   master：全体 / bgm：BGM / ui・battle・enemy・voice：効果音の種類ごと（SoundManager.CATS）
+        this.volumes = { ...SoundManager.DEFAULT_VOLUMES };
+        this.catGains = {};      // 効果音の種類ごとの音量（Web Audio）
         this.muted = false;
         this.duck = 1;           // 一時停止中は BGM を小さくする
         this.unlocked = false;   // 画面をさわって、音を出せるようになったか
@@ -43,10 +45,28 @@ class SoundManager {
         if (!AC) return;
         try {
             this.ac = new AC();
+            // つなぎ方：効果音 → 種類ごとの音量 → 効果音全体 ─┐
+            //           BGM ──────────────→ BGM の音量 ───┴→ 全体の音量 → リミッター → スピーカー
+            // リミッター：大きな声（咆哮）が重なっても音が割れないように、いちばん大きい所だけ抑える
+            this.masterGain = this.ac.createGain();
+            this.limiter = this.ac.createDynamicsCompressor();
+            const L = SoundManager.LIMITER;
+            this.limiter.threshold.value = L.threshold;
+            this.limiter.knee.value = L.knee;
+            this.limiter.ratio.value = L.ratio;
+            this.limiter.attack.value = L.attack;
+            this.limiter.release.value = L.release;
+            this.masterGain.connect(this.limiter);
+            this.limiter.connect(this.ac.destination);
             this.sfxGain = this.ac.createGain();
             this.bgmGain = this.ac.createGain();
-            this.sfxGain.connect(this.ac.destination);
-            this.bgmGain.connect(this.ac.destination);
+            this.sfxGain.connect(this.masterGain);
+            this.bgmGain.connect(this.masterGain);
+            for (const cat of Object.keys(SoundManager.CATS)) {
+                const g = this.ac.createGain();
+                g.connect(this.sfxGain);
+                this.catGains[cat] = g;
+            }
             this.applyVolumes();
         } catch (e) {
             this.ac = null;
@@ -247,7 +267,8 @@ class SoundManager {
     //   例：magic_water_hit（rate 0.75）は、ファイルがない時 magic_water の音を少し低くして鳴らす
     // 戻り値：鳴らせたか（ファイルがない・音を出せない時は false）
     play(key, opts = {}) {
-        if (this.muted || this.sfxVolume <= 0) return false;
+        const cat = this.categoryOf(key);
+        if (this.muted || this.volumes.master <= 0 || !(this.volumes[cat] > 0)) return false;
         const k = this.resolve(key);
         if (!k) return false;
         const e0 = this.entries[key] || {};
@@ -273,7 +294,7 @@ class SoundManager {
             src.playbackRate.value = rate * (1 + (Math.random() * 2 - 1) * vary);
             const g = this.ac.createGain();
             src.connect(g);
-            g.connect(this.sfxGain);
+            g.connect(this.catGains[cat] || this.sfxGain); // 種類ごとの音量につなぐ
             const t = this.ac.currentTime;
             const from = Math.min(v.buf.duration - 0.01, v.start + offset);
             g.gain.setValueAtTime(vol, t);
@@ -298,7 +319,7 @@ class SoundManager {
         if (urls && urls.length) {
             this.lastPlay[key] = now;
             const a = new Audio(urls[Math.floor(Math.random() * urls.length)]);
-            a.volume = Math.max(0, Math.min(1, vol * this.sfxVolume));
+            a.volume = Math.max(0, Math.min(1, vol * this.volumes[cat] * this.volumes.master));
             a.playbackRate = rate;
             if (offset) a.currentTime = offset;
             a.play().catch(() => {});
@@ -380,7 +401,7 @@ class SoundManager {
             g.gain.setValueAtTime(g.gain.value, t);
             g.gain.linearRampToValueAtTime(v, t + time);
         } else {
-            b.slot.el.volume = Math.max(0, Math.min(1, v * this.bgmVolume * this.duck));
+            b.slot.el.volume = Math.max(0, Math.min(1, v * this.volumes.bgm * this.volumes.master * this.duck));
         }
     }
     
@@ -432,19 +453,42 @@ class SoundManager {
     
     // ---------- 音量 ----------
     applyVolumes() {
-        if (this.sfxGain) this.sfxGain.gain.value = this.muted ? 0 : this.sfxVolume;
-        if (this.bgmGain) this.bgmGain.gain.value = this.muted ? 0 : this.bgmVolume * this.duck;
-        if (this.bgm && !this.bgm.slot.gain) this.bgm.slot.el.volume = Math.max(0, Math.min(1, this.bgm.vol * this.bgmVolume * this.duck));
+        const V = this.volumes;
+        if (this.masterGain) this.masterGain.gain.value = this.muted ? 0 : V.master;
+        if (this.sfxGain) this.sfxGain.gain.value = this.muted ? 0 : 1;
+        if (this.bgmGain) this.bgmGain.gain.value = this.muted ? 0 : V.bgm * this.duck;
+        for (const [cat, g] of Object.entries(this.catGains)) g.gain.value = V[cat];
+        if (this.bgm && !this.bgm.slot.gain) this.bgm.slot.el.volume = Math.max(0, Math.min(1, this.bgm.vol * V.bgm * V.master * this.duck));
     }
     
-    setBGMVolume(volume) {
-        this.bgmVolume = Math.max(0, Math.min(1, volume));
+    // 音量を変える（name：'master' / 'bgm' / 'ui' / 'battle' / 'enemy' / 'voice'。volume：0〜1）
+    setVolume(name, volume) {
+        if (!(name in this.volumes)) return;
+        this.volumes[name] = Math.max(0, Math.min(1, Number(volume) || 0));
         this.applyVolumes();
     }
     
-    setSFXVolume(volume) {
-        this.sfxVolume = Math.max(0, Math.min(1, volume));
-        this.applyVolumes();
+    // 前の名前（互換用）
+    setBGMVolume(volume) { this.setVolume('bgm', volume); }
+    setSFXVolume(volume) { for (const c of Object.keys(SoundManager.CATS)) this.setVolume(c, volume); }
+    get bgmVolume() { return this.volumes.bgm; }
+    get sfxVolume() { return this.volumes.battle; }
+    
+    // その効果音の種類（SoundManager.CATS のどれか）。一覧の cat、なければ名前で決める
+    categoryOf(key) {
+        const e = this.entries[key];
+        if (e && e.cat) return e.cat;
+        return SoundManager.guessCategory(key);
+    }
+    
+    static guessCategory(key) {
+        for (const [cat, c] of Object.entries(SoundManager.CATS)) {
+            if (c.keys && c.keys.includes(key)) return cat;
+        }
+        for (const [cat, c] of Object.entries(SoundManager.CATS)) {
+            if (c.match && c.match.test(key)) return cat;
+        }
+        return 'battle';
     }
     
     toggleMute() {
@@ -454,6 +498,20 @@ class SoundManager {
         return this.muted;
     }
 }
+
+// 効果音の種類（設定の画面で、種類ごとに音量を変えられる）
+//   keys：この種類にする音の名前 / match：名前がこれに合う音（keys を先に見る。どれでもなければ battle）
+SoundManager.CATS = {
+    voice:  { label: '敵の声（咆哮・鳴き声）', keys: ['boar_cry', 'boar_roar', 'wolf_howl', 'golem_roar', 'golem_roar_rumble', 'golem_boot', 'boss_intro'] },
+    ui:     { label: 'メニュー・合図の音', keys: ['battle_start', 'boss_down', 'boss_phase'], match: /^(ui_|target_|coin_)/ },
+    enemy:  { label: '敵の攻撃の音', match: /^(boar_|wolf_|golem_|boss_|enemy_)/ },
+    battle: { label: '主人公の音（攻撃・回避・魔法）', match: /^(attack|dodge|just_dodge|damage|chant|magic|levelup|heal)/ }
+};
+// 音量の初期値（設定の「初期値に戻す」もこの値。settings.js の DEFAULTS と同じにする）
+// BGM は戦いの曲が聞こえるように大きめ、メニューの音は少し小さめ、主人公の音（攻撃・回避・魔法）は小さめ、敵の声は大きく
+SoundManager.DEFAULT_VOLUMES = { master: 1, bgm: 0.8, ui: 0.6, battle: 0.5, enemy: 0.7, voice: 1 };
+// リミッター（いちばん大きい所だけ抑えて、音が割れないようにする）
+SoundManager.LIMITER = { threshold: -4, knee: 4, ratio: 16, attack: 0.003, release: 0.25 };
 
 SoundManager.DIR = 'assets/sounds';
 SoundManager.EXTS = ['mp3', 'ogg', 'wav'];
@@ -486,11 +544,12 @@ SoundManager.LIST = [
     { key: 'bgm_title',      bgm: true, label: 'タイトル・メインメニュー・設定' },
     { key: 'bgm_select',     bgm: true, label: 'モンスター選択・主人公選択・マイベスト', fallback: 'bgm_title', volume: 0.6, start: 0.25 },   // ★ 酒場BGM
     { key: 'bgm_boss',       bgm: true, label: 'ボス戦（3体共通。ボスごとの曲がない時に使う）' },
-    { key: 'bgm_boss_boar',  bgm: true, label: '巨大森イノシシ戦', fallback: 'bgm_boss', volume: 0.75 },   // ★ イノシシBGM
-    { key: 'bgm_boss_wolf',  bgm: true, label: '黒蝕狼戦', fallback: 'bgm_boss', volume: 0.75 },           // ★ 狼BGM
-    { key: 'bgm_boss_golem',    bgm: true, label: '魔道ゴーレム戦・第1形態', fallback: 'bgm_boss', volume: 0.75, start: 0.75 },          // ★ 魔道ゴーレムノーマル
-    { key: 'bgm_boss_golem_p2', bgm: true, label: '魔道ゴーレム戦・第2形態（HP50%以下）', fallback: 'bgm_boss_golem', volume: 0.8, start: 1.95 }, // ★ 魔道ゴーレム第2形態
-    { key: 'bgm_boss_golem_p3', bgm: true, label: '魔道ゴーレム戦・第3形態（HP25%以下）', fallback: 'bgm_boss_golem_p2', volume: 0.8, start: 1.95 }, // ★ 魔道ゴーレムBGM第三形態
+    // ボス戦の曲は大きめ（前は 0.75〜0.8）。メニューの曲（bgm_select）は小さめのまま
+    { key: 'bgm_boss_boar',  bgm: true, label: '巨大森イノシシ戦', fallback: 'bgm_boss', volume: 1.0 },    // ★ イノシシBGM
+    { key: 'bgm_boss_wolf',  bgm: true, label: '黒蝕狼戦', fallback: 'bgm_boss', volume: 1.0 },            // ★ 狼BGM
+    { key: 'bgm_boss_golem',    bgm: true, label: '魔道ゴーレム戦・第1形態', fallback: 'bgm_boss', volume: 1.0, start: 0.75 },           // ★ 魔道ゴーレムノーマル
+    { key: 'bgm_boss_golem_p2', bgm: true, label: '魔道ゴーレム戦・第2形態（HP50%以下）', fallback: 'bgm_boss_golem', volume: 1.0, start: 1.95 }, // ★ 魔道ゴーレム第2形態
+    { key: 'bgm_boss_golem_p3', bgm: true, label: '魔道ゴーレム戦・第3形態（HP25%以下）', fallback: 'bgm_boss_golem_p2', volume: 1.0, start: 1.95 }, // ★ 魔道ゴーレムBGM第三形態
     { key: 'bgm_battle',     bgm: true, label: 'フリーバトル（スライム・ウサギ）', fallback: 'bgm_boss' },
     { key: 'bgm_field',      bgm: true, label: '村・フィールド（ストーリー用）', fallback: 'bgm_title' },
     { key: 'jingle_victory', bgm: true, label: '勝利（GAME CLEAR。1回だけ流れる短い曲）', loop: false, volume: 0.9 },   // ★ jingle_12（オルガン）
@@ -543,8 +602,9 @@ SoundManager.LIST = [
     
     // ===== 巨大森イノシシ =====
     // 鳴き声・咆哮は元の音が小さいので大きく（咆哮の間は BGM を止めるので、声だけがはっきり聞こえる）
-    { key: 'boar_cry',    label: '鳴き声（名前が出た時）', volume: 2.4, vary: 0.03 },                               // ★ イノシシの鳴き声
-    { key: 'boar_roar',   label: '咆哮（強化の時）', volume: 2.4, vary: 0 },                                        // ★ ライオンの鳴き声2
+    // 大きくしても割れないように、全体の出口でリミッターをかけている（SoundManager.LIMITER）
+    { key: 'boar_cry',    label: '鳴き声（名前が出た時）', volume: 3.0, vary: 0.03 },                               // ★ イノシシの鳴き声
+    { key: 'boar_roar',   label: '咆哮（強化の時）', volume: 3.4, vary: 0 },                                        // ★ ライオンの鳴き声2
     { key: 'boar_snort',  label: '突進の前に鼻を鳴らして地面をかく（溜めの間だけ鳴る）', volume: 1.2, vary: 0.03 },  // ★ イノシシが鼻をフンフン
     { key: 'boar_tusk',   label: '牙で突き上げる', fallback: 'attack', volume: 0.65, rate: 0.85 },                  // ★ 振り回す2（低く）
     { key: 'boar_charge', label: '突進を始める（地響き）', volume: 0.7, offset: 1.2, dur: 1.2 },                     // ★ 地響き2短
@@ -552,7 +612,7 @@ SoundManager.LIST = [
     { key: 'boar_stomp',  label: '踏みつけ', volume: 0.6 },                                                         // ★ 発砲1（低い衝撃）
     
     // ===== 黒蝕狼 =====
-    { key: 'wolf_howl', label: '遠吠え（名前が出た時・強化の時。元の音が小さいので大きく）', volume: 3.0, vary: 0 }, // ★ オオカミの遠吠え
+    { key: 'wolf_howl', label: '遠吠え（名前が出た時・強化の時。元の音が小さいので大きく）', volume: 3.8, vary: 0 }, // ★ オオカミの遠吠え
     { key: 'wolf_bite', label: '噛みつき', fallback: 'attack', volume: 0.85, rate: 1.15 },                          // ★ 斬撃4（高く）
     { key: 'wolf_claw', label: '爪でひっかく（wolf_claw_2 とランダム）', fallback: 'attack', volume: 0.9 },          // ★ 斬撃6・斬撃7
     { key: 'wolf_leap', label: '飛びかかりの着地', volume: 1.0, rate: 0.85 },                                       // ★ 打撃1（低く）
@@ -561,17 +621,21 @@ SoundManager.LIST = [
     { key: 'wolf_wave', label: '侵蝕波動（必殺技。広がる紫の輪）', volume: 1.0, dur: 2.2 },                          // ★ 不気味な出現音3
     
     // ===== 魔道ゴーレム（boot・roar・thud はファイルがない時、機械の音をプログラムで作って鳴らす）=====
-    { key: 'golem_boot',   label: '起動する（戦いの始まり）', volume: 1.0, vary: 0 },                               // ★ 大型ロボットの駆動音7
-    { key: 'golem_roar',   label: '機械の咆哮（強化の時。警報のように鳴りひびく）', volume: 1.15, dur: 3.2, vary: 0 }, // ★ 警報3
-    { key: 'golem_thud',   label: '地面の叩きつけ・踏みつけ（衝撃波）', volume: 0.85, offset: 1.2, dur: 1.3 },        // ★ 地響き2短
-    { key: 'golem_punch',  label: '拳で殴る（golem_punch_2 とランダム）', fallback: 'attack', volume: 0.9 },          // ★ ロボットアーム5・4
-    { key: 'golem_swing',  label: '腕を振り回す（1回転ごと。golem_swing_2 とランダム）', fallback: 'attack', volume: 0.8, rate: 0.8 }, // ★ 振り回す1・3
-    { key: 'golem_shot',   label: '星力弾を撃つ', volume: 0.75, offset: 0.3, dur: 1.2 },                             // ★ エネルギーを発射1
-    { key: 'golem_charge', label: '胸の魔導核に力をためる（星力弾・危険床・魔法陣砲撃の溜め）', volume: 0.6, vary: 0 }, // ★ エネルギーを集める
-    { key: 'golem_rune',   label: '危険床（床の魔法陣）が光ってはじける', volume: 0.65, gap: 0.12 },                  // ★ ビーム発射音
-    { key: 'golem_beam',   label: '魔法陣砲撃（必殺技）の光の柱が落ちる', fallback: 'golem_rune', volume: 0.4, dur: 1.4 }, // ★ 電撃魔法1
-    { key: 'golem_shield', label: '星の盾を張る', volume: 1.0, dur: 1.6 },                                          // ★ 収束
-    { key: 'golem_step',   label: '重い足音（歩いている間）', volume: 0.5, gap: 0.25 },                               // ★ 大型ロボットの足音
+    // 石の巨体らしく、全部低い音（rate を 1 より小さくして、さらに低く重くしている）
+    // 叩きつけ・衝撃波・砲撃・咆哮には、低い地響き（golem_rumble・golem_roar_rumble）を重ねる（golem_ai.js の GolemSound）
+    { key: 'golem_boot',   label: '起動する（戦いの始まり。低いうなり）', volume: 1.3, rate: 0.75, dur: 2.6, vary: 0 },  // ★ 不気味な出現音1
+    { key: 'golem_roar',   label: '機械の咆哮（強化の時。低くうなる）', volume: 1.8, rate: 0.6, dur: 3.4, vary: 0 },    // ★ 不気味な出現音2
+    { key: 'golem_roar_rumble', label: '咆哮に重ねる地響き', volume: 1.2, offset: 2.4, dur: 3.0, vary: 0 },              // ★ 地響き1短
+    { key: 'golem_thud',   label: '地面の叩きつけ・踏みつけ（石がくだける）', volume: 1.1, rate: 0.6, dur: 1.5 },        // ★ 破壊音
+    { key: 'golem_rumble', label: '叩きつけ・衝撃波・砲撃に重ねる地響き', volume: 1.2, offset: 2.3, dur: 1.7, gap: 0.2 }, // ★ 地響き3短
+    { key: 'golem_punch',  label: '拳で殴る（重い打撃。golem_punch_2 とランダム）', fallback: 'attack', volume: 0.75, rate: 0.7 }, // ★ 大砲2・打撃2
+    { key: 'golem_swing',  label: '腕を振り回す（1回転ごと。低い風切り。golem_swing_2 とランダム）', fallback: 'attack', volume: 1.0, rate: 0.55 }, // ★ 振り回す3・1
+    { key: 'golem_shot',   label: '星力弾を撃つ（低い発射音）', volume: 0.9, rate: 0.65, dur: 1.2 },                   // ★ 大砲1
+    { key: 'golem_charge', label: '胸の魔導核に力をためる（星力弾・危険床・魔法陣砲撃の溜め）', volume: 0.75, rate: 0.6, vary: 0 }, // ★ エネルギーを集める
+    { key: 'golem_rune',   label: '危険床（床の魔法陣）が光ってはじける', volume: 0.75, rate: 0.75, dur: 1.0, gap: 0.12 }, // ★ 爆発2
+    { key: 'golem_beam',   label: '魔法陣砲撃（必殺技）の光の柱が落ちる', fallback: 'golem_rune', volume: 0.9, rate: 0.55, dur: 1.8 }, // ★ 爆発
+    { key: 'golem_shield', label: '星の盾を張る（低くうなる）', volume: 0.9, rate: 0.6, dur: 1.7 },                    // ★ 気を溜める1
+    { key: 'golem_step',   label: '重い足音（歩いている間）', volume: 0.6, rate: 0.55, dur: 0.6, gap: 0.25 },          // ★ 発砲1
     
     // ===== ふつうの敵（フリーバトル）=====
     { key: 'enemy_defeat', label: '敵が倒れて星になる', gap: 0.08 }

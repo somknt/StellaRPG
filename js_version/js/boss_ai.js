@@ -1002,7 +1002,9 @@ class BlackWolfAI extends BossAI {
             this.motion = 'bite';
             const dir = this.dirToPlayer();
             const ang = Math.atan2(dir.y, dir.x);
-            const windup = i === 0 ? a.windup : a.windup * 0.75;
+            // chain：2回目からの溜めの倍率 / follow：噛みついた後の動きの時間の倍率（boss_data.js）
+            const windup = i === 0 ? a.windup : a.windup * (a.chain || 0.75);
+            const fo = a.follow || 1;
             this.addFx({ type: 'flash', warn: true, follow: true, life: windup });
             yield* this.sleep(windup, (p) => { this.face(dir); this.pose = 0; this.scaleY = 1 - 0.1 * p; this.scaleX = 1 + 0.05 * p; });
             this.addHitbox({ kind: 'circle', follow: true, ang, fwd: this.e.size * 0.7, r: a.radius || 40 * this.R, damage: this.dmg(a.damage), life: 0.14 });
@@ -1011,8 +1013,8 @@ class BlackWolfAI extends BossAI {
             if (!this.fxImg('bite_fangs', { ground: false, follow: true, ang, fwd: this.e.size * 0.85, dy: -this.e.size * 0.15, w: 50 * this.R, s0: 1.35, s1: 0.9, life: 0.26, hold: 0.45 })) {
                 this.addFx({ type: 'slash', follow: true, ang, fwd: this.e.size * 0.55, r: 22 * this.R, spread: 2.4, life: 0.2 });
             }
-            yield* this.sleep(0.14, () => { this.face(dir); this.pose = 1; this.e.velocity = dir.mult(380 * this.SP); });
-            yield* this.sleep(0.08, () => { this.pose = 2; });
+            yield* this.sleep(0.14 * fo, () => { this.face(dir); this.pose = 1; this.e.velocity = dir.mult(380 / fo * this.SP); });
+            yield* this.sleep(0.08 * fo, () => { this.pose = 2; });
         }
         yield* this.recover(a.recover * 0.6);
         yield* this.backOff(0.25);
@@ -1026,7 +1028,8 @@ class BlackWolfAI extends BossAI {
             this.motion = 'claw';
             const dir = this.dirToPlayer();
             const ang = Math.atan2(dir.y, dir.x) + (i % 2 ? 0.25 : -0.25);
-            const windup = i === 0 ? a.windup : a.windup * 0.6;
+            const windup = i === 0 ? a.windup : a.windup * (a.chain || 0.6);
+            const fo = a.follow || 1;
             const spread = a.spread || 1.9;
             this.addFx({ type: 'arcWarn', warn: true, follow: true, ang, r: a.reach, spread, life: windup });
             yield* this.sleep(windup, (p) => { this.face(dir); this.pose = 0; this.scaleX = 1 - 0.06 * p; this.jitter = p > 0.5 ? 1 : 0; });
@@ -1038,7 +1041,7 @@ class BlackWolfAI extends BossAI {
             this.fxImg('claw_slash', { ground: false, follow: true, ang, fwd: a.reach * 0.55, dy: -this.e.size * 0.2, w: a.reach * 0.95, s0: 0.8, s1: 1.1,
                 // 画像の爪あとは右上がり（約60度）。攻撃の向きと直角になるように回す
                 rot: ang - 0.52 + (i % 2 ? 0.35 : -0.35), life: 0.3, hold: 0.4, add: true });
-            yield* this.sleep(0.12, (p) => { this.face(dir); this.pose = p < 0.5 ? 1 : 2; });
+            yield* this.sleep(0.12 * fo, (p) => { this.face(dir); this.pose = p < 0.5 ? 1 : 2; });
         }
         yield* this.recover(a.recover * 0.6);
         yield* this.backOff(0.25);

@@ -264,20 +264,50 @@
                 <div class="settings-wrap">
                     <div class="settings-col">
                         <h3>サウンド</h3>
-                        <div class="set-row" data-key="bgmVolume" data-type="volume" data-nav data-adjust>
-                            <span class="set-label">BGM音量</span>
+                        <!-- data-sample：音量を変えた時に、その種類の音を鳴らして大きさを確かめられる -->
+                        <div class="set-row" data-key="masterVolume" data-type="volume" data-sample="ui_select" data-nav data-adjust>
+                            <span class="set-label">全体の音量<small>すべての音</small></span>
                             <span class="set-step" data-step="-1">−</span>
                             <span class="set-bar"><span class="set-fill"></span></span>
                             <span class="set-step" data-step="1">＋</span>
-                            <span class="set-value">60%</span>
+                            <span class="set-value">100%</span>
                         </div>
-                        <div class="set-row" data-key="sfxVolume" data-type="volume" data-nav data-adjust>
-                            <span class="set-label">効果音音量</span>
+                        <div class="set-row" data-key="bgmVolume" data-type="volume" data-nav data-adjust>
+                            <span class="set-label">BGM<small>戦いの曲・メニューの曲</small></span>
                             <span class="set-step" data-step="-1">−</span>
                             <span class="set-bar"><span class="set-fill"></span></span>
                             <span class="set-step" data-step="1">＋</span>
                             <span class="set-value">80%</span>
                         </div>
+                        <div class="set-row" data-key="uiVolume" data-type="volume" data-sample="ui_select" data-nav data-adjust>
+                            <span class="set-label">メニューの音<small>カーソル・決定・合図</small></span>
+                            <span class="set-step" data-step="-1">−</span>
+                            <span class="set-bar"><span class="set-fill"></span></span>
+                            <span class="set-step" data-step="1">＋</span>
+                            <span class="set-value">60%</span>
+                        </div>
+                        <div class="set-row" data-key="battleVolume" data-type="volume" data-sample="attack" data-nav data-adjust>
+                            <span class="set-label">主人公の音<small>斬撃・回避・魔法</small></span>
+                            <span class="set-step" data-step="-1">−</span>
+                            <span class="set-bar"><span class="set-fill"></span></span>
+                            <span class="set-step" data-step="1">＋</span>
+                            <span class="set-value">50%</span>
+                        </div>
+                        <div class="set-row" data-key="enemyVolume" data-type="volume" data-sample="golem_punch" data-nav data-adjust>
+                            <span class="set-label">敵の攻撃の音<small>牙・爪・拳・衝撃波</small></span>
+                            <span class="set-step" data-step="-1">−</span>
+                            <span class="set-bar"><span class="set-fill"></span></span>
+                            <span class="set-step" data-step="1">＋</span>
+                            <span class="set-value">70%</span>
+                        </div>
+                        <div class="set-row" data-key="voiceVolume" data-type="volume" data-sample="boar_roar" data-nav data-adjust>
+                            <span class="set-label">敵の声<small>咆哮・遠吠え・鳴き声</small></span>
+                            <span class="set-step" data-step="-1">−</span>
+                            <span class="set-bar"><span class="set-fill"></span></span>
+                            <span class="set-step" data-step="1">＋</span>
+                            <span class="set-value">100%</span>
+                        </div>
+                        <button class="set-reset ui-btn" id="settings-reset-volume" type="button" data-nav>音量を最初の設定に戻す</button>
                         <h3>画面表示</h3>
                         <div class="set-row" data-key="screenShake" data-type="toggle" data-nav data-adjust>
                             <span class="set-label">画面の揺れ</span><span class="set-toggle">ON</span>

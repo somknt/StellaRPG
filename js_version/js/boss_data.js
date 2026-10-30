@@ -118,7 +118,7 @@ const BOSS_DATA = [
                          corruptionAttack: ['bite', null], stun: ['leapPrepare', 2], hit: ['leapPrepare', 0], death: ['leapPrepare', 0] },
                 speed: { walk: 0.15, run: 0.09, shadowDash: 0.05, howl: 0.16 }
             } },
-        attackInterval: 2.0,   // 攻撃と攻撃の間（2.2 → 2.0 で少し早く）
+        attackInterval: 2.5,   // 攻撃と攻撃の間（2.0 → 2.5 でゆっくり）
         ultimate: 'corruptionWave', // 必殺技：最終強化の侵蝕波動（広がる紫の輪）
         phases: [
             { hp: 1.0, label: '通常', speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0, dodgeChance: 0.2, aura: 0,
@@ -128,17 +128,18 @@ const BOSS_DATA = [
             { hp: 0.25, label: '最終強化', speedMul: 1.35, intervalMul: 0.75, recoverMul: 0.65, dodgeChance: 0.45, aura: 2, transition: 'howl',
               banner: '星喰いの暴走！', attacks: { tripleClaw: 3, doubleBite: 2, shadowLeap: 3, corruptionShot: 2, corruptionWave: 2 } }
         ],
-        // 範囲は小さめ。連続攻撃（噛みつき・爪）は前より4回多く、全体の溜め・隙・動きを約1割早く
+        // 範囲は小さめ。連続攻撃（噛みつき・爪）は前より2回少なく、攻撃は全体にゆっくり（溜め・隙を長く）
+        // chain：2回目からの溜めの倍率（1回目の溜めに掛ける） / follow：噛みつき・ひっかいた後の動きの時間の倍率
         attacks: {
-            bite:           { range: [0, 260], windup: 0.38, damage: 1.0, hits: 6, radius: 32, recover: 0.72 },
-            doubleBite:     { range: [0, 280], windup: 0.32, damage: 0.9, hits: 7, radius: 32, recover: 0.72 },
-            claw:           { range: [0, 260], windup: 0.41, damage: 1.1, hits: 6, reach: 68, spread: 1.6, recover: 0.76 },
-            tripleClaw:     { range: [0, 280], windup: 0.34, damage: 0.9, hits: 9, reach: 72, spread: 1.6, recover: 0.76 },
-            leap:           { range: [140, 460], prepare: 0.68, time: 0.47, damage: 1.3, radius: 52, recover: 0.8 },
-            shadowDash:     { range: [0, 700], prepare: 0.36, time: 0.24, dist: 260, recover: 0.32 },
-            shadowLeap:     { range: [0, 700], prepare: 0.32, time: 0.22, dist: 240, leapPrepare: 0.38, leapTime: 0.44, damage: 1.3, radius: 54, recover: 0.76 },
-            corruptionShot: { range: [160, 900], windup: 0.7, damage: 0.9, count: 5, spread: 0.32, speed: 230, recover: 0.72 },
-            corruptionWave: { range: [0, 400], windup: 1.12, damage: 1.3, maxRadius: 260, time: 0.78, band: 28, recover: 0.9 }
+            bite:           { range: [0, 260], windup: 0.52, damage: 1.0, hits: 4, radius: 32, chain: 0.9, follow: 1.35, recover: 0.9 },
+            doubleBite:     { range: [0, 280], windup: 0.46, damage: 0.9, hits: 5, radius: 32, chain: 0.9, follow: 1.35, recover: 0.9 },
+            claw:           { range: [0, 260], windup: 0.55, damage: 1.1, hits: 4, reach: 68, spread: 1.6, chain: 0.85, follow: 1.35, recover: 0.95 },
+            tripleClaw:     { range: [0, 280], windup: 0.48, damage: 0.9, hits: 7, reach: 72, spread: 1.6, chain: 0.85, follow: 1.35, recover: 0.95 },
+            leap:           { range: [140, 460], prepare: 0.82, time: 0.52, damage: 1.3, radius: 52, recover: 1.0 },
+            shadowDash:     { range: [0, 700], prepare: 0.42, time: 0.26, dist: 260, recover: 0.4 },
+            shadowLeap:     { range: [0, 700], prepare: 0.4, time: 0.24, dist: 240, leapPrepare: 0.46, leapTime: 0.5, damage: 1.3, radius: 54, recover: 0.95 },
+            corruptionShot: { range: [160, 900], windup: 0.85, damage: 0.9, count: 5, spread: 0.32, speed: 210, recover: 0.9 },
+            corruptionWave: { range: [0, 400], windup: 1.3, damage: 1.3, maxRadius: 260, time: 0.85, band: 28, recover: 1.05 }
         },
         motions: {
             // 下・上向き：歩き・走り・噛みつき・跳びかかりの溜め・跳びかかり・遠吠え・ひっかき の絵がある（ほかは横向きの絵を使う）
@@ -194,13 +195,15 @@ const BOSS_DATA = [
         ],
         // 距離（range・reach・radius・maxRadius・band）は Enemy.SCALE.range 倍、弾の速さは Enemy.SCALE.speed 倍される
         // 全体的に溜め・隙を短く、範囲攻撃（叩きつけ・衝撃波・危険床・砲撃・盾）を広く
+        // 近接（拳・叩きつけ）は重くゆっくり：溜め・振り抜き（follow 倍）・隙を長く。chain：2発目からの溜めの倍率
         attacks: {
-            punch:         { range: [0, 130],  windup: 0.56, damage: 1.0, reach: 90, hits: 2, recover: 0.85 },
-            punchCombo:    { range: [0, 140],  windup: 0.48, damage: 0.9, reach: 92, hits: 3, recover: 0.75 },
-            punchTriple:   { range: [0, 150],  windup: 0.45, damage: 0.9, reach: 95, hits: 5, recover: 0.65 },
+            punch:         { range: [0, 130],  windup: 0.82, damage: 1.0, reach: 90, hits: 2, chain: 0.85, follow: 1.45, recover: 1.0 },
+            punchCombo:    { range: [0, 140],  windup: 0.72, damage: 0.9, reach: 92, hits: 3, chain: 0.85, follow: 1.45, recover: 0.95 },
+            punchTriple:   { range: [0, 150],  windup: 0.66, damage: 0.9, reach: 95, hits: 5, chain: 0.85, follow: 1.4, recover: 0.85 },
             // 腕の振り回し：両腕を広げて体ごと回り、まわりをなぎ払いながら近づく（spins 回転。フェーズ3は1回多い）→ 目が回って隙
-            armSwing:      { range: [0, 150],  windup: 0.75, damage: 1.0, radius: 85, spins: 2, time: 1.1, dizzy: 0.9, recover: 0.6 },
-            slam:          { range: [0, 200],  windup: 0.8,  damage: 1.3, reach: 60, radius: 95, stuck: 0.55, recover: 0.8 },
+            // 1回転の速さは同じ（time / spins = 0.55秒）のまま、回る回数を 2 → 4 にして長く回る。回り終わりの隙も長く
+            armSwing:      { range: [0, 150],  windup: 0.75, damage: 1.0, radius: 85, spins: 4, time: 2.2, dizzy: 1.2, recover: 0.6 },
+            slam:          { range: [0, 200],  windup: 1.05, damage: 1.3, reach: 60, radius: 95, stuck: 0.7, recover: 0.95 },
             shockwave:     { range: [0, 260],  windup: 0.8,  damage: 1.2, maxRadius: 210, band: 28, time: 0.8, waves: 1, recover: 0.7 },
             bigShockwave:  { range: [0, 300],  windup: 0.78, damage: 1.3, maxRadius: 260, band: 30, time: 0.85, waves: 3, recover: 0.65 },
             magicShot:     { range: [110, 1200], windup: 0.65, damage: 0.9, count: 5, spread: 0.24, speed: 190, recover: 0.65 },

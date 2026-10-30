@@ -66,16 +66,24 @@
     打撃1                → wolf_leap          狼の飛びかかりの着地
     暗黒エネルギー       → wolf_shot          侵蝕弾
     不気味な出現音3      → wolf_wave          侵蝕波動（必殺技）
-    大型ロボットの駆動音7 → golem_boot        ゴーレムが起動する
-    警報3                → golem_roar         ゴーレムの機械の咆哮（形態が変わる時）
-    ロボットアーム5・4   → golem_punch・golem_punch_2  ゴーレムの拳（ランダム）
-    振り回す1・3         → golem_swing・golem_swing_2  ゴーレムの腕の振り回し（ランダム）
-    エネルギーを発射1    → golem_shot         星力弾
+  魔道ゴーレム（2026/10/30 に、全部低く重い音に入れかえた。sound.js で rate を下げて、さらに低くしている）
+    不気味な出現音1      → golem_boot         ゴーレムが起動する（低いうなり）
+    不気味な出現音2      → golem_roar         ゴーレムの咆哮（形態が変わる時）
+    地響き1短            → golem_roar_rumble  咆哮に重ねる地響き
+    破壊音               → golem_thud         叩きつけ・衝撃波（石がくだける）
+    地響き3短            → golem_rumble       叩きつけ・衝撃波・砲撃に重ねる地響き
+    大砲2・打撃2         → golem_punch・golem_punch_2  ゴーレムの拳（ランダム）
+    振り回す3・1         → golem_swing・golem_swing_2  ゴーレムの腕の振り回し（ランダム）
+    大砲1                → golem_shot         星力弾
     エネルギーを集める   → golem_charge       胸の魔導核に力をためる
-    ビーム発射音         → golem_rune         危険床がはじける
-    電撃魔法1            → golem_beam         魔法陣砲撃の光の柱（必殺技）
-    収束                 → golem_shield       星の盾
-    大型ロボットの足音   → golem_step         ゴーレムの足音
+    爆発2                → golem_rune         危険床がはじける
+    爆発                 → golem_beam         魔法陣砲撃の光の柱（必殺技）
+    気を溜める1          → golem_shield       星の盾
+    発砲1                → golem_step         ゴーレムの足音
+
+  音量の種類（設定の画面で、種類ごとに変えられる。sound.js の SoundManager.CATS）
+    全体の音量 / BGM / メニューの音（カーソル・決定・合図）/ 主人公の音（斬撃・回避・魔法）/
+    敵の攻撃の音（牙・爪・拳・衝撃波）/ 敵の声（咆哮・遠吠え・鳴き声）
 
   se/（前からある物）
     斬撃1・斬撃2         → attack・attack_2   ナイフを振る（ランダム）

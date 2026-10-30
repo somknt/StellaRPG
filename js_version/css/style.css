@@ -1384,6 +1384,30 @@ body.touch .title-start .touch-only { display: inline; }
 }
 .set-toggle.on { color: #1a2e0f; background: linear-gradient(180deg, #a6f08a, #5cbf4a); }
 .set-note { font-size: 13px; color: #9a94b8; margin-top: 12px; }
+/* 音量の項目が6つあるので、左の列を少し広く・1行を少し低く */
+.settings-col:first-child { width: 540px; padding-top: 8px; padding-bottom: 10px; }
+.settings-col:first-child h3 { margin: 4px 0 3px; }
+.settings-col:first-child .set-row { padding: 2px 10px; font-size: 17px; }
+.settings-col:first-child .set-step { width: 26px; height: 26px; }
+.settings-col:first-child .set-bar { width: 170px; }
+.settings-col:first-child .set-toggle { padding: 2px 0; }
+.settings-col:first-child .set-note { margin-top: 4px; }
+.set-label small { display: block; font-size: 12px; line-height: 1.2; letter-spacing: 0; color: #a9a3c9; }
+/* 音量を最初の設定に戻すボタン */
+.set-reset {
+    display: block;
+    margin: 3px 0 0 auto;
+    padding: 3px 14px;
+    font-family: inherit;
+    font-size: 14px;
+    color: #ffd76a;
+    background: rgba(20, 24, 62, 0.9);
+    border: 2px solid rgba(201, 162, 74, 0.6);
+    border-radius: 3px;
+    cursor: pointer;
+    pointer-events: auto;
+}
+.set-reset.focused, .set-reset:hover { color: #fff7d0; border-color: #ffd76a; background: rgba(255, 215, 110, 0.15); }
 .set-tabs { display: flex; gap: 8px; margin: 8px 0 10px; }
 .set-tab {
     flex: 1;
