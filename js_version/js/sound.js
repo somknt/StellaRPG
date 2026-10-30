@@ -541,7 +541,8 @@ SoundManager.SILENT_WAV = (() => {
 // start（BGM）：曲の頭の無音を飛ばす秒数 / offset（効果音）：頭から飛ばす秒数（だんだん大きくなる音を、すぐ大きく鳴らす）
 SoundManager.LIST = [
     // ===== BGM（assets/sounds/bgm/）=====
-    { key: 'bgm_title',      bgm: true, label: 'タイトル・メインメニュー・設定' },
+    // タイトルの曲：頭の 0.85 秒の無音を飛ばす（その後の、だんだん大きくなる入りは残す）。メニューの曲なので小さめ（bgm_select と同じ）
+    { key: 'bgm_title',      bgm: true, label: 'タイトル・メインメニュー・設定', volume: 0.6, start: 0.85 },   // ★ 星の子タイトル画面
     { key: 'bgm_select',     bgm: true, label: 'モンスター選択・主人公選択・マイベスト', fallback: 'bgm_title', volume: 0.6, start: 0.25 },   // ★ 酒場BGM
     { key: 'bgm_boss',       bgm: true, label: 'ボス戦（3体共通。ボスごとの曲がない時に使う）' },
     // ボス戦の曲は大きめ（前は 0.75〜0.8）。メニューの曲（bgm_select）は小さめのまま
@@ -583,8 +584,9 @@ SoundManager.LIST = [
     { key: 'magic_hit',       label: '魔法が当たる（属性ごとの音がない時に使う）' },
     { key: 'magic_fire',      label: 'ファイヤーボールを撃つ', fallback: 'magic', volume: 0.8 },                       // ★ 着火1
     { key: 'magic_fire_hit',  label: 'ファイヤーボールが当たって爆発', fallback: 'magic_fire', volume: 0.72, dur: 0.9 },  // ★ 爆発2
-    { key: 'magic_water',     label: 'ウォーターボールを撃つ', fallback: 'magic', volume: 1, dur: 0.9 },              // ★ ぴちょん単発
-    { key: 'magic_water_hit', label: 'ウォーターボールが当たって水しぶき', fallback: 'magic_water', volume: 0.9, rate: 0.75, dur: 0.8 },
+    // 撃つ音：14秒の波の音から、波が1つ寄せて返す所（1.93〜4.1秒）だけ鳴らす
+    { key: 'magic_water',     label: 'ウォーターボールを撃つ', fallback: 'magic', volume: 0.7, offset: 1.72, dur: 2.2 }, // ★ さざ波ループ
+    { key: 'magic_water_hit', label: 'ウォーターボールが当たって水しぶき', fallback: 'magic_water', volume: 0.9, rate: 0.75, dur: 0.8 }, // ★ ぴちょん単発（低く。前は撃つ音）
     { key: 'magic_wind',      label: 'テンペストの竜巻が出る', fallback: 'magic', volume: 0.75 },                      // ★ 強風2
     { key: 'magic_wind_hit',  label: '竜巻が敵を巻きこむ（何度も当たる）', fallback: 'magic_hit', gap: 0.35, volume: 0.65 },   // ★ 強風3
     { key: 'magic_earth',     label: 'ストーンキャノンを撃つ', fallback: 'dodge', volume: 0.44 },                      // ★ 大砲2
