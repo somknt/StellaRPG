@@ -330,6 +330,33 @@ class SoundManager {
     }
     playSFX(key, opts) { return this.play(key, opts); } // 前の名前（互換用）
     
+    // ヒールの音（magic_heal のファイルがない時に使う）：上がっていく4つの鈴の音と、きらめき
+    // 「主人公の音」の音量につなぐ（設定の音量・消音がそのまま効く）
+    playHealChime() {
+        const cat = this.categoryOf('magic_heal');
+        if (!this.ac || this.muted || this.volumes.master <= 0 || !(this.volumes[cat] > 0)) return false;
+        if (this.ac.state !== 'running' && !this.unlocked) return false;
+        const ac = this.ac, t0 = ac.currentTime + 0.01;
+        const out = ac.createGain();
+        out.gain.value = 0.32;
+        out.connect(this.catGains[cat] || this.sfxGain);
+        const notes = [1046.5, 1318.5, 1568.0, 2093.0]; // ド・ミ・ソ・ド（高い方）
+        notes.forEach((f, i) => {
+            const t = t0 + i * 0.075;
+            for (const [type, mul, vol] of [['sine', 1, 0.5], ['triangle', 2, 0.12]]) {
+                const o = ac.createOscillator(), g = ac.createGain();
+                o.type = type;
+                o.frequency.setValueAtTime(f * mul, t);
+                g.gain.setValueAtTime(0.0001, t);
+                g.gain.exponentialRampToValueAtTime(vol, t + 0.012);
+                g.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
+                o.connect(g); g.connect(out);
+                o.start(t); o.stop(t + 0.75);
+            }
+        });
+        return true;
+    }
+    
     // 鳴っている効果音を途中で止める（fade 秒でふっと小さくする）。詠唱をキャンセルした時など
     stop(key, fade = 0.08) {
         const act = this.active[key];
@@ -592,6 +619,8 @@ SoundManager.LIST = [
     { key: 'magic_earth',     label: 'ストーンキャノンを撃つ', fallback: 'dodge', volume: 0.44 },                      // ★ 大砲2
     { key: 'magic_earth_hit', label: '岩が当たって砕ける', fallback: 'magic_hit', volume: 1.0, dur: 0.9 },              // ★ 破壊音_短い
     { key: 'magic_thunder',   label: 'ライトニングの雷が落ちる', fallback: 'magic', volume: 0.75 },                   // ★ 雷4
+    // ヒール：ファイルがない間は、コードで作ったキラキラの音（SoundManager.playHealChime）
+    { key: 'magic_heal',      label: 'ヒールで回復した', volume: 0.8, vary: 0 },
     { key: 'magic_weak',      label: '有利属性で当たった（よく効いた）', volume: 0.7, gap: 0.3, vary: 0 },          // ★ 会心の一撃1
     { key: 'magic_resist',    label: '不利属性で当たった（効きにくい）', volume: 0.4, rate: 0.75, gap: 0.3, vary: 0 }, // ★ 打撃5（低く）
     

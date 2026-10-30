@@ -44,6 +44,9 @@ class InputManager {
     init() {
         // キーボードイベント
         window.addEventListener('keydown', (e) => {
+            // 文字を入力している間（ログイン・プレイヤー名の入力欄）は、ゲームのキーとして使わない
+            // （W・A・S・D・Space・Backspace で画面が動いたり、Space や矢印が入力欄で使えなくなったりしないように）
+            if (InputManager.isTyping(e.target)) return;
             this.pressKey(e.code);
             
             // ゲームで使うキーはブラウザのスクロール等を防ぐ
@@ -55,6 +58,8 @@ class InputManager {
         window.addEventListener('keyup', (e) => {
             this.releaseKey(e.code);
         });
+        // 入力欄に移った時に押していたキーが、押しっぱなしにならないように
+        document.addEventListener('focusin', (e) => { if (InputManager.isTyping(e.target)) this.resetAll(); });
         
         // ウィンドウからフォーカスが外れた・アプリを切り替えたら入力をリセット
         // （押しっぱなしのまま戻ってこない事故を防ぐ）
@@ -335,5 +340,13 @@ class InputManager {
     // 相互作用キー（E は魔法パレットに使うので F に変更。今は未使用）
     isInteractPressed() {
         return this.isKeyPressed('KeyF');
+    }
+    
+    // 文字の入力欄（input・textarea）にカーソルがあるか
+    static isTyping(el) {
+        if (!el || !el.tagName) return false;
+        if (el.isContentEditable) return true;
+        if (el.tagName === 'TEXTAREA') return true;
+        return el.tagName === 'INPUT' && !['button', 'checkbox', 'radio', 'submit', 'range'].includes(el.type);
     }
 }

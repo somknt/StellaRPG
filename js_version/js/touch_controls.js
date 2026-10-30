@@ -59,6 +59,9 @@ const TouchControls = {
     
     // ---------- 画面フィット ----------
     fitGame() {
+        // スマホで文字を入力している間（キーボードが出て画面が小さくなる）は、ゲーム画面の大きさを変えない
+        // （小さく縮んで入力欄が読めなくならないように。入力が終わったら screens.js がもう一度呼ぶ）
+        if (this.isTouch && document.body.classList.contains('typing') && this.scale) return;
         const vw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
         const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
         

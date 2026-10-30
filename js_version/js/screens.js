@@ -29,6 +29,11 @@ class UINav {
                 if (i !== nav.index && performance.now() > UINav.quietUntil) playSE('ui_move');
                 nav.setIndex(i);
             });
+            // 入力欄をクリック・タップした時も、そこを選んでいることにする
+            el.addEventListener('focus', () => {
+                const nav = el._nav;
+                if (nav) nav.setIndex(nav.items.indexOf(el));
+            });
         }
         this.refresh();
     }
@@ -71,6 +76,8 @@ class UINav {
         if (this.mode !== 'vertical' && (left || right)) this.move(left ? -1 : 1);
         if (this.index !== before) playSE('ui_move');
         if ((k('Enter') || k('Space')) && cur && !this.isSkip(cur)) {
+            // 入力欄は、押すと文字を入力できるようにする（もう一度 Enter で決定、Esc で入力をやめる）
+            if (InputManager.isTyping(cur)) { cur.focus(); return; }
             pressEffect(cur);
             cur.click();
         }
@@ -524,7 +531,11 @@ class ScreenManager {
         this.time = 0;
         this.nav = null;
         this.selectedBoss = null;
-        this.selectedHero = 'male';
+        this.selectedHero = 'male';   // プレイヤー登録の画面で選んでいる主人公
+        this.accountTab = 'create';   // アカウントの画面：'create'（はじめて遊ぶ）/ 'login'
+        this.profileFrom = null;      // プレイヤー登録をどこから開いたか（'account_info' なら戻れる。はじめての時は戻れない）
+        this.equip = null;            // 装備画面で変えている装備（Account.loadout のコピー）
+        this.equipSlot = -1;          // 装備画面：次に魔法を入れる枠（-1 なら空いている最初の枠）
         this.bg = new TitleBackground();
         // URL に ?mode=free を付けると、モンスター選択をとばして前のフリーバトル（スライム・ウサギ）で遊べる
         this.freeBattle = new URLSearchParams(window.location.search).get('mode') === 'free';
@@ -532,19 +543,31 @@ class ScreenManager {
         this.buildHeroCards();
         this.buildSettings();
         this.bindButtons();
+        this.bindAccountForms();
+        this.setupTyping();
+        // 通信が切れた・つながった時に、出している画面の「オンライン / オフライン」を書き直す
+        if (window.Account) Account.onChange(() => {
+            if (this.current === 'main_menu') this.refreshMenuUser();
+            if (this.current === 'account_info') { const m = this.$('ai-mode'); if (m) m.textContent = Account.storageLabel(); }
+        });
     }
     
     $(id) { return document.getElementById(id); }
     
     // 画面の名前 → HTML と、キーボードの動かし方
+    // 流れ：タイトル →（ログインしていなければ）アカウント →（名前が決まっていなければ）プレイヤー登録 → メインメニュー
+    //       バトルモード → ソロプレイ → モンスター選択 → 装備 → バトル
     static SCREENS = {
         title:          { id: 'scr-title',    nav: null,       bgm: 'bgm_title' },
+        account:        { id: 'scr-account',  nav: 'vertical', back: 'title',          bgm: 'bgm_title' },
+        profile:        { id: 'scr-profile',  nav: 'grid',                             bgm: 'bgm_title' },
         main_menu:      { id: 'scr-menu',     nav: 'vertical', back: 'title',          bgm: 'bgm_title' },
+        account_info:   { id: 'scr-accinfo',  nav: 'vertical', back: 'main_menu',      bgm: 'bgm_title' },
         story:          { id: 'scr-story',    nav: 'vertical', back: 'main_menu',      bgm: 'bgm_title' },
         battle_select:  { id: 'scr-battle',   nav: 'vertical', back: 'main_menu',      bgm: 'bgm_title' },
         monster_select: { id: 'scr-monster',  nav: 'grid',     back: 'battle_select',  bgm: 'bgm_select' },
         ranking:        { id: 'scr-ranking',  nav: 'grid',     back: 'monster_select', bgm: 'bgm_select' },
-        hero_select:    { id: 'scr-hero',     nav: 'grid',     back: 'monster_select', bgm: 'bgm_select' },
+        equip:          { id: 'scr-equip',    nav: 'grid',     back: 'monster_select', bgm: 'bgm_select' },
         settings:       { id: 'scr-settings', nav: 'vertical', back: 'main_menu',      bgm: 'bgm_title' }
     };
     
@@ -580,8 +603,13 @@ class ScreenManager {
         this.current = name;
         this.game.gameState = name;
         const el = this.$(def.id);
+        if (document.activeElement && InputManager.isTyping(document.activeElement)) document.activeElement.blur();
         if (name === 'title') this.bg.logoTime = 0; // ロゴの登場をもう一度
-        if (name === 'hero_select') this.enterHero();
+        if (name === 'account') this.enterAccount();
+        if (name === 'profile') this.enterProfile();
+        if (name === 'main_menu') this.refreshMenuUser();
+        if (name === 'account_info') this.enterAccountInfo();
+        if (name === 'equip') this.enterEquip();
         if (name === 'monster_select') this.enterMonster(prev);
         if (name === 'ranking') this.enterRanking();
         if (name === 'settings') this.refreshSettings();
@@ -600,12 +628,17 @@ class ScreenManager {
         this.nav = null;
     }
     
-    back() {
+    // 今の画面の「戻る」の行き先（なければ null）
+    backTarget() {
+        if (this.current === 'profile') return this.profileFrom === 'account_info' ? 'account_info' : null;
+        if (this.current === 'equip' && this.freeBattle) return 'battle_select';
         const def = ScreenManager.SCREENS[this.current];
-        if (!def || !def.back) return;
-        let to = def.back;
-        if (this.current === 'hero_select' && this.freeBattle) to = 'battle_select';
-        this.go(to);
+        return def && def.back ? def.back : null;
+    }
+    
+    back() {
+        const to = this.backTarget();
+        if (to) this.go(to);
     }
     
     toast(text) {
@@ -622,15 +655,15 @@ class ScreenManager {
         this.time += dt;
         this.bg.update(dt);
         if (this.current === 'monster_select') this.drawMonsterArt(dt);
-        if (this.current === 'hero_select') this.drawHeroArt(dt);
+        if (this.current === 'profile') this.drawHeroArt(dt);
+        if (this.current === 'equip') this.drawEquipArt(dt);
         if (this.busy || !this.current) return;
         if (this.current === 'title') {
             if (input.isKeyPressed('Enter') || input.isKeyPressed('Space')) this.startFromTitle();
             return;
         }
         if (input.isKeyPressed('Escape') || input.isKeyPressed('Backspace')) {
-            const def = ScreenManager.SCREENS[this.current];
-            if (def && def.back) playSE('ui_cancel');
+            if (this.backTarget()) playSE('ui_cancel');
             this.back();
             return;
         }
@@ -649,10 +682,29 @@ class ScreenManager {
         this.bg.draw(ctx, this.time, dim);
     }
     
-    startFromTitle() {
-        if (this.current !== 'title' || this.busy) return;
+    // タイトルで決定：ログインしていればメインメニュー（名前がまだならプレイヤー登録）、していなければアカウントの画面
+    // 起動した時の自動ログインが終わっていなければ、終わるまで待つ
+    async startFromTitle() {
+        if (this.current !== 'title' || this.busy || this._starting) return;
         playSE('ui_start');
-        this.go('main_menu');
+        const A = window.Account;
+        if (A && !A.ready) {
+            this._starting = true;
+            this.toast('アカウントを確かめています…');
+            await A.whenReady();
+            this._starting = false;
+            if (this.current !== 'title') return;
+        }
+        this.go(this.afterLoginScreen());
+    }
+    
+    // ログインの後に行く画面
+    afterLoginScreen() {
+        const A = window.Account;
+        if (!A) return 'main_menu';
+        if (!A.loggedIn) return 'account';
+        if (!A.hasProfile()) { this.profileFrom = null; return 'profile'; }
+        return 'main_menu';
     }
     
     // ---------- ボタン ----------
@@ -669,6 +721,8 @@ class ScreenManager {
         document.addEventListener('click', (e) => {
             const b = e.target.closest && e.target.closest('.ui-btn');
             if (!b || b.closest('#touch-controls') || b.classList.contains('boss-card')) return;
+            // 自分で音を決めるボタン（アカウントの送信：成功・失敗の音 / 装備画面の枠・魔法・装備：つけ外し・装備できない音）
+            if (b.type === 'submit' || b.closest('#scr-equip .equip-wrap')) return;
             if (b.id === 'pause-btn' || b.id === 'pause-resume' || b.id === 'fullscreen-btn') return;
             if (this.busy && b.closest('#screens')) return; // 画面の切り替え中（押しても進まない）
             const disabled = b.disabled || b.getAttribute('aria-disabled') === 'true' || b.classList.contains('disabled');
@@ -678,17 +732,295 @@ class ScreenManager {
         
         on('menu-story', () => this.go('story'));
         on('menu-battle', () => this.go('battle_select'));
+        on('menu-account', () => this.go('account_info'));
         on('menu-settings', () => this.go('settings'));
         on('story-back', () => this.go('main_menu'));
-        on('battle-solo', () => this.go(this.freeBattle ? 'hero_select' : 'monster_select'));
+        on('battle-solo', () => this.go(this.freeBattle ? 'equip' : 'monster_select'));
         on('battle-multi', () => this.toast('マルチプレイは今後実装予定です'));
         on('battle-back', () => this.go('main_menu'));
         on('monster-back', () => this.go('battle_select'));
         on('monster-ranking', () => this.go('ranking'));
         on('ranking-back', () => this.go('monster_select'));
-        on('hero-ok', () => this.startBattle());
-        on('hero-back', () => this.back());
         on('settings-back', () => this.go('main_menu'));
+        // アカウント
+        on('acc-tab-create', () => this.setAccountTab('create', true));
+        on('acc-tab-login', () => this.setAccountTab('login', true));
+        on('acc-eye', (el) => this.togglePasswordView(el));
+        on('acc-back', () => this.go('title'));
+        on('profile-ok', () => this.submitProfile());
+        on('profile-back', () => this.back());
+        on('ai-profile', () => { this.profileFrom = 'account_info'; this.go('profile'); });
+        on('ai-logout', (el) => this.confirmLogout(el));
+        on('ai-back', () => this.go('main_menu'));
+        // 装備
+        on('equip-ok', () => this.startBattle());
+        on('equip-back', () => this.back());
+        on('equip-clear', () => this.clearEquipMagic());
+    }
+    
+    // ---------- 文字の入力 ----------
+    // - Enter：アカウントの画面は送信（form の submit）、プレイヤー名は入力を終える。Esc：入力をやめる
+    // - 日本語の変換中（isComposing）の Enter は、変換を決めるだけ
+    // - スマホ：入力欄を押すとキーボードで画面の下半分がかくれるので、入力欄が上に来るように画面をずらす
+    //   キーボードが出て画面が小さくなっても、ゲーム画面の大きさは変えない（touch_controls.js の fitGame）
+    setupTyping() {
+        document.addEventListener('keydown', (e) => {
+            const el = e.target;
+            if (!InputManager.isTyping(el) || !el.closest('#screens')) return;
+            if (e.key === 'Escape') { el.blur(); e.preventDefault(); return; }
+            if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && el.id === 'profile-name-input') {
+                e.preventDefault();
+                el.blur();
+                if (this.nav) this.nav.setIndex(this.nav.items.indexOf(this.$('profile-ok')));
+            }
+        });
+        document.addEventListener('focusin', (e) => {
+            const el = e.target;
+            if (!InputManager.isTyping(el) || !el.closest('#screens')) return;
+            document.body.classList.add('typing');
+            if (document.body.classList.contains('touch')) this.shiftForKeyboard(el);
+        });
+        document.addEventListener('focusout', (e) => {
+            if (!InputManager.isTyping(e.target)) return;
+            // ほかの入力欄に移った時は、そのまま（focusin がもう一度ずらす）
+            setTimeout(() => {
+                const a = document.activeElement;
+                if (a && InputManager.isTyping(a) && a.closest('#screens')) return;
+                document.body.classList.remove('typing');
+                this.shiftForKeyboard(null);
+            }, 0);
+        });
+    }
+    
+    // スマホのキーボードで入力欄がかくれないよう、画面の中身を上へずらす（el が null なら戻す）
+    shiftForKeyboard(el) {
+        for (const s of this.root.querySelectorAll('.screen')) s.style.transform = '';
+        if (!el) {
+            // キーボードが閉じたら、画面の大きさを合わせ直す
+            if (window.TouchControls && TouchControls.fitGame) setTimeout(() => TouchControls.fitGame(), 250);
+            return;
+        }
+        const screen = el.closest('.screen');
+        if (!screen) return;
+        const scale = (window.TouchControls && TouchControls.scale) || 1;
+        const top = (el.getBoundingClientRect().top - screen.getBoundingClientRect().top) / scale;
+        const shift = Math.max(0, top - ScreenManager.TYPING_TOP);
+        if (shift > 0) screen.style.transform = `translateY(${-shift}px)`;
+    }
+    
+    // ---------- アカウント（作成・ログイン） ----------
+    bindAccountForms() {
+        const form = this.$('acc-form');
+        if (form) form.addEventListener('submit', (e) => { e.preventDefault(); this.submitAccount(); });
+        // 入力したら、前のエラーの文を消す
+        for (const id of ['acc-user', 'acc-pass', 'acc-pass2']) {
+            const el = this.$(id);
+            if (el) el.addEventListener('input', () => this.showAccountError(''));
+        }
+        const name = this.$('profile-name-input');
+        if (name) name.addEventListener('input', () => { this.updateNameCount(); this.showError('profile-error', ''); });
+    }
+    
+    enterAccount() {
+        const A = window.Account;
+        const last = A ? A.lastUsername : '';
+        // この端末で前にログインしたことがあればログイン、なければアカウント作成から
+        this.setAccountTab(last ? 'login' : 'create', false);
+        const user = this.$('acc-user');
+        if (user) user.value = last || '';
+        for (const id of ['acc-pass', 'acc-pass2']) { const el = this.$(id); if (el) el.value = ''; }
+        this.setAccountBusy(false);
+        const note = this.$('acc-note');
+        if (note) {
+            note.textContent = A && A.mode === 'cloud'
+                ? 'アカウントはオンラインに保存されます。PC とスマホで同じアカウントを使えます'
+                : 'いまはオンラインの準備中のため、アカウントはこの端末だけに保存されます';
+            note.classList.toggle('local', !(A && A.mode === 'cloud'));
+        }
+    }
+    
+    setAccountTab(tab, byUser) {
+        this.accountTab = tab;
+        const create = tab === 'create';
+        const title = this.$('acc-title');
+        if (title) title.textContent = create ? 'アカウント作成' : 'ログイン';
+        for (const t of this.root.querySelectorAll('.acc-tab')) t.classList.toggle('on', t.dataset.tab === tab);
+        const row = this.$('acc-pass2-row');
+        if (row) row.hidden = !create;
+        const p2 = this.$('acc-pass2');
+        if (p2) { p2.value = ''; p2.toggleAttribute('data-nav', create); }
+        const pass = this.$('acc-pass');
+        if (pass) pass.setAttribute('autocomplete', create ? 'new-password' : 'current-password');
+        const submit = this.$('acc-submit');
+        if (submit) submit.textContent = create ? 'アカウントを作る' : 'ログイン';
+        const user = this.$('acc-user');
+        if (user) user.placeholder = create ? '半角英数字と _（3〜16文字）' : 'ユーザー名';
+        if (pass) pass.placeholder = create ? `${(window.Account && Account.PASSWORD_MIN) || 6}文字以上` : 'パスワード';
+        this.showAccountError('');
+        // 確認の欄が出たり消えたりするので、キーボードで選べる項目を作り直す
+        if (this.current === 'account') {
+            const keep = this.nav && this.nav.current;
+            this.nav = new UINav(this.$('scr-account'), 'vertical');
+            const i = keep ? this.nav.items.indexOf(keep) : -1;
+            if (i >= 0) this.nav.setIndex(i);
+        }
+        if (byUser && user && !user.value) setTimeout(() => user.focus(), 0);
+    }
+    
+    togglePasswordView(btn) {
+        const show = btn.textContent === '表示';
+        for (const id of ['acc-pass', 'acc-pass2']) { const el = this.$(id); if (el) el.type = show ? 'text' : 'password'; }
+        btn.textContent = show ? '隠す' : '表示';
+        btn.setAttribute('aria-label', show ? 'パスワードを隠す' : 'パスワードを表示');
+    }
+    
+    showError(id, text) {
+        const el = this.$(id);
+        if (!el) return;
+        el.textContent = text || '';
+        el.classList.toggle('show', !!text);
+        if (text) { el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); }
+    }
+    showAccountError(text) { this.showError('acc-error', text); }
+    
+    setAccountBusy(busy) {
+        this.accountBusy = busy;
+        const panel = this.$('scr-account');
+        if (panel) panel.classList.toggle('busy', busy);
+        const submit = this.$('acc-submit');
+        if (submit) {
+            submit.disabled = busy;
+            if (busy) submit.textContent = '通信しています…';
+            else submit.textContent = this.accountTab === 'create' ? 'アカウントを作る' : 'ログイン';
+        }
+    }
+    
+    async submitAccount() {
+        const A = window.Account;
+        if (!A || this.accountBusy || this.busy) return;
+        const user = this.$('acc-user').value.trim();
+        const pass = this.$('acc-pass').value;
+        const create = this.accountTab === 'create';
+        // 先にこの画面で調べる（サーバーに送る前に、まちがいを知らせる）
+        const bad = create
+            ? (A.validateUsername(user) || A.validatePassword(pass, this.$('acc-pass2').value))
+            : (!user ? 'EMPTY_USERNAME' : !pass ? 'EMPTY_PASSWORD' : null);
+        if (bad) {
+            playSE('ui_error');
+            this.showAccountError(A.message(bad));
+            const focus = /USERNAME/.test(bad) ? 'acc-user' : bad === 'PASSWORD_MISMATCH' ? 'acc-pass2' : 'acc-pass';
+            const el = this.$(focus);
+            if (el && !document.body.classList.contains('touch')) el.focus();
+            return;
+        }
+        if (document.activeElement && InputManager.isTyping(document.activeElement)) document.activeElement.blur();
+        this.setAccountBusy(true);
+        this.showAccountError('');
+        try {
+            if (create) await A.register(user, pass);
+            else await A.login(user, pass);
+        } catch (e) {
+            this.setAccountBusy(false);
+            playSE('ui_error');
+            this.showAccountError(e && e.code ? e.message : A.message('SERVER'));
+            if (!(e && e.code)) console.error(e);
+            return;
+        }
+        this.setAccountBusy(false);
+        playSE('ui_select');
+        this.toast(create ? 'アカウントを作りました' : `ログインしました（${A.user.username}）`);
+        this.go(this.afterLoginScreen());
+    }
+    
+    // ---------- プレイヤー登録（名前と主人公） ----------
+    enterProfile() {
+        const A = window.Account;
+        const p = A && A.profile;
+        const input = this.$('profile-name-input');
+        if (input) input.value = p ? p.name : '';
+        this.selectHero(p ? p.gender : (this.selectedHero || 'male'));
+        for (const a of this.heroArts) a.card.classList.toggle('focused', false);
+        this.updateNameCount();
+        this.showError('profile-error', '');
+        const back = this.$('profile-back');
+        if (back) back.hidden = this.profileFrom !== 'account_info';
+        const ok = this.$('profile-ok');
+        if (ok) ok.textContent = this.profileFrom === 'account_info' ? '変更する' : '決定';
+    }
+    
+    updateNameCount() {
+        const input = this.$('profile-name-input');
+        const cnt = this.$('profile-count');
+        if (!input || !cnt) return;
+        const max = (window.Account && Account.NAME_MAX) || 10;
+        const n = [...input.value.trim()].length;
+        cnt.textContent = `${n}/${max}`;
+        cnt.classList.toggle('over', n > max);
+    }
+    
+    submitProfile() {
+        const A = window.Account;
+        if (!A || !A.loggedIn) { this.go('account'); return; }
+        const input = this.$('profile-name-input');
+        const bad = A.validateName(input.value);
+        if (bad) {
+            playSE('ui_error');
+            this.showError('profile-error', A.message(bad));
+            if (!document.body.classList.contains('touch')) input.focus();
+            return;
+        }
+        const first = !A.hasProfile();
+        A.setProfile(input.value, this.selectedHero);
+        this.toast(first ? `ようこそ、${A.playerName}さん！` : 'プレイヤー名と主人公を変えました');
+        this.go(this.profileFrom === 'account_info' ? 'account_info' : 'main_menu');
+    }
+    
+    // ---------- メインメニューの右上・アカウントの画面 ----------
+    refreshMenuUser() {
+        const el = this.$('menu-user');
+        const A = window.Account;
+        if (!el) return;
+        if (!A || !A.loggedIn) { el.hidden = true; return; }
+        el.hidden = false;
+        el.innerHTML = '';
+        const star = document.createElement('i');
+        star.textContent = '★';
+        const name = document.createElement('b');
+        name.textContent = A.playerName || A.user.username;
+        const mode = document.createElement('small');
+        const offline = A.user.mode === 'cloud' && A.online === false;
+        mode.textContent = A.user.mode === 'cloud' ? (offline ? 'オフライン' : 'オンライン') : 'この端末';
+        mode.classList.toggle('offline', offline);
+        el.title = offline ? 'サーバーにつながっていません。変えた所はこの端末に残して、つながった時に送ります' : '';
+        el.append(star, name, mode);
+    }
+    
+    enterAccountInfo() {
+        const A = window.Account;
+        const set = (id, t) => { const el = this.$(id); if (el) el.textContent = t; };
+        set('ai-name', A && A.playerName || '─');
+        set('ai-hero', A && A.hasProfile() ? (A.gender === 'female' ? '女の子' : '男の子') : '─');
+        set('ai-user', A && A.user ? A.user.username : '─');
+        set('ai-mode', A ? A.storageLabel() : '─');
+        const lo = this.$('ai-logout');
+        if (lo) { lo.textContent = 'ログアウト'; lo.classList.remove('confirm'); }
+        clearTimeout(this._logoutTimer);
+    }
+    
+    // ログアウトは2回押す（まちがえて押さないように）
+    async confirmLogout(btn) {
+        if (!btn.classList.contains('confirm')) {
+            btn.classList.add('confirm');
+            btn.textContent = 'もう一度押すとログアウト';
+            clearTimeout(this._logoutTimer);
+            this._logoutTimer = setTimeout(() => { btn.classList.remove('confirm'); btn.textContent = 'ログアウト'; }, 3000);
+            return;
+        }
+        clearTimeout(this._logoutTimer);
+        btn.textContent = 'ログアウトしています…';
+        if (window.Account) await Account.logout();
+        this.toast('ログアウトしました');
+        this.go('account');
     }
     
     // ---------- モンスター選択 ----------
@@ -755,7 +1087,7 @@ class ScreenManager {
             return;
         }
         this.selectedBoss = b.id;
-        this.go('hero_select');
+        this.go('equip');
     }
     
     // from：前の画面。マイベストから戻った時は、左上のマイベストのボタンを選んだ状態に（それ以外は前に選んだボスのカード）
@@ -953,7 +1285,7 @@ class ScreenManager {
                 pressEffect(card);
                 this.selectHero(g);
                 // キーボードで選んだ時は、続けて決定ボタンへ
-                if (this.nav) this.nav.setIndex(this.nav.items.indexOf(this.$('hero-ok')));
+                if (this.nav) this.nav.setIndex(this.nav.items.indexOf(this.$('profile-ok')));
             });
             this.heroArts.push({ gender: g, card, canvas: card.querySelector('canvas'), hop: 0 });
         }
@@ -966,14 +1298,6 @@ class ScreenManager {
             a.card.classList.toggle('selected', on);
             if (on) a.hop = 0.35;
         }
-    }
-    
-    enterHero() {
-        const b = getBossData(this.selectedBoss);
-        const vs = this.$('hero-vs');
-        if (vs) vs.textContent = this.freeBattle || !b ? 'フリーバトル（星の闘技場）' : `VS ${b.name}　─　${b.fieldName}`;
-        this.selectHero(this.selectedHero || 'male');
-        for (const a of this.heroArts) a.card.classList.toggle('focused', a.gender === this.selectedHero);
     }
     
     // 待機モーション（仮：立ち姿の画像が息をするように少し上下する。選ぶと小さく跳ねる）
@@ -1003,14 +1327,275 @@ class ScreenManager {
         }
     }
     
+    // 装備画面の「出撃する」：アカウントの主人公・プレイヤー名と、決めた装備でバトルを始める
     startBattle() {
-        const gender = this.selectedHero || 'male';
+        const A = window.Account;
+        const gender = A && A.hasProfile() ? A.gender : (this.selectedHero || 'male');
         const bossId = this.selectedBoss;
+        if (this.equip && A && A.loggedIn) A.setLoadout(this.equip);
+        this.game.loadout = this.equip && A ? A.normalizeLoadout(this.equip) : null;
+        this.game.playerName = A ? A.playerName : '';
         this.transition(() => {
             this.hideAll();
             if (this.freeBattle || !bossId) this.game.startGame(gender);
             else this.game.startBossBattle(bossId, gender);
         });
+    }
+    
+    // ---------- 装備 ----------
+    // 魔法パレット：5つの枠（星の頂点。上から時計回り）。魔法を押すと空いている枠（選んだ枠があればそこ）に入る
+    //   セットしてある魔法をもう一度押す・枠を押すと外れる。同じ魔法は1つまで
+    // 武器・防具：バトルモードでは剣はナイフだけ・盾と防具はなし（押すと「装備できません」）
+    static EQUIP_GEAR = [
+        { slot: 'sword',  group: 'weapon', label: '剣',   icon: 'sword',  item: 'ナイフ', note: '攻撃 +5' },
+        { slot: 'shield', group: 'weapon', label: '盾',   icon: 'shield' },
+        { slot: 'head',   group: 'armor',  label: '頭',   icon: 'head' },
+        { slot: 'body',   group: 'armor',  label: '鎧',   icon: 'body' },
+        { slot: 'legs',   group: 'armor',  label: '足',   icon: 'legs' }
+    ];
+    // 装備の枠の絵（ドット絵ふうの小さな線画。金色）
+    static GEAR_ICONS = {
+        sword:  '<path d="M19 3 L21 3 L21 5 L11 15 L9 13 Z"/><path d="M6 12 L12 18 L10 20 L8 18 L5 21 L3 19 L6 16 L4 14 Z"/>',
+        shield: '<path d="M12 2 L20 5 L20 11 C20 16 16.5 19.5 12 22 C7.5 19.5 4 16 4 11 L4 5 Z M12 5 L7 7 L7 11 C7 14.5 9.2 17 12 18.6 Z"/>',
+        head:   '<path d="M12 3 C7 3 4 6.5 4 11 L4 15 L7 15 L7 12 L17 12 L17 15 L20 15 L20 11 C20 6.5 17 3 12 3 Z M11 4.5 L13 4.5 L13 10 L11 10 Z"/><path d="M6 16 L9 16 L9 20 L6 20 Z M15 16 L18 16 L18 20 L15 20 Z"/>',
+        body:   '<path d="M8 3 L10 5 L14 5 L16 3 L21 6 L19 11 L17 10 L17 21 L7 21 L7 10 L5 11 L3 6 Z M10 8 L10 18 L14 18 L14 8 Z"/>',
+        legs:   '<path d="M6 3 L11 3 L11 15 L14 17 L14 21 L4 21 L4 17 L6 15 Z"/><path d="M14 3 L19 3 L19 13 L16 13 L16 9 L14 9 Z"/>'
+    };
+    
+    // 装備画面で選べる魔法（覚えている魔法：最初の6つ）
+    equipMagicList() {
+        const list = (window.gameData && window.gameData.magicCircles) || [];
+        const starters = window.STARTER_MAGIC || [];
+        return ScreenManager.EQUIP_MAGIC.map(id => list.find(m => m.id === id) || starters.find(m => m.id === id)).filter(Boolean);
+    }
+    
+    magicIcon(m) {
+        const info = getElementInfo(m.element);
+        const src = window.TouchControls && TouchControls.elementIcons && TouchControls.elementIcons[info.key];
+        return src ? `<img class="mi-icon" src="${src}" alt="">` : `<span class="mi-icon text" style="--c:${info.color}">${info.label}</span>`;
+    }
+    
+    buildEquip() {
+        if (this._equipBuilt) return;
+        this._equipBuilt = true;
+        // 魔法パレットの5つの枠（星の頂点）
+        const star = this.$('equip-palette');
+        this.equipSlots = [];
+        for (let i = 0; i < 5; i++) {
+            const a = -Math.PI / 2 + i * Math.PI * 2 / 5;
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'ps-slot ui-btn';
+            b.dataset.nav = '';
+            b.dataset.slot = String(i);
+            b.style.left = `calc(50% + ${(Math.cos(a) * ScreenManager.EQUIP_STAR_R).toFixed(1)}px)`;
+            b.style.top = `calc(50% + ${(Math.sin(a) * ScreenManager.EQUIP_STAR_R).toFixed(1)}px)`;
+            b.innerHTML = `<span class="ps-num">${i + 1}</span><span class="ps-icon"></span><span class="ps-name"></span>`;
+            b.addEventListener('click', (e) => { e.preventDefault(); if (!this.busy) { pressEffect(b); this.clickEquipSlot(i); } });
+            b.addEventListener('pointerenter', () => this.showEquipDetail(this.equip && this.equip.magic[i]));
+            star.appendChild(b);
+            this.equipSlots.push(b);
+        }
+        // 選べる魔法の札
+        const list = this.$('equip-magic-list');
+        this.equipCards = [];
+        for (const m of this.equipMagicList()) {
+            const info = getElementInfo(m.element);
+            const c = document.createElement('button');
+            c.type = 'button';
+            c.className = 'mg-card ui-btn';
+            c.dataset.nav = '';
+            c.dataset.id = m.id;
+            c.style.setProperty('--c', info.color);
+            c.innerHTML = `${this.magicIcon(m)}<span class="mg-text"><b>${m.name}</b><small>${m.category === '治癒' ? '治癒' : info.label + 'の攻撃'}・MP${m.spCost}</small></span><span class="mg-badge"></span>`;
+            c.addEventListener('click', (e) => { e.preventDefault(); if (!this.busy) { pressEffect(c); this.toggleEquipMagic(m.id); } });
+            c.addEventListener('pointerenter', () => this.showEquipDetail(m.id));
+            list.appendChild(c);
+            this.equipCards.push(c);
+        }
+        // 武器・防具の枠
+        for (const g of ScreenManager.EQUIP_GEAR) {
+            const box = this.$(g.group === 'weapon' ? 'equip-gear-weapon' : 'equip-gear-armor');
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'gear-slot ui-btn' + (g.item ? ' fixed' : ' empty');
+            b.dataset.nav = '';
+            b.dataset.slot = g.slot;
+            b.innerHTML = `<svg class="gs-icon" viewBox="0 0 24 24" aria-hidden="true">${ScreenManager.GEAR_ICONS[g.icon]}</svg>`
+                + `<span class="gs-label">${g.label}</span><span class="gs-item">${g.item || 'なし'}${g.note ? `<small>${g.note}</small>` : ''}</span>`
+                + `<span class="gs-lock">${g.item ? '固定' : '─'}</span>`;
+            b.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (this.busy) return;
+                playSE('ui_error');
+                b.classList.remove('shake'); void b.offsetWidth; b.classList.add('shake');
+                this.toast(g.item ? 'バトルモードの剣はナイフだけです' : 'バトルモードでは装備できません');
+            });
+            box.appendChild(b);
+        }
+    }
+    
+    enterEquip() {
+        this.buildEquip();
+        const A = window.Account;
+        this.equip = A ? Account.normalizeLoadout(A.loadout) : (window.Account ? Account.blankLoadout() : { magic: [null, null, null, null, null] });
+        this.equipSlot = -1;
+        const b = getBossData(this.selectedBoss);
+        const vs = this.$('equip-vs');
+        if (vs) vs.textContent = this.freeBattle || !b ? 'フリーバトル（星の闘技場）' : `VS ${b.name}　─　${b.fieldName}`;
+        // 主人公（プレイヤー登録で決めた見た目と名前）とステータス（ボスごとの推奨レベル）
+        const lv = !this.freeBattle && b && b.playerLevel ? b.playerLevel : 1;
+        const st = (window.gameData && gameData.playerStatsTable && gameData.playerStatsTable.find(s => s.level === lv)) || Player.statsForLevel(lv);
+        const set = (id, t) => { const el = this.$(id); if (el) el.textContent = t; };
+        set('equip-hero-name', A && A.playerName ? A.playerName : (this.selectedHero === 'female' ? '女の子' : '男の子'));
+        set('equip-hero-lv', `Lv.${lv}${!this.freeBattle && b ? '（このボスの推奨レベル）' : ''}`);
+        const stats = this.$('equip-stats');
+        if (stats) {
+            const knife = 5;
+            stats.innerHTML = '';
+            for (const [k, v] of [['HP', st.hp], ['MP', st.maxSP], ['攻撃', `${st.attack} <em>+${knife}</em>`], ['防御', st.defense]]) {
+                const dt = document.createElement('dt'); dt.textContent = k;
+                const dd = document.createElement('dd'); dd.innerHTML = String(v);
+                stats.append(dt, dd);
+            }
+        }
+        this.equipHeroGender = A && A.hasProfile() ? A.gender : (this.selectedHero || 'male');
+        this.renderEquip();
+        this.showEquipDetail(this.equip.magic.find(Boolean) || null);
+        // 最初は「出撃する」を選んだ状態（魔法がまだなら、最初の魔法の札）
+        const first = this.equip.magic.some(Boolean) ? this.$('equip-ok') : this.equipCards[0];
+        for (const el of this.root.querySelectorAll('#scr-equip [data-nav]')) el.classList.toggle('focused', el === first);
+    }
+    
+    renderEquip() {
+        const eq = this.equip;
+        if (!eq) return;
+        const byId = {};
+        for (const m of this.equipMagicList()) byId[m.id] = m;
+        eq.magic.forEach((id, i) => {
+            const s = this.equipSlots[i];
+            const m = id && byId[id];
+            s.classList.toggle('filled', !!m);
+            s.classList.toggle('target', this.equipSlot === i);
+            s.style.setProperty('--c', m ? getElementInfo(m.element).color : 'transparent');
+            s.querySelector('.ps-icon').innerHTML = m ? this.magicIcon(m) : '<span class="ps-plus">＋</span>';
+            s.querySelector('.ps-name').textContent = m ? m.name : '空き';
+            s.setAttribute('aria-label', m ? `枠${i + 1}：${m.name}（押すと外す）` : `枠${i + 1}：空き`);
+        });
+        for (const c of this.equipCards) {
+            const i = eq.magic.indexOf(c.dataset.id);
+            c.classList.toggle('set', i >= 0);
+            c.querySelector('.mg-badge').textContent = i >= 0 ? String(i + 1) : '';
+        }
+        const n = eq.magic.filter(Boolean).length;
+        const cnt = this.$('equip-magic-count');
+        if (cnt) cnt.textContent = `${n}/5`;
+        const hint = this.$('equip-hint');
+        if (hint) {
+            hint.textContent = this.equipSlot >= 0 ? `枠${this.equipSlot + 1}に入れる魔法を選んでください`
+                : n === 0 ? '魔法を押すと、空いている枠に入ります（魔法なしでも出撃できます）'
+                : n >= 5 ? '入れかえる時は、外したい枠を押してください' : '魔法を押すと空いている枠に入ります。枠を押すと外れます';
+            hint.classList.toggle('warn', n === 0);
+        }
+    }
+    
+    // 魔法を押した：セットしてあれば外す。なければ選んだ枠（なければ最初の空き）に入れる
+    toggleEquipMagic(id) {
+        const eq = this.equip;
+        const at = eq.magic.indexOf(id);
+        if (at >= 0) {
+            eq.magic[at] = null;
+            playSE('ui_cancel');
+        } else {
+            const slot = this.equipSlot >= 0 ? this.equipSlot : eq.magic.indexOf(null);
+            if (slot < 0) {
+                playSE('ui_error');
+                this.toast('パレットがいっぱいです。外したい枠を押してください');
+                return;
+            }
+            eq.magic[slot] = id;
+            this.equipSlot = -1;
+            this.flashEquipSlot(slot);
+            playSE('ui_select');
+        }
+        this.showEquipDetail(id);
+        this.saveEquip();
+    }
+    
+    // 枠を押した：魔法が入っていれば外す（その枠に次の魔法が入る）。空きなら、次に入れる枠にする
+    clickEquipSlot(i) {
+        const eq = this.equip;
+        if (eq.magic[i]) {
+            eq.magic[i] = null;
+            this.equipSlot = i;
+            playSE('ui_cancel');
+        } else {
+            this.equipSlot = this.equipSlot === i ? -1 : i;
+            playSE('ui_move');
+        }
+        this.saveEquip();
+    }
+    
+    clearEquipMagic() {
+        if (!this.equip || !this.equip.magic.some(Boolean)) { playSE('ui_error'); this.toast('魔法はセットされていません'); return; }
+        playSE('ui_cancel');
+        this.equip.magic = [null, null, null, null, null];
+        this.equipSlot = -1;
+        this.saveEquip();
+        this.toast('魔法をすべて外しました');
+    }
+    
+    flashEquipSlot(i) {
+        const s = this.equipSlots[i];
+        if (!s) return;
+        s.classList.remove('just'); void s.offsetWidth; s.classList.add('just');
+    }
+    
+    saveEquip() {
+        this.renderEquip();
+        if (window.Account && Account.loggedIn) Account.setLoadout(this.equip);
+    }
+    
+    showEquipDetail(id) {
+        const box = this.$('equip-magic-detail');
+        if (!box) return;
+        const m = id && this.equipMagicList().find(x => x.id === id);
+        if (!m) {
+            box.innerHTML = '<p class="md-empty">魔法にカーソルを合わせると、ここに説明が出ます</p>';
+            return;
+        }
+        const info = getElementInfo(m.element);
+        const chant = ((m.chantTime || 1) * (Player.CHANT_TIME_MUL || 1)).toFixed(1);
+        box.style.setProperty('--c', info.color);
+        box.innerHTML = '';
+        const head = document.createElement('div');
+        head.className = 'md-head';
+        head.innerHTML = `<b>${m.name}</b><span class="md-tag">${m.category === '治癒' ? '治癒' : info.label}</span><span class="md-cost">MP ${m.spCost}　詠唱 ${chant}秒</span>`;
+        const p = document.createElement('p');
+        p.textContent = m.description || '';
+        box.append(head, p);
+    }
+    
+    // 装備画面の主人公（立ち姿が息をするように動く）
+    drawEquipArt(dt) {
+        const c = this.$('equip-hero-art');
+        if (!c) return;
+        const g = c.getContext('2d');
+        const W = c.width, H = c.height;
+        g.clearRect(0, 0, W, H);
+        const gender = this.equipHeroGender || 'male';
+        const img = window.assetManager && window.assetManager.get(`player_${gender}_down_2`);
+        const breathe = Math.sin(this.time * 2.4) * 0.015;
+        g.fillStyle = 'rgba(0, 0, 0, 0.35)';
+        g.beginPath(); g.ellipse(W / 2, H - 20, 34, 9, 0, 0, Math.PI * 2); g.fill();
+        if (img) {
+            g.save();
+            g.imageSmoothingEnabled = false;
+            g.translate(W / 2, H - 14);
+            g.scale(1 - breathe * 0.5, 1 + breathe);
+            g.drawImage(img, -75, -150, 150, 150);
+            g.restore();
+        }
     }
     
     // ---------- 設定 ----------
@@ -1097,6 +1682,10 @@ class ScreenManager {
     }
 }
 ScreenManager.FADE_MS = 350;
+ScreenManager.EQUIP_STAR_R = 71.5; // 装備画面の魔法パレット：星の中心から枠までの距離（px。輪の絵 270px の丸の位置 = 幅の 26.5%）
+// 装備画面で選べる魔法（最初から覚えている魔法。Player の learnedMagic と同じ）
+ScreenManager.EQUIP_MAGIC = ['magic_201', 'magic_202', 'magic_203', 'magic_204', 'magic_205', 'magic_206'];
+ScreenManager.TYPING_TOP = 40;     // スマホで文字を入力する時、入力欄が来る高さ（1280×720 の画面の上から px）
 ScreenManager.SAMPLE_DUR = 0.8; // 設定で音量を変えた時に鳴らす、確かめの音の長さ（秒）
 
 window.UINav = UINav;

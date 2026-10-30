@@ -6,9 +6,15 @@ class Game {
         this.ctx = canvas.getContext('2d');
         this.running = false;
         this.paused = false;
-        // 画面：'title' / 'main_menu' / 'story' / 'battle_select' / 'monster_select' / 'hero_select' / 'settings'（screens.js）
+        // 画面：'title' / 'account' / 'profile' / 'main_menu' / 'account_info' / 'story' / 'battle_select' /
+        //       'monster_select' / 'equip' / 'ranking' / 'settings'（screens.js）
         //       'playing'（バトル中）
         this.gameState = 'title';
+        
+        // 装備画面で決めた装備（魔法パレットなど。account.js の Account.loadout と同じ形）と、HUD に出すプレイヤー名
+        // バトルを始める時に screens.js が入れる。setupArena で主人公に反映する（もう一度挑戦する時も同じ）
+        this.loadout = null;
+        this.playerName = '';
         
         // ゲームモード：'battle'（フリーバトル。今はこれだけ） / 'story'（今後追加）
         this.gameMode = 'battle';
@@ -63,6 +69,9 @@ class Game {
     async init() {
         console.log('ゲーム初期化中...');
         
+        // 前にログインしたアカウントへ自動でログイン（読み込みと同時に進める。タイトルで決定した時に待つ）
+        if (window.Account) Account.init();
+        
         // データ読み込み
         await this.loadGameData();
         
@@ -87,7 +96,7 @@ class Game {
         on('pause-btn', () => this.togglePause());
         on('pause-resume', () => this.togglePause(false));
         on('pause-retry', () => this.restartBattle());
-        on('pause-select', () => this.leaveBattle(this.activeBattle === this.bossBattle ? 'monster_select' : 'hero_select'));
+        on('pause-select', () => this.leaveBattle(this.activeBattle === this.bossBattle ? 'monster_select' : 'equip'));
         on('pause-menu', () => this.leaveBattle('main_menu'));
     }
     
@@ -248,6 +257,7 @@ class Game {
         this.player.direction = 'up';        // 闘技場の中央（北の門）を向いて始まる
         this.player.unlockStarPower(3);
         this.player.setMoveMode(this.getMoveModeForMap(this.map.mapData));
+        this.applyLoadout(this.player);
         this.justDodgeTimer = 0;
         
         this.magicSystem.clear();
@@ -267,6 +277,20 @@ class Game {
         this.input.resetAll();
     }
     
+    // 装備画面で決めた魔法パレットを主人公にセットする（装備がない時は、主人公の最初の5つのまま）
+    // バトルモードの剣はナイフだけ・防具と盾はなしなので、ステータスは変えない
+    applyLoadout(p) {
+        const l = this.loadout;
+        if (!p || !l || !Array.isArray(l.magic)) return;
+        for (let i = 0; i < Player.MAGIC_SLOT_COUNT; i++) {
+            const id = l.magic[i];
+            p.setMagicSlot(i, id && p.getMagicData(id) ? id : null);
+        }
+        // 最初に選んでいる魔法：いちばん上（スロット1）から見て、最初にセットしてある魔法
+        const first = p.magicSlots.findIndex(Boolean);
+        p.selectedMagicIndex = first >= 0 ? first : 0;
+    }
+    
     isArena() {
         return this.gameState === 'playing' && typeof ArenaMap === 'function' && this.map instanceof ArenaMap;
     }
@@ -281,6 +305,9 @@ class Game {
         if (was !== this.paused) playSE('ui_pause');
         if (window.soundManager) soundManager.setDuck(this.paused); // 止めている間は BGM を小さく
         if (this.paused) {
+            // 「選択へ」のボタン：ボス戦はモンスター選択、フリーバトル（?mode=free）は装備画面へ戻る
+            const sel = document.getElementById('pause-select');
+            if (sel) sel.textContent = b === this.bossBattle ? 'モンスター選択へ' : '装備画面へ';
             b.showPause();
             this.pauseNav = new UINav(document.querySelector('#battle-pause .battle-panel'), 'vertical');
         } else {
@@ -300,7 +327,7 @@ class Game {
         });
     }
     
-    // バトルをやめて、メニューの画面へ戻る（'monster_select' / 'main_menu' / 'hero_select'）
+    // バトルをやめて、メニューの画面へ戻る（'monster_select' / 'main_menu' / 'equip'）
     leaveBattle(target = 'main_menu') {
         this.screens.transition(() => {
             this.stopBattles();
@@ -313,9 +340,9 @@ class Game {
         });
     }
     
-    // 前のキャラクター選択に戻る処理（今は主人公選択画面へ）
+    // 前のキャラクター選択に戻る処理（今は装備画面へ。主人公はプレイヤー登録で決める）
     backToCharacterSelect() {
-        this.leaveBattle('hero_select');
+        this.leaveBattle('equip');
     }
     
     // 今は「バトルモード」（フリーバトル）だけなので常に走る。
@@ -525,7 +552,12 @@ class Game {
         }
         
         const cast = this.player.consumeReadyCast(this.enemySpawner.enemies, this.castAim ? this.castAim.dir : aim, !!this.castAim);
-        if (cast) {
+        if (cast && cast.magic.category === '治癒') {
+            this.castHeal(cast);
+            this.input.clearTouchAim('magic');
+            this.castAim = null;
+            this.castAnchor = null;
+        } else if (cast) {
             this.magicSystem.castMagic(cast.magic, cast.position, cast.direction, cast.circlePos,
                 this.enemySpawner.enemies, cast.circleShape, cast.circleRadius, this.castAim && this.castAim.target);
             // 発動の音（雷は落ちた瞬間に magic.js で鳴らす）
@@ -1014,7 +1046,18 @@ class Game {
     //   スマホ：押したままスライド（砲弾系）→ その向き / 長押し（その場系）→ ターゲットカーソル（スライドで動かす）
     //   PC：Q を長押し → マウスカーソルの方向・場所（敵の近くなら敵に吸いつく）
     // 戻り値：{ kind: 'shot'|'target', dir, target, manual, reach, end, radius, range }
+    // ヒール（治癒魔法）：最大 HP の magic.heal（30%）だけ回復。緑の「+数字」と、足元の魔法陣・立ちのぼる光
+    castHeal(cast) {
+        const p = this.player, magic = cast.magic;
+        const healed = p.heal(Math.max(1, Math.round(p.maxHP * (magic.heal || 0.3))), true);
+        this.magicSystem.addHeal(p);
+        this.damageNumbers.add(healed, { position: p.position, size: p.drawSize }, { heal: true });
+        if (!playSE('magic_heal') && window.soundManager && soundManager.playHealChime) soundManager.playHealChime();
+    }
+    
     computeCastAim(magic) {
+        // 自分にかける魔法（ヒール）は、ねらう向きも場所もない
+        if (magic.shape === 'self') return null;
         const p = this.player;
         const enemies = this.enemySpawner.enemies.filter(e => e.isAlive() && !e.dying);
         const M = window.MAGIC_SIZE_MUL || 1;

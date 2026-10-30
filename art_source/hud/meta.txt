@@ -1,0 +1,4 @@
+level_bar: 406x104  inner x 54..174.9  y 14.4..37.8 (screen px)
+magic_bar: 465x75  inner x 48.6..214.8  y 6.3..31.8
+orb: 50px  at x 18 y 5.4 in magic_bar (screen px), size 25.2
+nameplate: 432x87  bar top y 14.7  inner y 19.6..39.1  inner x 13.8..202.4 (screen px)

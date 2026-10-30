@@ -12,17 +12,18 @@ class DamageNumbers {
         this.list = [];
     }
     
-    // value：ダメージ / enemy：当たった敵（頭の上に出す）
+    // value：ダメージ / enemy：当たった敵（頭の上に出す。position と size があれば主人公でもよい）
     // opts.affinity：'weak'（有利属性）/ 'resist'（不利属性）/ 'normal'
     // opts.element：魔法の属性（'炎' など。ナイフは null） / opts.tick：残り火・竜巻のような続けて当たるダメージ
+    // opts.heal：回復した量（緑の「+25」）
     add(value, enemy, opts = {}) {
         const n = Math.round(value);
         if (!(n > 0) || !enemy) return;
         const D = DamageNumbers;
-        const palette = D.paletteFor(opts.affinity, opts.element);
+        const palette = opts.heal ? D.COLORS.heal : D.paletteFor(opts.affinity, opts.element);
         const px = opts.affinity === 'weak' ? D.PX.weak : opts.tick ? D.PX.tick : D.PX.normal;
         this.list.push({
-            img: D.render(String(n), palette),
+            img: D.render((opts.heal ? '+' : '') + String(n), palette),
             x: enemy.position.x + (Math.random() - 0.5) * D.JITTER.x,
             y: enemy.position.y - (enemy.size || 40) * D.HEAD + (Math.random() - 0.5) * D.JITTER.y,
             px,
@@ -134,7 +135,8 @@ DamageNumbers.OUTLINE = '#1a0e12';
 DamageNumbers.COLORS = {
     normal: { key: 'normal', top: '#ffffff', bottom: '#cdd3e6' },  // ナイフ（属性なし）
     weak:   { key: 'weak',   top: '#ffb0a0', bottom: '#ff3030' },  // 有利属性
-    resist: { key: 'resist', top: '#b8d6ff', bottom: '#3a7dff' }   // 不利属性
+    resist: { key: 'resist', top: '#b8d6ff', bottom: '#3a7dff' },  // 不利属性
+    heal:   { key: 'heal',   top: '#d8ffe2', bottom: '#3ad06e' }   // 回復（ヒール）
 };
 // 5×7 の数字（# が色のあるドット）
 DamageNumbers.FONT = {
@@ -147,7 +149,8 @@ DamageNumbers.FONT = {
     '6': ['.###.', '##...', '##...', '####.', '##.##', '##.##', '.###.'],
     '7': ['#####', '...##', '..##.', '..##.', '.##..', '.##..', '.##..'],
     '8': ['.###.', '##.##', '##.##', '.###.', '##.##', '##.##', '.###.'],
-    '9': ['.###.', '##.##', '##.##', '.####', '...##', '...##', '.###.']
+    '9': ['.###.', '##.##', '##.##', '.####', '...##', '...##', '.###.'],
+    '+': ['.....', '..#..', '..#..', '#####', '..#..', '..#..', '.....']
 };
 
 window.DamageNumbers = DamageNumbers;

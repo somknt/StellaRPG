@@ -10,6 +10,7 @@ const MAGIC_ELEMENTS = {
     '風': { key: 'wind',    color: '#3fe0b8', light: '#b8fff0', label: '風' }, // 緑と水色の間
     '土': { key: 'earth',   color: '#a8743f', light: '#e6c79a', label: '土' },
     '雷': { key: 'thunder', color: '#a35cff', light: '#dcc2ff', label: '雷' },
+    '癒': { key: 'heal',    color: '#46d97e', light: '#d2ffe0', label: '癒' }, // 治癒魔法（ヒール）
     '光': { key: 'light',   color: '#fff07a', light: '#fffbe0', label: '光' },
     '氷': { key: 'ice',     color: '#66ccff', light: '#d8f3ff', label: '氷' },
     '無': { key: 'none',    color: '#ffb347', light: '#ffe2b8', label: '無' }
@@ -41,7 +42,12 @@ const STARTER_MAGIC = [
     // 雷：前方の敵に直接雷を落とす
     { id: 'magic_205', name: 'ライトニング', category: '攻撃', element: '雷', power: 28, spCost: 12, cooldown: 1.0, chantTime: 1.1, requiredStage: 0, starter: true,
       shape: 'strike', range: 380, radius: 45,
-      description: '前方の敵に直接雷を落とす。' }
+      description: '前方の敵に直接雷を落とす。' },
+    // 治癒：自分の HP を回復する（heal：最大 HP に対する回復の割合）。ねらう向きはない（shape: 'self'）
+    // 詠唱が長いので、攻撃に当たって止められないよう、すきを見て使う。HP が満タンの時は使えない
+    { id: 'magic_206', name: 'ヒール', category: '治癒', element: '癒', power: 0, heal: 0.3, spCost: 20, cooldown: 6.0, chantTime: 1.2, requiredStage: 0, starter: true,
+      shape: 'self',
+      description: 'やさしい星の光で傷を癒す。最大HPの30%を回復する。詠唱が長く、攻撃に当たると止まってしまう。' }
 ];
 
 // 燃える地面か（草原・畑・花・木・柵・看板・家など。土の道・石畳・水・井戸は燃えない）
@@ -721,6 +727,84 @@ class MagicCircleEffect {
     }
 }
 
+// ヒール（治癒魔法）の光：足元に緑の魔法陣が広がり、体のまわりから光の粒が立ちのぼる（主人公についていく）
+class HealEffect {
+    constructor(target) {
+        this.target = target;
+        this.age = 0;
+        this.life = HealEffect.LIFE;
+        this.active = true;
+        // 立ちのぼる光の粒（角度・横の広がり・出る時間・速さ・大きさ）
+        this.sparks = [];
+        for (let i = 0; i < 16; i++) {
+            this.sparks.push({ x: (Math.random() - 0.5) * 2, delay: Math.random() * 0.55, speed: 70 + Math.random() * 60,
+                size: 2 + Math.floor(Math.random() * 3), cross: Math.random() < 0.45 });
+        }
+    }
+    
+    update(dt) {
+        this.age += dt;
+        if (this.age >= this.life) this.active = false;
+    }
+    
+    feet() {
+        const t = this.target;
+        return new Vector2(t.position.x, t.position.y + (t.drawSize || 90) * 0.36);
+    }
+    
+    // 地面：魔法陣が広がって消える（キャラの下に描く）
+    drawGround(ctx, cam) {
+        const p = this.feet().sub(cam);
+        const k = Math.min(1, this.age / 0.25);
+        const fade = this.age < this.life - 0.35 ? 1 : Math.max(0, (this.life - this.age) / 0.35);
+        const r = 34 + 26 * (1 - (1 - k) * (1 - k));
+        ctx.save();
+        const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 1.2);
+        glow.addColorStop(0, 'rgba(120, 255, 170, 0.45)');
+        glow.addColorStop(1, 'rgba(70, 217, 126, 0)');
+        ctx.globalAlpha = fade;
+        ctx.fillStyle = glow;
+        ctx.beginPath(); ctx.ellipse(p.x, p.y, r * 1.2, r * 0.6, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        drawMagicCircle(ctx, p.x, p.y, r, '癒', this.age * 1.8, 0.9 * fade, 0.5);
+    }
+    
+    // 体の前：光の柱と、立ちのぼる光の粒
+    draw(ctx, cam) {
+        const t = this.target;
+        const f = this.feet().sub(cam);
+        const h = (t.drawSize || 90) * 1.15;
+        const a = this.age, fade = a < this.life - 0.35 ? Math.min(1, a / 0.12) : Math.max(0, (this.life - a) / 0.35);
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        // 光の柱（足元から上へ、だんだん薄く）
+        const col = ctx.createLinearGradient(0, f.y, 0, f.y - h);
+        col.addColorStop(0, `rgba(110, 255, 160, ${0.38 * fade})`);
+        col.addColorStop(1, 'rgba(110, 255, 160, 0)');
+        ctx.fillStyle = col;
+        ctx.fillRect(f.x - 26, f.y - h, 52, h);
+        // 光の粒（ドット絵らしく四角で。十字の形の物もある）
+        for (const s of this.sparks) {
+            const age = a - s.delay;
+            if (age <= 0) continue;
+            const life = 0.75;
+            if (age > life) continue;
+            const x = Math.round(f.x + s.x * 30 + Math.sin(age * 9 + s.x * 5) * 3);
+            const y = Math.round(f.y - 8 - age * s.speed);
+            ctx.globalAlpha = (1 - age / life) * fade;
+            ctx.fillStyle = age < 0.15 ? '#ffffff' : '#9dffbe';
+            const z = s.size;
+            ctx.fillRect(x - Math.floor(z / 2), y - Math.floor(z / 2), z, z);
+            if (s.cross) {
+                ctx.fillRect(x - z - 1, y - 1, z * 2 + 2, 2);
+                ctx.fillRect(x - 1, y - z - 1, 2, z * 2 + 2);
+            }
+        }
+        ctx.restore();
+    }
+}
+HealEffect.LIFE = 1.1;
+
 class MagicSystem {
     constructor() {
         this.projectiles = [];
@@ -728,7 +812,13 @@ class MagicSystem {
         this.effects = [];
         this.firePatches = [];  // ファイヤーボールの残り火
         this.tornados = [];     // テンペストの竜巻
+        this.heals = [];        // ヒールの光（HealEffect）
         this.map = null;        // 燃える地面かどうかを調べるのに使う
+    }
+    
+    // ヒールの光を出す（target：回復した主人公。ついていく）
+    addHeal(target) {
+        this.heals.push(new HealEffect(target));
     }
     
     setMap(map) {
@@ -749,6 +839,7 @@ class MagicSystem {
         for (const f of this.firePatches) f.update(deltaTime);
         for (const t of this.tornados) t.update(deltaTime);
         for (const effect of this.effects) effect.update(deltaTime);
+        for (const h of this.heals) h.update(deltaTime);
         
         // 非アクティブを削除
         this.projectiles = this.projectiles.filter(p => p.active);
@@ -756,6 +847,7 @@ class MagicSystem {
         this.firePatches = this.firePatches.filter(f => f.active);
         this.tornados = this.tornados.filter(t => t.active);
         this.effects = this.effects.filter(e => e.active);
+        this.heals = this.heals.filter(h => h.active);
     }
     
     // 弾が消えた時（敵に当たった・最大距離まで飛んだ）：ファイヤーボールなら、燃える地面に炎を残す
@@ -900,9 +992,10 @@ class MagicSystem {
         return hits;
     }
     
-    // 地面に描くもの（残り火）：敵やキャラより先に描く
+    // 地面に描くもの（残り火・ヒールの魔法陣）：敵やキャラより先に描く
     drawGround(ctx, camera) {
         for (const f of this.firePatches) f.draw(ctx, camera);
+        for (const h of this.heals) h.drawGround(ctx, camera);
     }
     
     draw(ctx, camera) {
@@ -910,6 +1003,7 @@ class MagicSystem {
         for (const t of this.tornados) t.draw(ctx, camera);
         for (const s of this.strikes) s.draw(ctx, camera);
         for (const proj of this.projectiles) proj.draw(ctx, camera);
+        for (const h of this.heals) h.draw(ctx, camera);
     }
     
     getElementColor(element) {
@@ -922,6 +1016,7 @@ class MagicSystem {
         this.effects = [];
         this.firePatches = [];
         this.tornados = [];
+        this.heals = [];
     }
 }
 

@@ -272,7 +272,7 @@ class BattleMode {
         };
         // 一時停止の画面のボタンは game.js でまとめて登録している（ボス戦と共通）
         on('result-retry', () => this.game.restartBattle());
-        on('result-select', () => this.game.leaveBattle('hero_select'));
+        on('result-select', () => this.game.leaveBattle('equip'));
     }
     
     updateHUD() {

@@ -1,5 +1,7 @@
 // バトルモードの記録（バトルコイン・クリアしたボス・クリアタイムのマイベスト）
-// ブラウザの localStorage に保存する（この端末だけの記録。保存できない時は、その間だけ覚えておく）
+// ログインしている時は、アカウントのセーブデータ（account.js の Account.data.battle）に入れる
+//   オンラインのアカウントならサーバーにも保存されるので、PC・スマホのどちらで遊んでも同じ記録になる
+// ログインしていない時（テストなど）だけ、前と同じくこの端末の localStorage に保存する
 //
 // - ボスを倒すとバトルコインがもらえる：ボスの基本のコイン（boss_data.js の coins）＋ ランクのボーナス
 // - ランクはクリアタイムで決まる（BattleRecords.RANKS）
@@ -18,9 +20,12 @@ const BattleRecords = {
         { rank: 'D',  max: Infinity, bonus: 0 }
     ],
     
-    data: null,
+    data: null,   // ログインしていない時の記録
+    
+    get useAccount() { return !!(window.Account && Account.loggedIn); },
     
     load() {
+        if (this.useAccount) return Account.data.battle;
         if (this.data) return this.data;
         let d = null;
         try {
@@ -36,6 +41,7 @@ const BattleRecords = {
     },
     
     save() {
+        if (this.useAccount) return; // アカウントの記録は Account.update が保存する
         try {
             if (window.localStorage) localStorage.setItem(this.KEY, JSON.stringify(this.data));
         } catch (e) { /* 保存できなくても遊べる */ }
@@ -86,16 +92,18 @@ const BattleRecords = {
         const gained = base + r.bonus;
         const first = !d.clears[id];
         const prevBest = d.records[id] && d.records[id][0] ? d.records[id][0].time : Infinity;
-        d.coins += gained;
-        d.clears[id] = (d.clears[id] || 0) + 1;
         const entry = { time, rank: r.rank, hero: hero || 'male', date: new Date().toISOString() };
-        const list = (d.records[id] || []).concat([entry]);
-        // 速い順（同じタイムなら先に出した記録が上）
-        list.sort((a, b) => a.time - b.time || (a.date < b.date ? -1 : 1));
-        d.records[id] = list.slice(0, this.MAX_RECORDS);
-        const i = d.records[id].indexOf(entry);
-        this.save();
-        return { time, rank: r.rank, base, bonus: r.bonus, gained, coins: d.coins, place: i >= 0 ? i + 1 : null, best: time < prevBest, first };
+        // コインを足して、記録を速い順に入れる（アカウントの時は「できごと」にして、サーバーにも送る）
+        const ev = { t: 'clear', boss: id, gained, entry };
+        if (this.useAccount) {
+            Account.update(ev);
+        } else {
+            window.Account.applyEvent({ battle: d, applied: [] }, { ...ev, id: 'local' });
+            this.save();
+        }
+        const list = this.getRecords(id);
+        const i = list.findIndex(x => x.date === entry.date && x.time === entry.time);
+        return { time, rank: r.rank, base, bonus: r.bonus, gained, coins: this.getCoins(), place: i >= 0 ? i + 1 : null, best: time < prevBest, first };
     }
 };
 

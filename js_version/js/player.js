@@ -82,8 +82,8 @@ class Player {
         this.faceTarget = null;             // この敵の方を向き続ける（game.js が毎フレーム入れる）
         this.slashFx = null;                // 斬撃エフェクト（{ t, angle }。t は経過時間）
         
-        // 魔法（最初から 炎・水・風・土・雷 の5つが使える）
-        this.learnedMagic = ['magic_201', 'magic_202', 'magic_203', 'magic_204', 'magic_205'];
+        // 魔法（最初から 炎・水・風・土・雷 の5つと、治癒魔法のヒールが使える）
+        this.learnedMagic = ['magic_201', 'magic_202', 'magic_203', 'magic_204', 'magic_205', 'magic_206'];
         // 魔法パレットにセットする5つ（覚えた魔法の中から選ぶ。最初は 炎・水・風・土・雷）
         // パレットの上から時計回りの順。setMagicSlot で入れ替えられる
         this.magicSlots = [...Player.DEFAULT_MAGIC_SLOTS];
@@ -616,6 +616,7 @@ class Player {
         if (this.starPowerStage < (magic.requiredStage || 0)) return '星力不足';
         if (this.isChanting || this.isDodging || this.isAttacking || this.hitStun > 0) return '行動中';
         if (this.magicCooldowns[magic.id] > 0) return 'クールダウン';
+        if (magic.category === '治癒' && this.currentHP >= this.maxHP) return 'HP満タン'; // 回復しても意味がない時は MP を使わせない
         if (this.currentSP < magic.spCost) return 'SP不足';
         return null;
     }
@@ -695,6 +696,13 @@ class Player {
         if (!this.readyCast) return null;
         const magic = this.readyCast;
         this.readyCast = null;
+        
+        // 自分にかける魔法（ヒール）：向きは変えない。足元に出す
+        if (magic.shape === 'self') {
+            const feet = this.position.add(new Vector2(0, this.drawSize * 0.36));
+            return { magic, self: true, position: this.position.clone(), direction: this.directionToVector(this.direction),
+                circlePos: feet, circleShape: { sx: 1, sy: 0.5 }, circleRadius: this.drawSize * 0.4 };
+        }
         
         let aim;
         if (aimDir && exact) {
@@ -803,13 +811,16 @@ class Player {
         return actualDamage;
     }
     
-    heal(amount) {
+    // 回復する。戻り値は実際に回復した量。silent：音を鳴らさない（ヒールは game.js が魔法の音を鳴らす）
+    heal(amount, silent = false) {
+        const before = this.currentHP;
         this.currentHP = Math.min(this.maxHP, this.currentHP + amount);
         
         // 回復効果音
-        if (window.soundManager) {
+        if (!silent && window.soundManager) {
             window.soundManager.playSFX('heal');
         }
+        return this.currentHP - before;
     }
     
     restoreSP(amount) {

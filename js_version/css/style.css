@@ -69,7 +69,7 @@ body:not([data-state="playing"]) #debug-info {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 8px;
+    gap: 4px;
     transform: scale(var(--hud-scale, 1)); /* スマホでは文字が小さくなりすぎないよう拡大 */
     transform-origin: top left;
 }
@@ -136,43 +136,131 @@ body:not([data-state="playing"]) #debug-info {
     font-variant-numeric: tabular-nums;
 }
 
-/* Level Info */
-.stat-info {
-    background: rgba(0, 0, 0, 0.6);
-    padding: 8px 12px;
-    border-radius: 8px;
-    border: 2px solid rgba(255, 255, 255, 0.2);
+/* HP のバー（HP が少ない時は赤いバーにかえる） */
+#hp-bar { background-image: url('../assets/ui/status_fill_hp.png'); }
+
+/* ---------- HP が少ない時（ui.js：HP 30% 以下で .hp-low、15% 以下で .hp-critical） ----------
+   HP のバーが赤くなって明るく脈打ち、左の星（星章）が赤くうすく光る。HP が減った瞬間は、枠全体が赤く光る */
+#hp-bar.low {
+    background-image: url('../assets/ui/hud/status_fill_hp_low.png');
+    animation: hp-low-pulse 1.4s ease-in-out infinite;
+}
+#status-panel.hp-critical #hp-bar.low { animation-duration: 0.7s; }
+@keyframes hp-low-pulse {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.45) saturate(1.25); }
+}
+#hp-text.low { color: #ffe0da; text-shadow: 0 0 2px #000, 0 1px 2px #000, 0 0 6px rgba(255, 40, 40, 0.9); }
+
+/* 星章の結晶を赤くした絵（assets/ui/hud/status_emblem_red.png）を重ねて、うすく光らせる */
+.status-emblem-red {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+    opacity: 0;
+    pointer-events: none;
+    -webkit-user-drag: none;
+}
+#status-panel.hp-low .status-emblem-red { animation: emblem-red 1.4s ease-in-out infinite; }
+#status-panel.hp-critical .status-emblem-red { animation-duration: 0.7s; }
+@keyframes emblem-red {
+    0%, 100% { opacity: 0.2; filter: drop-shadow(0 0 1px rgba(255, 70, 70, 0.4)); }
+    50% { opacity: 0.8; filter: drop-shadow(0 0 4px rgba(255, 50, 50, 0.95)) drop-shadow(0 0 10px rgba(255, 0, 0, 0.5)); }
+}
+/* ダメージを受けた瞬間：枠全体が赤く光って消える */
+#status-panel.hp-hit { animation: hud-hit 0.45s ease-out; }
+@keyframes hud-hit {
+    0% { filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6)) drop-shadow(0 0 6px rgba(255, 40, 40, 1)) brightness(1.15); }
+    100% { filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6)); }
+}
+
+/* ---------- HP バーの上のプレイヤー名（assets/ui/hud/nameplate.png。432×87 の絵を半分の大きさで。上の宝石は札からはみ出す） ---------- */
+#hud-name {
+    position: absolute;
+    left: 141px;
+    top: -11px;
+    width: 216px;
+    height: 43.5px;
+    background: url('../assets/ui/hud/nameplate.png') center / 100% 100% no-repeat;
+    pointer-events: none;
+}
+#hud-name[hidden] { display: none; }
+#hud-name-text {
+    position: absolute;
+    left: 16px;
+    right: 16px;
+    top: 19.5px;
+    height: 19.5px;
     display: flex;
-    gap: 15px;
+    align-items: center;
+    justify-content: center;
+    font-family: 'DotGothic16', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
     font-size: 14px;
+    letter-spacing: 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    color: #fff4d6;
+    text-shadow: 0 1px 0 #1a0f05, 0 0 3px #000, 0 0 6px rgba(255, 200, 110, 0.45);
 }
+#hud-name.long #hud-name-text { font-size: 12px; letter-spacing: 0; }
 
-.xp-text {
-    color: #ffb347;
+/* ---------- ステータスの下：レベルの札と、今選んでいる魔法の札（assets/ui/hud/。2倍の絵を半分の大きさで） ---------- */
+.hud-bar {
+    position: relative;
+    image-rendering: auto;
+    filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6));
 }
-
-/* 今選んでいる魔法 */
-#magic-info {
+.hud-bar-frame {
+    display: block;
+    width: 100%;
+    height: 100%;
+    -webkit-user-drag: none;
+}
+.hud-bar-inner {
+    position: absolute;
+    display: flex;
     align-items: center;
     gap: 8px;
+    font-family: 'DotGothic16', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+    color: #fff4d6;
+    text-shadow: 0 1px 0 #000, 0 0 3px #000;
+    white-space: nowrap;
 }
-
-.magic-dot {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--magic-color, #ff4a3a);
-    box-shadow: 0 0 8px var(--magic-color, #ff4a3a);
+/* レベル：星の札（203×52。中の暗い所は x 54〜175・y 14〜38） */
+#level-info { width: 203px; height: 52px; margin-top: -2px; }
+#level-info .hud-bar-inner { left: 60px; right: 30px; top: 14px; height: 24px; justify-content: space-between; }
+#level-info .lv { color: #ffd76a; }
+#level-info .lv small { font-size: 12px; margin-right: 2px; }
+#level-info .lv b { font-size: 18px; font-weight: normal; }
+#level-info .xp-text { font-size: 11px; color: #ffcf8a; }
+#level-info .xp-text[hidden] { display: none; }
+/* 魔法：属性の色の玉の札（232×38。玉は x 18・y 5.4 に 25px。中の暗い所は x 49〜215・y 6〜32） */
+#magic-info { width: 232.5px; height: 37.5px; margin-top: -6px; }
+.hud-orb {
+    position: absolute;
+    left: 18px;
+    top: 5.4px;
+    width: 25.2px;
+    height: 25.2px;
+    -webkit-user-drag: none;
+    transition: filter 0.2s;
 }
-
-.magic-cost {
-    color: #9fa8ff;
-    font-size: 12px;
+#magic-info .hud-bar-inner { left: 52px; right: 26px; top: 7px; height: 24px; justify-content: space-between; }
+#magic-name { font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+.magic-cost { font-size: 11px; color: #a8b4ff; }
+#magic-info.unavailable .hud-bar-inner, #magic-info.unavailable .hud-orb { opacity: 0.55; }
+#magic-info.unavailable .hud-orb { filter: grayscale(0.6); }
+#magic-info.no-mp .magic-cost { color: #ff8f8f; }
+#magic-info.empty #magic-name { color: #a29cbf; }
+/* 詠唱している間は、玉が光る */
+#magic-info.chanting .hud-orb { animation: orb-chant 0.5s ease-in-out infinite alternate; }
+@keyframes orb-chant {
+    from { filter: drop-shadow(0 0 2px var(--magic-color, #fff)) brightness(1.05); }
+    to { filter: drop-shadow(0 0 7px var(--magic-color, #fff)) brightness(1.35); }
 }
-
-#magic-info.unavailable {
-    opacity: 0.5;
-}
+.hud-preload { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 
 /* Debug Info */
 #debug-info {
@@ -1285,8 +1373,374 @@ body.touch .title-start .touch-only { display: inline; }
     75% { translate: 6px 0; }
 }
 
-/* ---- 主人公選択 ---- */
-#hero-vs { font-size: 20px; color: #ffb08a; letter-spacing: 2px; margin-bottom: 8px; }
+/* ---- アカウント（作成・ログイン） ---- */
+.account-panel {
+    width: 560px;
+    gap: 10px;
+    /* スマホでも画面の高さに収まるように、大きくしすぎない */
+    transform: scale(min(var(--hud-scale, 1), 1.12));
+}
+.acc-tabs { display: flex; gap: 8px; margin-bottom: 2px; }
+.acc-tab {
+    flex: 1;
+    padding: 8px;
+    font-family: inherit;
+    font-size: 18px;
+    letter-spacing: 2px;
+    color: #c9c3e8;
+    background: rgba(10, 12, 34, 0.7);
+    border: 2px solid rgba(201, 162, 74, 0.45);
+    border-radius: 3px;
+    cursor: pointer;
+    pointer-events: auto;
+}
+.acc-tab.on { color: #2a1606; background: linear-gradient(180deg, #ffd977, #c8902e); border-color: #ffe9a8; }
+.acc-tab:not(.on).focused, .acc-tab:not(.on):hover { color: #fff7d0; border-color: #ffd76a; }
+.acc-form { display: flex; flex-direction: column; gap: 9px; text-align: left; }
+.acc-field { display: flex; flex-direction: column; gap: 4px; }
+.acc-field[hidden] { display: none; }
+.acc-label { font-size: 15px; color: #ffd76a; letter-spacing: 2px; }
+.acc-input {
+    width: 100%;
+    padding: 9px 12px;
+    font-family: inherit;
+    font-size: 20px;
+    color: #fff7e0;
+    background: rgba(4, 6, 20, 0.88);
+    border: 2px solid rgba(201, 162, 74, 0.6);
+    border-radius: 3px;
+    outline: none;
+    pointer-events: auto;
+    -webkit-user-select: text;
+    user-select: text;
+    touch-action: manipulation;
+}
+.acc-input::placeholder { color: rgba(200, 195, 230, 0.42); font-size: 16px; }
+.acc-input:focus, .acc-input.focused {
+    border-color: #ffd76a;
+    box-shadow: 0 0 0 2px rgba(255, 215, 110, 0.25), 0 0 14px rgba(255, 200, 90, 0.35);
+}
+.acc-pass { display: flex; gap: 6px; }
+.acc-pass .acc-input { flex: 1; min-width: 0; }
+.acc-eye {
+    width: 66px;
+    flex: none;
+    font-family: inherit;
+    font-size: 15px;
+    color: #ffd76a;
+    background: rgba(20, 24, 62, 0.9);
+    border: 2px solid rgba(201, 162, 74, 0.6);
+    border-radius: 3px;
+    cursor: pointer;
+    pointer-events: auto;
+}
+.acc-eye:hover { border-color: #ffd76a; color: #fff7d0; }
+.acc-error {
+    min-height: 22px;
+    font-size: 15px;
+    line-height: 1.4;
+    color: #ff9e8e;
+    text-align: center;
+    text-shadow: 0 1px 2px #000;
+}
+.acc-error.shake { animation: card-shake 0.35s; }
+.acc-form .menu-item.primary, #scr-accinfo .menu-item { text-align: center; font-size: 22px; }
+.menu-item:disabled { opacity: 0.65; cursor: wait; }
+.acc-note { font-size: 13px; line-height: 1.5; color: #9fd6a8; }
+.acc-note.local { color: #d8c48a; }
+#scr-account.busy .acc-form .acc-input, #scr-account.busy .acc-tabs { opacity: 0.6; pointer-events: none; }
+
+/* ---- プレイヤー登録（名前と主人公） ---- */
+.profile-sub { font-size: 17px; color: #c9c3e8; letter-spacing: 1px; }
+.profile-name {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 4px 0 18px;
+    padding: 10px 18px;
+    background: linear-gradient(180deg, rgba(16, 20, 56, 0.92), rgba(8, 10, 30, 0.92));
+    border: 2px solid #c9a24a;
+    border-radius: 4px;
+    box-shadow: 0 0 0 2px #2a1a08, 0 8px 26px rgba(0, 0, 0, 0.55);
+}
+.profile-name .acc-label { font-size: 18px; }
+.profile-name .acc-input { width: 330px; font-size: 24px; }
+.profile-count { min-width: 48px; font-size: 15px; color: #a9a3c9; font-variant-numeric: tabular-nums; }
+.profile-count.over { color: #ff9e8e; }
+#scr-profile .hero-cards { gap: 70px; }
+#scr-profile .screen-buttons { margin-top: 2px; }
+#profile-back[hidden] { display: none; }
+
+/* ---- メインメニュー：右上のプレイヤー ---- */
+.menu-user {
+    position: absolute;
+    top: 18px;
+    right: 22px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    font-size: 18px;
+    color: #fff4d0;
+    background: rgba(10, 12, 34, 0.85);
+    border: 2px solid rgba(201, 162, 74, 0.7);
+    border-radius: 3px;
+    transform: scale(var(--hud-scale, 1));
+    transform-origin: top right;
+}
+.menu-user[hidden] { display: none; }
+.menu-user i { font-style: normal; color: #ffd76a; text-shadow: 0 0 6px rgba(255, 200, 90, 0.8); }
+.menu-user b { font-weight: normal; }
+.menu-user small { font-size: 12px; color: #9fd6a8; }
+.menu-user small.offline { color: #ffb27a; } /* サーバーにつながっていない（変えた所は、つながった時に送る） */
+
+/* ---- アカウントの画面 ---- */
+.acc-info {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 6px 16px;
+    margin: 2px 0 10px;
+    padding: 12px 16px;
+    text-align: left;
+    font-size: 18px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid rgba(201, 162, 74, 0.35);
+}
+/* 「プレイヤー名・主人公を変える」は長いので、枠を広くして左の★と文字が重ならないようにする */
+#scr-accinfo .menu-panel { width: 540px; }
+#scr-accinfo .menu-item { padding-left: 48px; padding-right: 48px; }
+.acc-info dt { color: #ffd76a; }
+.acc-info dd { color: #fff4d0; word-break: break-all; }
+#ai-logout.confirm { color: #ffc2b4; border-color: rgba(255, 130, 110, 0.75); }
+
+/* ---- 装備 ---- */
+#scr-equip { gap: 6px; }
+.equip-title { font-size: 34px; margin-bottom: 0; }
+#equip-vs { font-size: 18px; color: #ffb08a; letter-spacing: 2px; margin-bottom: 4px; }
+.equip-wrap { display: flex; gap: 14px; align-items: stretch; }
+.equip-col {
+    padding: 10px 14px 12px;
+    background: linear-gradient(180deg, rgba(16, 20, 56, 0.93), rgba(8, 10, 30, 0.93));
+    border: 2px solid #c9a24a;
+    border-radius: 4px;
+    box-shadow: 0 0 0 2px #2a1a08, 0 8px 26px rgba(0, 0, 0, 0.55);
+}
+.equip-col h3 {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin: 2px 0 8px;
+    font-size: 17px;
+    font-weight: normal;
+    letter-spacing: 3px;
+    color: #ffd76a;
+    border-bottom: 1px solid rgba(201, 162, 74, 0.35);
+}
+.equip-col h3 small { font-size: 14px; letter-spacing: 1px; color: #c9c3e8; }
+/* 主人公 */
+.equip-hero { width: 230px; display: flex; flex-direction: column; align-items: center; }
+.equip-hero canvas { width: 200px; height: 190px; image-rendering: pixelated; }
+.eh-name { font-size: 22px; letter-spacing: 2px; color: #fff4d0; }
+.eh-lv { font-size: 13px; color: #ffd76a; margin-bottom: 8px; }
+.eh-stats {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 14px;
+    width: 100%;
+    padding: 8px 12px;
+    font-size: 16px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(201, 162, 74, 0.3);
+}
+.eh-stats dt { color: #c9c3e8; }
+.eh-stats dd { text-align: right; color: #fff4d0; font-variant-numeric: tabular-nums; }
+.eh-stats em { font-style: normal; font-size: 13px; color: #9fd6a8; }
+/* 武器・防具 */
+.equip-gear { width: 290px; }
+.gear-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.gear-slot {
+    display: grid;
+    grid-template-columns: 38px 30px 1fr auto;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    font-family: inherit;
+    text-align: left;
+    color: #f2eeff;
+    background: rgba(4, 6, 20, 0.6);
+    border: 2px solid rgba(201, 162, 74, 0.45);
+    border-radius: 3px;
+    cursor: pointer;
+    pointer-events: auto;
+}
+.gear-slot .gs-icon {
+    width: 38px;
+    height: 38px;
+    padding: 6px;
+    fill: #ffd76a;
+    background: radial-gradient(circle, rgba(255, 215, 110, 0.2), rgba(0, 0, 0, 0) 70%);
+    border: 1px solid rgba(201, 162, 74, 0.6);
+    border-radius: 50%;
+}
+.gear-slot.empty .gs-icon { fill: rgba(255, 215, 110, 0.32); }
+.gs-label { font-size: 17px; color: #ffd76a; }
+.gs-item { font-size: 18px; line-height: 1.2; }
+.gs-item small { display: block; font-size: 12px; color: #9fd6a8; }
+.gear-slot.empty .gs-item { color: #8f89ad; }
+.gs-lock { padding: 1px 6px; font-size: 12px; color: #a9a3c9; border: 1px solid rgba(169, 163, 201, 0.4); border-radius: 2px; }
+.gear-slot.focused, .gear-slot:hover { border-color: #ffd76a; background: rgba(255, 215, 110, 0.1); }
+.gear-slot.shake { animation: card-shake 0.35s; }
+.gear-note { font-size: 13px; line-height: 1.55; color: #b8b0d8; }
+/* 魔法パレット */
+.equip-magic { width: 590px; display: flex; flex-direction: column; }
+.em-body { display: flex; gap: 14px; }
+/* 星の5つの枠：バトル中のパレットと同じ輪の絵（magic_palette/palette_bg.png。丸の中心は中心から幅の 26.5% の所） */
+.palette-star {
+    position: relative;
+    flex: none;
+    width: 270px;
+    height: 270px;
+    background: url('../assets/ui/magic_palette/palette_bg.png') center / contain no-repeat;
+    filter: drop-shadow(0 0 6px rgba(0, 0, 0, 0.6));
+}
+.ps-slot {
+    --c: transparent;
+    position: absolute;
+    width: 50px;
+    height: 50px;
+    margin: -25px 0 0 -25px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: inherit;
+    color: #ffd76a;
+    background: radial-gradient(circle, rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0) 70%);
+    border: 2px solid rgba(255, 215, 110, 0.25);
+    border-radius: 50%;
+    cursor: pointer;
+    pointer-events: auto;
+    transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+.ps-slot .ps-icon { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+.ps-slot .mi-icon { width: 46px; height: 46px; }
+.ps-plus { font-size: 20px; color: rgba(255, 215, 110, 0.45); }
+.ps-num {
+    position: absolute;
+    right: -6px;
+    top: -6px;
+    width: 18px;
+    height: 18px;
+    font-size: 12px;
+    line-height: 16px;
+    text-align: center;
+    color: #2a1606;
+    background: #ffd76a;
+    border: 1px solid #5a3408;
+    border-radius: 50%;
+    z-index: 1;
+}
+.ps-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.ps-slot.filled { border-color: transparent; box-shadow: 0 0 10px var(--c); }
+.ps-slot.focused, .ps-slot:hover { transform: scale(1.12); border-color: #fff4c0; }
+.ps-slot.target { border-color: #fff4c0; animation: slot-target 0.8s ease-in-out infinite alternate; }
+@keyframes slot-target {
+    from { box-shadow: 0 0 2px rgba(255, 240, 180, 0.6); }
+    to { box-shadow: 0 0 14px rgba(255, 240, 180, 1); }
+}
+.ps-slot.just .mi-icon { animation: slot-in 0.35s ease-out; }
+@keyframes slot-in {
+    0% { transform: scale(0.4); filter: brightness(2); }
+    70% { transform: scale(1.15); }
+    100% { transform: scale(1); filter: brightness(1); }
+}
+.ps-center { position: absolute; inset: 0; pointer-events: none; }
+/* 選べる魔法の札 */
+.magic-list { flex: 1; display: flex; flex-direction: column; gap: 5px; }
+.mg-card {
+    --c: #fff;
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 40px;
+    padding: 2px 10px 2px 4px;
+    font-family: inherit;
+    text-align: left;
+    color: #f2eeff;
+    background: rgba(4, 6, 20, 0.6);
+    background: linear-gradient(90deg, color-mix(in srgb, var(--c) 18%, transparent), rgba(4, 6, 20, 0.6) 60%);
+    border: 2px solid rgba(201, 162, 74, 0.4);
+    border-radius: 3px;
+    cursor: pointer;
+    pointer-events: auto;
+}
+.mg-card .mi-icon { width: 34px; height: 34px; flex: none; }
+.mi-icon.text {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    color: #fff;
+    background: radial-gradient(circle, var(--c), rgba(0, 0, 0, 0.6));
+    border: 2px solid #c9a24a;
+    border-radius: 50%;
+}
+.mg-text { flex: 1; display: flex; flex-direction: column; line-height: 1.15; }
+.mg-text b { font-weight: normal; font-size: 16px; }
+.mg-text small { font-size: 12px; color: #b8b0d8; }
+.mg-badge:empty { display: none; }
+.mg-badge {
+    width: 22px;
+    height: 22px;
+    font-size: 13px;
+    line-height: 20px;
+    text-align: center;
+    color: #2a1606;
+    background: #ffd76a;
+    border: 1px solid #5a3408;
+    border-radius: 50%;
+}
+.mg-card.set { border-color: rgba(255, 215, 110, 0.85); }
+.mg-card.focused, .mg-card:hover { border-color: #fff4c0; box-shadow: 0 0 10px rgba(255, 215, 110, 0.4); }
+/* 魔法の説明 */
+.magic-detail {
+    --c: #ffd76a;
+    min-height: 84px; /* 説明が2行の魔法と同じ高さ（魔法を変えても画面がずれないように） */
+    box-sizing: border-box;
+    margin-top: 8px;
+    padding: 7px 12px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #e6e1ff;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(201, 162, 74, 0.35);
+    border-left: 4px solid var(--c);
+}
+.md-head { display: flex; align-items: baseline; gap: 10px; }
+.md-head b { font-weight: normal; font-size: 17px; color: #fff4d0; }
+.md-tag { padding: 0 8px; font-size: 12px; color: #1a1020; background: var(--c); border-radius: 2px; }
+.md-cost { margin-left: auto; font-size: 13px; color: #a8b4ff; }
+.md-empty { color: #8f89ad; }
+.em-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
+.em-hint { font-size: 13px; color: #b8b0d8; }
+.em-hint.warn { color: #ffcf8a; }
+.equip-clear {
+    flex: none;
+    padding: 4px 14px;
+    font-family: inherit;
+    font-size: 14px;
+    color: #ffd76a;
+    background: rgba(20, 24, 62, 0.9);
+    border: 2px solid rgba(201, 162, 74, 0.6);
+    border-radius: 3px;
+    cursor: pointer;
+    pointer-events: auto;
+}
+.equip-clear.focused, .equip-clear:hover { color: #fff7d0; border-color: #ffd76a; background: rgba(255, 215, 110, 0.15); }
+#scr-equip .screen-buttons { margin-top: 8px; }
+
+/* ---- 主人公のカード（プレイヤー登録） ---- */
 .hero-cards { display: flex; gap: 90px; }
 .hero-card {
     position: relative;

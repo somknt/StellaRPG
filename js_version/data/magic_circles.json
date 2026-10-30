@@ -245,6 +245,21 @@
       "range": 380,
       "radius": 45,
       "description": "前方の敵に直接雷を落とす。"
+    },
+    {
+      "id": "magic_206",
+      "name": "ヒール",
+      "category": "治癒",
+      "element": "癒",
+      "power": 0,
+      "heal": 0.3,
+      "spCost": 20,
+      "cooldown": 6.0,
+      "chantTime": 1.2,
+      "requiredStage": 0,
+      "starter": true,
+      "shape": "self",
+      "description": "やさしい星の光で傷を癒す。最大HPの30%を回復する。詠唱が長く、攻撃に当たると止まってしまう。"
     }
   ]
 }

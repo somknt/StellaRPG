@@ -28,29 +28,39 @@
             <div id="hud-left">
                 <!-- ステータスバー（星章のデザイン）
                      枠の画像の上に、HP・ST・MP の色の画像を重ねて、今の量のところで切り取って表示する
-                     --l/--r/--t/--b：枠画像の中でのバーの中身の位置（%） -->
+                     --l/--r/--t/--b：枠画像の中でのバーの中身の位置（%）
+                     HP が少ない時（ui.js）：HP のバーが赤くなり、左の星が赤くうすく光る（status-emblem-red を重ねる） -->
                 <div id="status-panel">
                     <img class="status-frame" src="assets/ui/status_frame.png" alt="" draggable="false">
-                    <div class="status-fill" id="hp-bar" style="--l:34.251; --r:93.647; background-image:url('assets/ui/status_fill_hp.png')"></div>
+                    <img class="status-emblem-red" src="assets/ui/hud/status_emblem_red.png" alt="" draggable="false">
+                    <div class="status-fill" id="hp-bar" style="--l:34.251; --r:93.647"></div>
                     <div class="status-fill" id="stamina-bar" style="--l:34.727; --r:75.437; background-image:url('assets/ui/status_fill_st.png')"></div>
                     <div class="status-fill" id="sp-bar" style="--l:34.674; --r:71.784; background-image:url('assets/ui/status_fill_mp.png')"></div>
                     <div class="status-value" id="hp-text" style="--l:34.251; --r:93.647; --t:29.082; --b:41.991">100/100</div>
                     <div class="status-value" id="stamina-text" style="--l:34.727; --r:75.437; --t:54.588; --b:62.83">100/100</div>
                     <div class="status-value" id="sp-text" style="--l:34.674; --r:71.784; --t:74.961; --b:84.292">50/50</div>
+                    <!-- HP バーの上：プレイヤー名の札（assets/ui/hud/nameplate.png） -->
+                    <div id="hud-name"><span id="hud-name-text"></span></div>
                 </div>
                 
-                <!-- Level & XP -->
-                <div class="stat-info" id="level-info">
-                    <span>Lv.<span id="player-level">1</span></span>
-                    <span class="xp-text">XP: <span id="player-xp">0</span>/<span id="player-xp-next">100</span></span>
+                <!-- ステータスバーの下：レベル（星の札）と、今選んでいる魔法（属性の色の玉） -->
+                <div class="hud-bar" id="level-info">
+                    <img class="hud-bar-frame" src="assets/ui/hud/level_bar.png" alt="" draggable="false">
+                    <div class="hud-bar-inner">
+                        <span class="lv"><small>Lv.</small><b id="player-level">1</b></span>
+                        <span class="xp-text" id="xp-box">EXP <span id="player-xp">0</span>/<span id="player-xp-next">10</span></span>
+                    </div>
                 </div>
-                
-                <!-- 今選んでいる魔法 -->
-                <div class="stat-info" id="magic-info">
-                    <span class="magic-dot" id="magic-dot"></span>
-                    <span id="magic-name">火球陣</span>
-                    <span class="magic-cost" id="magic-cost">MP10</span>
+                <div class="hud-bar" id="magic-info">
+                    <img class="hud-bar-frame" src="assets/ui/hud/magic_bar.png" alt="" draggable="false">
+                    <img class="hud-orb" id="magic-orb" src="assets/ui/hud/orb_none.png" alt="" draggable="false">
+                    <div class="hud-bar-inner">
+                        <span id="magic-name">魔法なし</span>
+                        <span class="magic-cost" id="magic-cost"></span>
+                    </div>
                 </div>
+                <!-- HP が少ない時の赤いバーを先に読んでおく（初めて赤くなった時にちらつかないように） -->
+                <img class="hud-preload" src="assets/ui/hud/status_fill_hp_low.png" alt="" aria-hidden="true">
             </div>
             
             <!-- Debug Info（タッチ端末では非表示） -->
@@ -141,7 +151,7 @@
                     <h2 id="result-title">GAME CLEAR</h2>
                     <div id="result-stats"></div>
                     <button class="ui-btn primary" id="result-retry" type="button">もう一度挑戦</button>
-                    <button class="ui-btn" id="result-select" type="button">キャラクター選択へ</button>
+                    <button class="ui-btn" id="result-select" type="button">装備画面へ</button>
                     <p class="battle-hint">Enter / R でもう一度挑戦</p>
                 </div>
             </div>
@@ -167,17 +177,98 @@
                 <div class="title-start"><span class="ts-star">✦</span><span class="pc-only">Press Enter</span><span class="touch-only">Tap to Start</span><span class="ts-star">✦</span></div>
             </div>
             
+            <!-- アカウント（はじめて遊ぶ：アカウント作成 ／ ログイン）。account.js -->
+            <div class="screen" id="scr-account">
+                <div class="menu-panel account-panel">
+                    <div class="menu-deco">✦ ─────── ✧ ─────── ✦</div>
+                    <h2 class="menu-title" id="acc-title">アカウント作成</h2>
+                    <div class="acc-tabs" role="tablist">
+                        <button class="acc-tab ui-btn" id="acc-tab-create" type="button" data-nav data-tab="create">はじめて遊ぶ</button>
+                        <button class="acc-tab ui-btn" id="acc-tab-login" type="button" data-nav data-tab="login">ログイン</button>
+                    </div>
+                    <form class="acc-form" id="acc-form" autocomplete="on" novalidate>
+                        <label class="acc-field">
+                            <span class="acc-label">ユーザー名</span>
+                            <input class="acc-input" id="acc-user" name="username" type="text" inputmode="url" autocapitalize="off" autocorrect="off"
+                                   spellcheck="false" autocomplete="username" maxlength="16" data-nav placeholder="半角英数字と _（3〜16文字）">
+                        </label>
+                        <label class="acc-field">
+                            <span class="acc-label">パスワード</span>
+                            <span class="acc-pass">
+                                <input class="acc-input" id="acc-pass" name="password" type="password" autocomplete="new-password" maxlength="64" data-nav placeholder="6文字以上">
+                                <button class="acc-eye ui-btn" id="acc-eye" type="button" aria-label="パスワードを表示">表示</button>
+                            </span>
+                        </label>
+                        <label class="acc-field" id="acc-pass2-row">
+                            <span class="acc-label">パスワード（確認）</span>
+                            <input class="acc-input" id="acc-pass2" type="password" autocomplete="new-password" maxlength="64" data-nav placeholder="同じパスワードをもう一度">
+                        </label>
+                        <p class="acc-error" id="acc-error" role="alert"></p>
+                        <button class="menu-item ui-btn primary" id="acc-submit" type="submit" data-nav>アカウントを作る</button>
+                    </form>
+                    <p class="acc-note" id="acc-note"></p>
+                    <button class="menu-item ui-btn back" id="acc-back" type="button" data-nav>タイトルに戻る</button>
+                </div>
+            </div>
+            
+            <!-- プレイヤー登録（プレイヤー名と主人公）。アカウントを作った後・アカウントの画面から -->
+            <div class="screen" id="scr-profile">
+                <h2 class="screen-title">プレイヤー登録</h2>
+                <p class="profile-sub">ゲームで表示されるプレイヤー名と、主人公を決めてください</p>
+                <div class="profile-name">
+                    <label class="acc-label" for="profile-name-input">プレイヤー名</label>
+                    <input class="acc-input" id="profile-name-input" type="text" maxlength="20" autocomplete="nickname" spellcheck="false" data-nav placeholder="1〜10文字">
+                    <span class="profile-count" id="profile-count">0/10</span>
+                </div>
+                <div class="hero-cards">
+                    <button class="hero-card ui-btn" id="hero-male" type="button" data-nav>
+                        <canvas width="200" height="190"></canvas>
+                        <span class="hc-name">男の子</span>
+                    </button>
+                    <button class="hero-card ui-btn" id="hero-female" type="button" data-nav>
+                        <canvas width="200" height="190"></canvas>
+                        <span class="hc-name">女の子</span>
+                    </button>
+                </div>
+                <p class="hero-note">ステータスは男の子・女の子とも同じです（あとでアカウントの画面から変えられます）</p>
+                <p class="acc-error" id="profile-error" role="alert"></p>
+                <div class="screen-buttons">
+                    <button class="menu-item ui-btn primary" id="profile-ok" type="button" data-nav>決定</button>
+                    <button class="menu-item ui-btn back" id="profile-back" type="button" data-nav>戻る</button>
+                </div>
+            </div>
+            
             <!-- メインメニュー -->
             <div class="screen" id="scr-menu">
+                <!-- 右上：ログインしているプレイヤー -->
+                <div class="menu-user" id="menu-user"></div>
                 <div class="menu-panel">
                     <div class="menu-deco">✦ ─────── ✧ ─────── ✦</div>
                     <h2 class="menu-title">メインメニュー</h2>
                     <button class="menu-item ui-btn" id="menu-story" type="button" data-nav>メインストーリー</button>
                     <button class="menu-item ui-btn" id="menu-battle" type="button" data-nav>バトルモード</button>
+                    <button class="menu-item ui-btn" id="menu-account" type="button" data-nav>アカウント</button>
                     <button class="menu-item ui-btn" id="menu-settings" type="button" data-nav>設定</button>
                     <div class="menu-deco">✦ ─────── ✧ ─────── ✦</div>
                 </div>
                 <p class="screen-hint pc-only">↑↓ で選んで Enter で決定 ／ Esc でタイトルへ</p>
+            </div>
+            
+            <!-- アカウント（ログインしている人・名前と主人公の変更・ログアウト） -->
+            <div class="screen" id="scr-accinfo">
+                <div class="menu-panel">
+                    <div class="menu-deco">✦ ─────── ✧ ─────── ✦</div>
+                    <h2 class="menu-title">アカウント</h2>
+                    <dl class="acc-info">
+                        <dt>プレイヤー名</dt><dd id="ai-name"></dd>
+                        <dt>主人公</dt><dd id="ai-hero"></dd>
+                        <dt>ユーザー名</dt><dd id="ai-user"></dd>
+                        <dt>保存先</dt><dd id="ai-mode"></dd>
+                    </dl>
+                    <button class="menu-item ui-btn" id="ai-profile" type="button" data-nav>プレイヤー名・主人公を変える</button>
+                    <button class="menu-item ui-btn" id="ai-logout" type="button" data-nav>ログアウト</button>
+                    <button class="menu-item ui-btn back" id="ai-back" type="button" data-nav>メニューに戻る</button>
+                </div>
             </div>
             
             <!-- メインストーリー（今後実装予定） -->
@@ -237,24 +328,45 @@
                 <p class="screen-hint pc-only">←→ でモンスターを切りかえ ／ Esc で戻る</p>
             </div>
             
-            <!-- 主人公選択 -->
-            <div class="screen" id="scr-hero">
-                <h2 class="screen-title">主人公を選択</h2>
-                <p id="hero-vs"></p>
-                <div class="hero-cards">
-                    <button class="hero-card ui-btn" id="hero-male" type="button" data-nav>
-                        <canvas width="200" height="190"></canvas>
-                        <span class="hc-name">男の子</span>
-                    </button>
-                    <button class="hero-card ui-btn" id="hero-female" type="button" data-nav>
-                        <canvas width="200" height="190"></canvas>
-                        <span class="hc-name">女の子</span>
-                    </button>
+            <!-- 装備（バトルモード：モンスター選択の後）。魔法パレット5つ・武器（剣・盾）・防具（頭・鎧・足） -->
+            <div class="screen" id="scr-equip">
+                <h2 class="screen-title equip-title">装備</h2>
+                <p id="equip-vs"></p>
+                <div class="equip-wrap">
+                    <!-- 左：主人公 -->
+                    <div class="equip-col equip-hero">
+                        <canvas id="equip-hero-art" width="200" height="190"></canvas>
+                        <div class="eh-name" id="equip-hero-name"></div>
+                        <div class="eh-lv" id="equip-hero-lv"></div>
+                        <dl class="eh-stats" id="equip-stats"></dl>
+                    </div>
+                    <!-- 真ん中：武器と防具（バトルモードはナイフだけ・ほかは装備なし） -->
+                    <div class="equip-col equip-gear">
+                        <h3>武器</h3>
+                        <div class="gear-list" id="equip-gear-weapon"></div>
+                        <h3>防具</h3>
+                        <div class="gear-list" id="equip-gear-armor"></div>
+                        <p class="gear-note">バトルモードでは剣はナイフだけです。盾と防具は装備できません</p>
+                    </div>
+                    <!-- 右：魔法パレット（星の5つの枠。上から時計回り＝バトル中のパレットと同じ並び） -->
+                    <div class="equip-col equip-magic">
+                        <h3>魔法パレット <small id="equip-magic-count">0/5</small></h3>
+                        <div class="em-body">
+                            <div class="palette-star" id="equip-palette">
+                                <div class="ps-center" aria-hidden="true"></div>
+                            </div>
+                            <div class="magic-list" id="equip-magic-list"></div>
+                        </div>
+                        <div class="magic-detail" id="equip-magic-detail"></div>
+                        <div class="em-foot">
+                            <span class="em-hint" id="equip-hint">魔法を押すと、空いている枠に入ります</span>
+                            <button class="equip-clear ui-btn" id="equip-clear" type="button" data-nav>すべて外す</button>
+                        </div>
+                    </div>
                 </div>
-                <p class="hero-note">ステータスは男の子・女の子とも同じです</p>
                 <div class="screen-buttons">
-                    <button class="menu-item ui-btn primary" id="hero-ok" type="button" data-nav>決定</button>
-                    <button class="menu-item ui-btn back" id="hero-back" type="button" data-nav>戻る</button>
+                    <button class="menu-item ui-btn primary" id="equip-ok" type="button" data-nav>出撃する</button>
+                    <button class="menu-item ui-btn back" id="equip-back" type="button" data-nav>戻る</button>
                 </div>
             </div>
             
@@ -428,6 +540,8 @@
     <script src="js/arena_map.js"></script>
     <script src="js/ruins_map.js"></script>
     <script src="js/battle_mode.js"></script>
+    <script src="js/online_config.js"></script>
+    <script src="js/account.js"></script>
     <script src="js/settings.js"></script>
     <script src="js/boss_data.js"></script>
     <script src="js/boss_ai.js"></script>
