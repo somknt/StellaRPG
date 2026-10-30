@@ -158,9 +158,10 @@ class MagicGolemAI extends BossAI {
     }
     
     // 拳が届かない時は、半分くらいの確率でもう少し歩いて近づく（遠くから叩きつけばかりにならないように）
+    // フェーズが変わった後の大技（opener）を出す時は待たない
     chooseAttack(force = false) {
         const punch = this.atk('punch');
-        if (!force && punch && this.dist() > punch.range[1] && Math.random() < 0.5) { this.wait = 0.6; return; }
+        if (!force && !this.opener && punch && this.dist() > punch.range[1] && Math.random() < 0.5) { this.wait = 0.6; return; }
         super.chooseAttack(force);
     }
     

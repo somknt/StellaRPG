@@ -579,7 +579,16 @@ class Enemy {
         if (this.ai && this.ai.superArmor) canStagger = false;
         const def = kind === 'magic' && this.magicDefense !== null ? this.magicDefense : this.defense;
         // damageTakenMul：ボスのフェーズの防御力アップ（boss_ai.js の BossAI.PHASE_BUFF）
-        const actualDamage = Math.max(1, Math.round((damage - def) * (this.damageTakenMul || 1)));
+        let actualDamage = Math.max(1, Math.round((damage - def) * (this.damageTakenMul || 1)));
+        // ボス：次のフェーズの区切り（HP50%・25%）より下には減らない（強い攻撃や、同じフレームの連続ヒットでフェーズを飛ばさない）
+        // 区切りまで減ったら、形態が変わる演出が始まるまで無敵。ひるんでいる時は、飛ばされ終わったらすぐ形態を変える
+        const floor = this.ai && this.ai.phaseFloor ? this.ai.phaseFloor() : 0;
+        if (floor > 0 && this.currentHP >= floor && this.currentHP - actualDamage <= floor) {
+            actualDamage = this.currentHP - floor;
+            canStagger = false;
+            this.ai.reachPhaseFloor();
+            if (this.staggerTimer > 0) this.staggerTimer = Math.min(this.staggerTimer, Math.max(0, this.knockDuration - this.knockTime));
+        }
         this.currentHP = Math.max(0, this.currentHP - actualDamage);
         this.hitFlashTimer = 0.1;
         this.hitFlashColor = '#ffffff';

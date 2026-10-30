@@ -51,6 +51,7 @@ class BossAI {
         this.action = null;         // 実行中の攻撃（ジェネレーター）
         this.actionName = '';
         this.lastAttack = '';
+        this.opener = null;         // フェーズが変わった後に最初に出す大技 { name, t（待った秒数）}（boss_data.js の phases[].opener）
         this.wait = 0.8;            // 次の攻撃までの時間
         this.motionTime = 0;        // 今のモーションになってからの時間（画像のコマ送りに使う）
         this.pose = null;           // 画像のコマ（0〜2）を攻撃側で決める時に入れる。null なら時間でくり返す
@@ -160,6 +161,10 @@ class BossAI {
             this.applyPhaseBuff(changed);
             this.cancel();
             this.events.push({ type: 'phase', index: changed });
+            // 形態が変わった後の最初の攻撃は、そのフェーズの大技（chooseAttack → useOpener）
+            const op = this.P.opener;
+            this.opener = op && this.atk(op) && this['act_' + op] ? { name: op, t: 0 } : null;
+            if (op && !this.opener) console.warn('ボスAIに大技（opener）の攻撃がありません:', op);
             this.startAction('transition', this.transition(changed));
         }
         
@@ -168,6 +173,7 @@ class BossAI {
             if (r.done) this.endAction();
         } else {
             this.wait -= dt;
+            if (this.opener) this.opener.t += dt;
             // 後ろに回りこまれた：すぐに振り向いて、待たずに攻撃する
             if (this.playerBehind()) {
                 this.face(this.dirToPlayer());
@@ -189,6 +195,18 @@ class BossAI {
         const b = list[Math.min(index, list.length - 1)];
         this.e.attack = Math.max(1, Math.round(this.baseAttack * b.attack));
         this.e.damageTakenMul = b.damageTaken;
+    }
+    
+    // 次のフェーズに変わる HP（HP50%・25% の区切り）。これより下には減らない（Enemy.takeDamage）。最後のフェーズなら 0
+    // 小数は切り捨て（BossPhaseManager は「割合が区切り以下」で次のフェーズにするので、区切りで止まれば必ず切りかわる）
+    phaseFloor() {
+        const next = this.phase.phases[this.phase.index + 1];
+        return next ? Math.floor(next.hp * this.e.maxHP) : 0;
+    }
+    
+    // HP が区切りまで減った（Enemy.takeDamage）：形態が変わる演出（transition）が始まるまで、ダメージを受けない
+    reachPhaseFloor() {
+        this.invulnerable = true;
     }
     
     // プレイヤーがボスの後ろ（向いている方向から 100度以上うしろ）の近くにいるか
@@ -248,6 +266,7 @@ class BossAI {
     // フェーズで使える攻撃から、距離が合う物を重みで選ぶ（同じ攻撃が続きにくいように）
     // force = true（後ろに回られた時）：距離が合う攻撃がなくても、いちばん距離が近い攻撃を出す
     chooseAttack(force = false) {
+        if (this.opener) { this.useOpener(force); return; }
         const d = this.dist();
         const list = [];
         let near = null, nearGap = Infinity;
@@ -271,6 +290,18 @@ class BossAI {
         for (const [name, w] of list) { roll -= w; if (roll < 0) { pick = name; break; } }
         this.lastAttack = pick;
         this.startAction(pick, this['act_' + pick](this.atk(pick)));
+    }
+    
+    // フェーズが変わった後の最初の攻撃：そのフェーズの大技（boss_data.js の phases[].opener）を出す
+    // 遠くて届かない時だけ、近づくのを待つ（idleMove）。BossAI.OPENER_WAIT 秒たっても届かなければ、そのまま出す
+    // 近すぎる時（突進・侵蝕弾の最小距離より近い）と、後ろに回りこまれた時（force）は、すぐ出す
+    useOpener(force) {
+        const name = this.opener.name;
+        const a = this.atk(name);
+        if (!force && this.dist() > a.range[1] && this.opener.t < BossAI.OPENER_WAIT) { this.wait = 0.15; return; }
+        this.opener = null;
+        this.lastAttack = name;
+        this.startAction(name, this['act_' + name](a));
     }
     
     // 攻撃していない間の動き（ボスごとに上書き）
@@ -658,6 +689,8 @@ class BossAI {
 // behindRange ：この距離（× Enemy.SCALE.range）より近くで後ろに回られたら、すぐ振り向いて攻撃
 // roarRange / roarKnock：咆哮・遠吠えでプレイヤーが必ず吹き飛ばされる範囲と距離(px)
 BossAI.TUNING = { interval: 0.35, recover: 0.55, behindRange: 300, roarRange: 330, roarKnock: 260 };
+// フェーズが変わった後の大技（opener）が届かない時に、近づくのを待つ長さ（秒）。過ぎたら届かなくても出す
+BossAI.OPENER_WAIT = 4.0;
 // 攻撃範囲の予告（円・扇・突進の帯・ゴーレムの危険床・体の光）の色。全ボス共通のはっきりした赤
 // WARN_DARK：ふちの下に敷く濃い色（明るい地面でも見えるように）
 // WARN_HOT ：溜めの最後のこの割合は「もうすぐ来る」（中が濃くなり、ふちが白と赤ですばやく点滅する）

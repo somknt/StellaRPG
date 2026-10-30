@@ -5,8 +5,11 @@
 // difficulty : ★の数（1〜3）。モンスター選択では左から difficulty の低い順に並ぶ
 // enemy      : Enemy クラスに渡すステータス（hp / attack / defense / speed など）
 // phases     : HP の割合で切り替わる3段階。hp 以下になったらそのフェーズ（一度進んだら戻らない）
+//              HP は次のフェーズの区切り（hp）より下には減らない。区切りで止まって、形態が変わる演出の後に続きが減る（Enemy.takeDamage）
 //              speedMul（移動速度の倍率）/ intervalMul（攻撃と攻撃の間の時間の倍率）/ recoverMul（攻撃後の隙の倍率）
 //              attacks：そのフェーズで使う攻撃と、選ばれやすさ（重み）
+//              opener：そのフェーズに変わった後（咆哮・遠吠えの後）に、最初に出す大技（attacks のキー）
+//                      遠くて届かない時は近づいてから出す（BossAI.OPENER_WAIT 秒たっても届かなければ、そのまま出す）
 // attacks    : 攻撃ごとの数値（damage は enemy.attack に掛ける倍率、range は使う距離 [最小, 最大]）
 // motions    : 必要なモーションと今の状態（'temp' = コードで動かしている仮アニメーション / 'done' = 画像あり /
 //              'alt' = 別のモーションの絵で代用）
@@ -66,9 +69,10 @@ const BOSS_DATA = [
         phases: [
             { hp: 1.0, label: '通常', speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0,
               attacks: { tusk: 4, charge: 3 } },
-            { hp: 0.5, label: '強化', speedMul: 1.15, intervalMul: 0.9, recoverMul: 0.85, transition: 'roar',
+            // 強化の大技：連続突進（3回）／最終強化の大技：必殺技の大踏みつけ
+            { hp: 0.5, label: '強化', speedMul: 1.15, intervalMul: 0.9, recoverMul: 0.85, transition: 'roar', opener: 'doubleCharge',
               banner: '怒りの咆哮！', attacks: { tusk: 3, charge: 1, doubleCharge: 3, stomp: 3 } },
-            { hp: 0.25, label: '最終強化', speedMul: 1.25, intervalMul: 0.8, recoverMul: 0.55, transition: 'roar',
+            { hp: 0.25, label: '最終強化', speedMul: 1.25, intervalMul: 0.8, recoverMul: 0.55, transition: 'roar', opener: 'bigStomp',
               banner: '暴走状態！', attacks: { tuskCombo: 4, tripleCharge: 3, bigStomp: 3, doubleCharge: 1 } }
         ],
         // 牙（近接）は特にゆっくり・範囲を小さく。突進・踏みつけも溜めを長く、範囲を小さく
@@ -123,9 +127,10 @@ const BOSS_DATA = [
         phases: [
             { hp: 1.0, label: '通常', speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0, dodgeChance: 0.2, aura: 0,
               attacks: { bite: 3, claw: 3, leap: 3 } },
-            { hp: 0.5, label: '強化', speedMul: 1.2, intervalMul: 0.86, recoverMul: 0.85, dodgeChance: 0.3, aura: 1, transition: 'howl',
+            // 強化の大技：侵蝕弾（扇形の5発）／最終強化の大技：必殺技の侵蝕波動
+            { hp: 0.5, label: '強化', speedMul: 1.2, intervalMul: 0.86, recoverMul: 0.85, dodgeChance: 0.3, aura: 1, transition: 'howl', opener: 'corruptionShot',
               banner: '侵蝕の遠吠え！', attacks: { doubleBite: 3, claw: 2, leap: 2, shadowDash: 3, corruptionShot: 3 } },
-            { hp: 0.25, label: '最終強化', speedMul: 1.35, intervalMul: 0.75, recoverMul: 0.65, dodgeChance: 0.45, aura: 2, transition: 'howl',
+            { hp: 0.25, label: '最終強化', speedMul: 1.35, intervalMul: 0.75, recoverMul: 0.65, dodgeChance: 0.45, aura: 2, transition: 'howl', opener: 'corruptionWave',
               banner: '星喰いの暴走！', attacks: { tripleClaw: 3, doubleBite: 2, shadowLeap: 3, corruptionShot: 2, corruptionWave: 2 } }
         ],
         // 範囲は小さめ。連続攻撃（噛みつき・爪）は前より2回少なく、攻撃は全体にゆっくり（溜め・隙を長く）
@@ -202,9 +207,10 @@ const BOSS_DATA = [
         phases: [
             { hp: 1.0, label: '通常', speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0,
               attacks: { punch: 4, slam: 3, armSwing: 3, shockwave: 1 } },
-            { hp: 0.5, label: '強化', speedMul: 1.15, intervalMul: 0.9, recoverMul: 0.9, transition: 'activate',
+            // 強化の大技：魔法陣の危険床（ステージが起動した直後に床が光る）／最終強化の大技：必殺技の魔法陣砲撃
+            { hp: 0.5, label: '強化', speedMul: 1.15, intervalMul: 0.9, recoverMul: 0.9, transition: 'activate', opener: 'hazardFloor',
               attacks: { punch: 1, punchCombo: 3, slam: 2, armSwing: 2, magicShot: 3, shockwave: 3, hazardFloor: 3, shield: 1 } },
-            { hp: 0.25, label: '最終強化', speedMul: 1.25, intervalMul: 0.8, recoverMul: 0.8, transition: 'activate',
+            { hp: 0.25, label: '最終強化', speedMul: 1.25, intervalMul: 0.8, recoverMul: 0.8, transition: 'activate', opener: 'magicCannon',
               attacks: { punchTriple: 3, slam: 1, armSwing: 2, magicCannon: 3, bigShockwave: 3, hazardBarrage: 3, magicShot: 2, shield: 1 } }
         ],
         // 距離（range・reach・radius・maxRadius・band）は Enemy.SCALE.range 倍、弾の速さは Enemy.SCALE.speed 倍される
