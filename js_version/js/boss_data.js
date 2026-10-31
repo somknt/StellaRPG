@@ -2,7 +2,7 @@
 // 新しいボスを足す時は、この配列に1つ追加して、boss_ai.js に AI のクラスを作り BOSS_AI_CLASSES に登録する
 //
 // status     : 'playable'（戦える） / 'coming'（カードだけ表示。今後実装予定）
-// difficulty : ★の数（1〜3）。モンスター選択では左から difficulty の低い順に並ぶ
+// difficulty : ★の数（1〜4）。モンスター選択では左から difficulty の低い順に並ぶ
 // enemy      : Enemy クラスに渡すステータス（hp / attack / defense / speed など）
 // phases     : HP の割合で切り替わる3段階。hp 以下になったらそのフェーズ（一度進んだら戻らない）
 //              HP は次のフェーズの区切り（hp）より下には減らない。区切りで止まって、形態が変わる演出の後に続きが減る（Enemy.takeDamage）
@@ -241,10 +241,92 @@ const BOSS_DATA = [
         }
     },
     {
+        // 怨嗟の鎧：戦争の遺物・星喰いの残響（バトルモード用の設定。ストーリーの歴史とは別）
+        // AI は armor_ai.js（GrudgeArmorAI）、ステージは battlefield_map.js（BattlefieldMap）
+        // 魔法の直接のダメージは効かない（物理だけ。第3形態は実体化している時だけ）。炎の魔法は消えた火を灯すのに使う
+        id: 'grudge_armor',
+        name: '怨嗟の鎧',
+        reading: 'えんさのよろい',
+        category: '戦争の遺物・星喰いの残響',
+        difficulty: 4,
+        level: '最上級者向け',
+        field: 'battlefield',
+        fieldName: '歴戦の跡地',
+        status: 'playable',
+        features: ['高速居合い', '亡霊分身', '暗闇戦闘', '魔法はほとんど効かない', '炎の魔法で火を灯せる'],
+        ai: 'GrudgeArmorAI',
+        theme: { color: '#b98aff', banner: 'armor', flash: '#8a5cff', arenaTint: 'rgba(40, 0, 25, 0.1)', vignette: 'rgba(25, 0, 20, 0.55)' },
+        // 形態ごとの曲（ファイルがない間は sound.js の fallback：黒蝕狼 → ゴーレム第2・第3形態の曲）
+        bgm: ['bgm_boss_armor', 'bgm_boss_armor_p2', 'bgm_boss_armor_p3'],
+        introSE: 'armor_intro',
+        coins: 40,
+        playerLevel: 20,          // 推奨レベル：主人公をこのレベルの強さで始める（data/player_stats_table.json の Lv20）
+        guaranteeMagic: ['magic_201'],  // バトルモードのこの戦いだけ、ファイヤーボールを必ずパレットに入れる（火を灯すため）
+        magicImmune: true,        // 魔法の直接のダメージは効かない（モンスター選択のカードの表示にも使う）
+        phaseNames: true,         // ボスの HP バーに形態の名前（phases[].label）を出す
+        cardLabels: { field: 'ステージ', level: '推奨レベル' },
+        // 勝ち・負けの画面の文字
+        result: { win: 'VICTORY', winSub: '怨嗟の鎧を討伐！', lose: 'DEFEAT', loseSub: '怨嗟の鎧に敗北した……', retry: '再挑戦', coinLabel: '獲得コイン' },
+        elements: { weak: [], resist: [] },
+        enemy: {
+            enemyId: 'boss_004', name: '怨嗟の鎧', displayName: '怨嗟の鎧',
+            hp: 3800, attack: 65, defense: 38, exp: 600,
+            size: 56, speed: 120, detectionRange: 4000, attackRange: 90,   // 速い（歩く速さ 120 × Enemy.SCALE.speed）
+            isBoss: true, knockbackScale: 0.55
+        },
+        // 画像が届くまでは Enemy.drawGrudgeArmor（armor_ai.js）のコードで描く仮の姿
+        // 画像を置いたら look.sprite（イノシシ・狼と同じ書き方）を足し、assets.js の BEAST_SPRITES_READY に 'grudge_armor' を足す
+        look: { key: 'grudge_armor', armor: true, cardFit: 70 },
+        attackInterval: 2.0,
+        ultimate: ['focusIai', 'darkIai'],   // 必殺技：集中居合い・闇の居合い（当たると少し飛ばされて1秒無敵）
+        phaseBuff: [
+            { attack: 1.0,  damageTaken: 1.0 },
+            { attack: 1.05, damageTaken: 0.9 },
+            { attack: 1.15, damageTaken: 1.0 }   // 第3形態は斬れる時間が短いので、硬くしない
+        ],
+        phases: [
+            { hp: 1.0, label: '亡霊剣士', speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0,
+              attacks: { drawSlash: 3, stepSlash: 3, doubleSlash: 3, focusIai: 3 } },
+            // 移行：刀を地面に突き立て、霧の中に6つの点 → 本体と分身5体。最初の大技は六影風刃
+            { hp: 0.5, label: '六影の怨嗟', speedMul: 1.1, intervalMul: 0.9, recoverMul: 0.9, transition: 'sixShadows', opener: 'sixWind',
+              attacks: { tripleSlash: 3, windSlash: 3, stepSlash: 2, cloneSummon: 3 } },
+            // 移行：火をすべて斬り消す → 暗闇。最初の大技は闇の居合い
+            { hp: 0.25, label: '常闇の剣鬼', speedMul: 1.15, intervalMul: 0.9, recoverMul: 0.9, transition: 'eternalDark', opener: 'darkIai',
+              attacks: { darkIai: 3, shadowCombo: 3, mistRush: 3 } }
+        ],
+        // 距離（range・reach・radius・dist）は Enemy.SCALE.range 倍、速さ（speed）は Enemy.SCALE.speed 倍される
+        // focus：居合いの集中（予告）の秒数 / over：主人公を通り過ぎて駆け抜ける距離 / windup2：2回目からの溜め
+        // 風刃：warn = 撃つ前の線の予告の秒数 / gapMin〜gapMax = 6体が撃つ間隔 / volleyGap = 6体が撃ち終わってから次まで /
+        //       shuffleEvery = この回数撃つごとに並び直す / dist = 飛ぶ距離
+        attacks: {
+            drawSlash:   { range: [90, 380], focus: 0.7, dist: 330, over: 80, speed: 950, radius: 30, damage: 0.9, recover: 1.1 },
+            stepSlash:   { range: [0, 200], windup: 0.42, dist: 110, reach: 60, spread: 1.9, damage: 0.75, recover: 1.0 },
+            doubleSlash: { range: [0, 125], windup: 0.48, windup2: 0.28, reach: 58, spread: 2.0, damage: 0.65, recover: 1.0 },
+            focusIai:    { range: [130, 480], focus: 1.0, dist: 420, over: 90, speed: 1500, radius: 32, damage: 1.05, recover: 1.5 },
+            tripleSlash: { range: [0, 130], windup: 0.45, windup2: 0.26, reach: 60, spread: 2.0, damage: 0.6, hits: 3, recover: 1.0 },
+            windSlash:   { range: [110, 520], windup: 0.6, count: 3, spread: 0.24, speed: 300, radius: 18, dist: 520, damage: 0.6, recover: 0.9 },
+            cloneSummon: { range: [0, 2000] },
+            sixWind:     { range: [0, 2000], warn: 0.42, gapMin: 0.2, gapMax: 0.4, volleyGap: 1.2, shuffleEvery: 3, speed: 290, radius: 18, dist: 520, damage: 0.5 },
+            darkIai:     { range: [0, 2000], eyes: 0.5, focus: 0.85, dist: 420, over: 100, speed: 1500, radius: 34, damage: 1.0, recover: 1.25 },
+            shadowCombo: { range: [0, 2000], hits: 4, around: 85, windup: 0.62, windup2: 0.45, reach: 62, spread: 1.9, damage: 0.55, recover: 1.15 },
+            mistRush:    { range: [0, 2000], focus: 0.75, dist: 430, over: 140, speed: 1100, radius: 36, damage: 0.85, recover: 1.1 },
+            // 第3形態で火を消しに行く時の速さ（AI が時間で使う。phases の attacks には入れない）
+            extinguishFire: { range: [0, 9999], speed: 420, slash: 0.3 }
+        },
+        // モーション（'temp' = コードで描いている仮の姿）。画像の名前は assets/enemies/grudge_armor/<モーション>_<向き>_<1〜3>.png
+        motions: {
+            idle: 'temp', walk: 'temp', run: 'temp', drawSword: 'temp', sheathSword: 'temp', slash1: 'temp', slash2: 'temp',
+            doubleSlash: 'temp', tripleSlash: 'temp', iaiCharge: 'temp', iaiAttack: 'temp', hit: 'temp', knockback: 'temp', death: 'temp',
+            phase2Start: 'temp', cloneSummon: 'temp', windSlash: 'temp', cloneDisappear: 'temp',
+            phase3Start: 'temp', extinguishFire: 'temp', darkAura: 'temp', ghostMove: 'temp', glowingEyes: 'temp',
+            materialize: 'temp', dematerialize: 'temp', darkIai: 'temp', shadowCombo: 'temp'
+        }
+    },
+    {
         // まだ決まっていないボスの枠
         id: 'unknown',
         name: '？？？',
-        difficulty: 4,
+        difficulty: 5,
         level: '',
         field: '',
         fieldName: '？？？',

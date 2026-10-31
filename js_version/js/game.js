@@ -209,13 +209,15 @@ class Game {
         document.body.dataset.hero = gender;
         this.stopBattles();
         this.currentBossId = bossId;
-        // ボスのフィールド：'arena'（星の闘技場。巨大森イノシシ・黒蝕狼） / 'ruins'（古代星紋遺跡。魔道ゴーレム）
+        // ボスのフィールド：'arena'（星の闘技場。巨大森イノシシ・黒蝕狼） / 'ruins'（古代星紋遺跡。魔道ゴーレム） /
+        //                   'battlefield'（歴戦の跡地。怨嗟の鎧）
         this.setupArena(gender, def.field);
-        // バトルモード：主人公のレベルはボスごとに固定（イノシシ Lv5・狼 Lv10・ゴーレム Lv15）。そのステータスで戦う
+        // バトルモード：主人公のレベルはボスごとに固定（イノシシ Lv5・狼 Lv10・ゴーレム Lv15・怨嗟の鎧 Lv20）。そのステータスで戦う
         if (def.playerLevel) {
             this.player.setLevel(def.playerLevel);
             this.player.levelLocked = true;
         }
+        if (def.guaranteeMagic) this.ensureMagic(this.player, def.guaranteeMagic);
         if (!this.bossBattle) this.bossBattle = new BossBattle(this);
         this.activeBattle = this.bossBattle;
         this.bossBattle.start(this.map, def);
@@ -249,6 +251,8 @@ class Game {
         
         this.map = field === 'ruins' && typeof RuinsMap === 'function'
             ? new RuinsMap(createRuinsMapData())
+            : field === 'battlefield' && typeof BattlefieldMap === 'function'
+            ? new BattlefieldMap(createBattlefieldMapData())
             : new ArenaMap(createArenaMapData());
         document.body.dataset.field = field;
         const spawn = this.map.getPlayerSpawn();
@@ -289,6 +293,25 @@ class Game {
         // 最初に選んでいる魔法：いちばん上（スロット1）から見て、最初にセットしてある魔法
         const first = p.magicSlots.findIndex(Boolean);
         p.selectedMagicIndex = first >= 0 ? first : 0;
+    }
+    
+    // そのボス戦で必ず使う魔法（boss_data.js の guaranteeMagic。怨嗟の鎧は火を灯すファイヤーボール）を、パレットに入れる
+    // バトルモードのこの戦いだけ（ストーリーの覚える順番は変えない）。空きがなければ、攻撃の魔法（ヒール以外）と入れかえる
+    ensureMagic(p, ids) {
+        if (!p) return;
+        for (const id of ids) {
+            if (p.magicSlots.includes(id)) continue;
+            if (!p.learnedMagic.includes(id)) p.learnedMagic.push(id);
+            let i = p.magicSlots.findIndex(s => !s);
+            if (i < 0) {
+                for (let k = p.magicSlots.length - 1; k >= 0; k--) {
+                    const m = p.getMagicData(p.magicSlots[k]);
+                    if (m && m.category !== '治癒' && !ids.includes(m.id)) { i = k; break; }
+                }
+            }
+            if (i >= 0) p.setMagicSlot(i, id);
+            console.log('このボス戦で使う魔法をパレットに入れました:', id, 'スロット', i + 1);
+        }
     }
     
     isArena() {
@@ -551,7 +574,7 @@ class Game {
             this.player.setDirectionFromVector(this.castAim.dir);
         }
         
-        const cast = this.player.consumeReadyCast(this.enemySpawner.enemies, this.castAim ? this.castAim.dir : aim, !!this.castAim);
+        const cast = this.player.consumeReadyCast(this.targetableEnemies(), this.castAim ? this.castAim.dir : aim, !!this.castAim);
         if (cast && cast.magic.category === '治癒') {
             this.castHeal(cast);
             this.input.clearTouchAim('magic');
@@ -572,7 +595,7 @@ class Game {
         // プレイヤーの近接攻撃（ナイフ）：敵の方へ向き直って斬る（ターゲット → ねらった向きの敵 → 近くの敵。いなければねらう向き）
         // 連打でも、押したまま（マウスの左ボタン・Space・スマホの攻撃ボタン）でも、攻撃の間隔ごとに続けて斬る
         if (attackInput) {
-            const attackData = this.player.startAttack(this.enemySpawner.enemies, aim, this.getMeleeTarget(aim));
+            const attackData = this.player.startAttack(this.targetableEnemies(), aim, this.getMeleeTarget(aim));
             if (attackData) {
                 this.attackBuffer = 0;
                 const hits = this.enemySpawner.checkMeleeAttack(attackData);
@@ -722,6 +745,8 @@ class Game {
             // ターゲット（ロックオン）の足元の照準
             this.drawLockTarget(this.ctx, cam, false);
             const items = this.map.getDepthDrawables(this.player);
+            // ボス戦で奥行き順に並べる物（怨嗟の鎧の分身）
+            if (this.activeBattle && this.activeBattle.getDepthDrawables) items.push(...this.activeBattle.getDepthDrawables());
             for (const e of this.enemySpawner.enemies) {
                 items.push({ sortY: e.position.y + e.size * 0.55, draw: (ctx, c) => e.draw(ctx, c) });
             }
@@ -879,7 +904,7 @@ class Game {
     nearestEnemy(range) {
         const p = this.player;
         let best = null, bd = Infinity;
-        for (const e of this.enemySpawner.enemies) {
+        for (const e of this.targetableEnemies()) {
             if (!e.isAlive() || e.dying) continue;
             const d = e.position.distance(p.position);
             if (d <= range && d < bd) { bd = d; best = e; }
@@ -887,16 +912,22 @@ class Game {
         return best;
     }
     
-    // 今のターゲット（倒れた敵は null）
+    // ねらえる敵（ターゲット・自動でねらう・向き直す）。ボスAIの hideTarget が true の間はねらえない
+    // （怨嗟の鎧：分身がいる間は本体がどれか分からないように・暗闇で実体化していない間は見えないので）
+    targetableEnemies() {
+        return this.enemySpawner.enemies.filter(e => !(e.ai && e.ai.hideTarget));
+    }
+    
+    // 今のターゲット（倒れた敵・ねらえなくなった敵は null）
     getLockTarget() {
         const t = this.lockTarget;
-        return t && t.isAlive() && !t.dying ? t : null;
+        return t && t.isAlive() && !t.dying && !(t.ai && t.ai.hideTarget) ? t : null;
     }
     
     // その場所（ワールド座標）にいる敵（体の絵の上。重なっていたら中心に近い方）
     enemyAt(world) {
         let best = null, bd = Infinity;
-        for (const e of this.enemySpawner.enemies) {
+        for (const e of this.targetableEnemies()) {
             if (!e.isAlive() || e.dying) continue;
             const rx = Math.max(28, e.size * 0.62), ry = Math.max(32, e.size * 0.72);
             const dx = (world.x - e.position.x) / rx, dy = (world.y - (e.position.y - e.size * 0.1)) / ry;
@@ -911,7 +942,7 @@ class Game {
         const t = this.getLockTarget();
         if (t) return t;
         const p = this.player, range = Game.MELEE_FACE_RANGE;
-        const enemies = this.enemySpawner.enemies.filter(e => e.isAlive() && !e.dying);
+        const enemies = this.targetableEnemies().filter(e => e.isAlive() && !e.dying);
         if (aim) {
             const a = p.pickAimTarget(enemies, aim, range, 0.5);
             if (a) return a;

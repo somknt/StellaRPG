@@ -2214,3 +2214,17 @@ body.touch .coin-box { transform: scale(1.2); transform-origin: top right; }
 #monster-cards .boss-card { gap: 4px; padding: 8px 12px 10px; min-height: 0; }
 #monster-cards .bc-feat { line-height: 1.38; }
 #scr-monster .screen-hint, #scr-ranking .screen-hint { bottom: 6px; }
+
+/* 5枚のカード（怨嗟の鎧を足した）：1280px の画面に収まるように少し細く。「今後実装予定」のカードはさらに細く */
+#monster-cards { gap: 12px; }
+#monster-cards .boss-card { width: 240px; }
+#monster-cards .boss-card.unknown { width: 168px; }
+#monster-cards .bc-feat { font-size: 13px; }
+/* 分類（怨嗟の鎧：戦争の遺物・星喰いの残響） */
+.bc-cat { margin-top: -3px; font-size: 12px; letter-spacing: 1px; color: #c9a8ff; }
+
+/* 怨嗟の鎧：名前の文字・HP バーの色（紫と黒） */
+#battle-banner.armor #battle-banner-main { color: #e6d2ff; text-shadow: 0 0 18px rgba(150, 70, 255, 0.95), 0 3px 0 #1c0730, 0 5px 8px #000; }
+body[data-boss="grudge_armor"] #bh2-fill { background: linear-gradient(180deg, #b48cff, #5a2a9a 60%, #2a0f4a); }
+body[data-boss="grudge_armor"] #boss-hud[data-phase="3"] #bh2-fill { background: linear-gradient(180deg, #d08cff, #6a1a8a 55%, #2a0636); }
+body[data-boss="grudge_armor"] #bh2-name { color: #e2ccff; }

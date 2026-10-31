@@ -22,6 +22,8 @@
      - Name：何でもよい（例 `hoshinoko`）
      - Database Password：自分で決めて、メモしておく
      - Region：Northeast Asia (Tokyo)
+     - 「Enable Data API」（Data API を使う）：チェックを入れたままにする（ゲームはこれで関数を呼ぶ）
+     - 「Automatically expose new tables」：チェックなしでよい（関数を呼ぶ権限は SQL の中で渡している）
 2. **表と関数を作る**
    - 左のメニューの「SQL Editor」を開きます。
    - このフォルダの `supabase_setup.sql` を全部コピーして、はりつけます。

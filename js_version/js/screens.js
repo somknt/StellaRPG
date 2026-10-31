@@ -1046,17 +1046,24 @@ class ScreenManager {
             const feats = b.unknown ? '<li class="muted">新しいボスが現れるかも…</li>' : b.features.map(f => `<li>${f}</li>`).join('');
             const playable = b.status === 'playable';
             const coins = playable && window.BattleRecords ? BattleRecords.baseCoins(b) : 0;
+            // 行の名前はボスごとに変えられる（boss_data.js の cardLabels。怨嗟の鎧は「ステージ」「推奨レベル」）
+            const lab = b.cardLabels || {};
+            // 魔法が効かないボス（怨嗟の鎧）は、有利・不利属性の代わりに「魔法 ほぼ無効」の1行
+            const elemRows = b.magicImmune
+                ? '<div class="bc-row bc-elem"><span>魔法</span><b><i class="el-chip none">ほぼ無効</i></b></div>'
+                : b.elements ? `<div class="bc-row bc-elem"><span>有利属性</span><b>${elemChips(b.elements.weak)}</b></div>
+                <div class="bc-row bc-elem"><span>不利属性</span><b>${elemChips(b.elements.resist)}</b></div>` : '';
             // 倒したことのあるボスは、絵の上に「CLEAR」（enterMonster で出し入れする）
             card.innerHTML = `
                 <div class="bc-art"><canvas width="240" height="150"></canvas>${playable ? '<span class="bc-clear" hidden>CLEAR</span>' : ''}</div>
                 <div class="bc-name">${b.name}${b.reading ? `<small>${b.reading}</small>` : ''}</div>
+                ${b.category ? `<div class="bc-cat">${b.category}</div>` : ''}
                 <div class="bc-row"><span>難易度</span><b class="bc-stars">${stars}</b></div>
-                <div class="bc-row"><span>フィールド</span><b>${b.fieldName}</b></div>
-                ${b.playerLevel ? `<div class="bc-row"><span>主人公</span><b>Lv.${b.playerLevel}</b></div>` : ''}
+                <div class="bc-row"><span>${lab.field || 'フィールド'}</span><b>${b.fieldName}</b></div>
+                ${b.playerLevel ? `<div class="bc-row"><span>${lab.level || '主人公'}</span><b>Lv.${b.playerLevel}</b></div>` : ''}
                 ${playable ? `<div class="bc-row"><span>報酬</span><b><i class="coin-icon"></i>${coins}枚 ＋ランクボーナス</b></div>
                 <div class="bc-row bc-best"><span>ベスト</span><b>─</b></div>` : ''}
-                ${b.elements ? `<div class="bc-row bc-elem"><span>有利属性</span><b>${elemChips(b.elements.weak)}</b></div>
-                <div class="bc-row bc-elem"><span>不利属性</span><b>${elemChips(b.elements.resist)}</b></div>` : ''}
+                ${elemRows}
                 <ul class="bc-feat">${feats}</ul>
                 <div class="bc-status">${b.status === 'playable' ? 'プレイ可能' : '今後実装予定'}</div>`;
             card.addEventListener('click', (e) => {
@@ -1208,7 +1215,8 @@ class ScreenManager {
                 e.velocity = focused ? new Vector2(1, 0) : new Vector2(0, 0);
                 e.animationTimer = a.t;
                 e.animationFrame = focused ? Math.floor(a.t / 0.2) % 3 : 0;
-                const s = Math.min(1.7, 92 / e.size); // 小さいボスも同じくらいの大きさに見せる
+                // 小さいボスも同じくらいの大きさに見せる（背の高いボスは look.cardFit で小さめに。怨嗟の鎧）
+                const s = Math.min(1.7, ((a.def.look && a.def.look.cardFit) || 92) / e.size);
                 g.save();
                 g.translate(W / 2, H / 2 + 10);
                 g.scale(s, s + (focused ? 0 : Math.sin(a.t * 2.2) * 0.015));

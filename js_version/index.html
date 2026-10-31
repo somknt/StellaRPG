@@ -11,6 +11,12 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="星の子">
     <title>星の子 (Hoshi no Ko) - 2D RPG</title>
+    <!-- アプリのアイコン（art_source/icon/tools/make_icons.ps1 で作る）：タブ・ブックマーク・ホーム画面に追加した時 -->
+    <!-- ?v= はアイコンを作り直した日。ブラウザが前のアイコンを覚えていても、新しいアイコンを読み直す（変えたら manifest.webmanifest の方も同じにする） -->
+    <link rel="icon" href="favicon.ico?v=20261031" sizes="16x16 32x32 48x48 256x256">
+    <link rel="icon" type="image/png" sizes="192x192" href="assets/icon/icon-192.png?v=20261031">
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/icon/apple-touch-icon.png?v=20261031">
+    <link rel="manifest" href="manifest.webmanifest?v=20261031">
     <!-- ピクセルアート風の日本語フォント（読めない時はふつうのフォントで表示） -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -99,6 +105,8 @@
                 <div class="bh2-top">
                     <span id="bh2-name">ボス</span>
                     <span id="bh2-phase" data-phase="1"><i data-n="1" class="on"></i><i data-n="2"></i><i data-n="3"></i></span>
+                    <!-- 形態の名前（boss_data.js の phaseNames が true のボスだけ。怨嗟の鎧） -->
+                    <span id="bh2-phase-label"></span>
 
                 </div>
                 <div class="bh2-track">
@@ -539,6 +547,7 @@
     <script src="js/map.js"></script>
     <script src="js/arena_map.js"></script>
     <script src="js/ruins_map.js"></script>
+    <script src="js/battlefield_map.js"></script>
     <script src="js/battle_mode.js"></script>
     <script src="js/online_config.js"></script>
     <script src="js/account.js"></script>
@@ -546,6 +555,7 @@
     <script src="js/boss_data.js"></script>
     <script src="js/boss_ai.js"></script>
     <script src="js/golem_ai.js"></script>
+    <script src="js/armor_ai.js"></script>
     <script src="js/battle_records.js"></script>
     <script src="js/boss_battle.js"></script>
     <script src="js/title_atlas.js"></script>

@@ -668,6 +668,28 @@ SoundManager.LIST = [
     { key: 'golem_shield', label: '星の盾を張る（低くうなる）', volume: 0.9, rate: 0.6, dur: 1.7 },                    // ★ 気を溜める1
     { key: 'golem_step',   label: '重い足音（歩いている間）', volume: 0.6, rate: 0.55, dur: 0.6, gap: 0.25 },          // ★ 発砲1
     
+    // ===== 怨嗟の鎧（ファイルがない間は fallback の音を、高さ・長さを変えて鳴らす。置けばその音に変わる）=====
+    { key: 'armor_intro',  label: '名前が出た時（低いうめき）', fallback: 'boss_intro', volume: 0.85, rate: 0.8, vary: 0 },
+    { key: 'armor_roar',   label: '怨嗟の声（形態が変わる時。この声の後に次の曲）', fallback: 'wolf_wave', volume: 1.2, rate: 0.75, dur: 2.4, vary: 0 },
+    { key: 'armor_draw',   label: '刀を抜く', fallback: 'attack', volume: 0.9, rate: 1.35, vary: 0 },
+    { key: 'armor_sheath', label: '刀を鞘に納める', fallback: 'ui_select', volume: 0.3, rate: 0.6, vary: 0 },
+    { key: 'armor_charge', label: '居合いの集中（予告の帯が出た時）', fallback: 'golem_charge', volume: 0.45, rate: 1.4, dur: 0.7, gap: 0.2 },
+    { key: 'armor_slash',  label: '刀で斬る（armor_slash_2 とランダム）', fallback: 'wolf_claw', volume: 0.95, rate: 0.8 },
+    { key: 'armor_iai',    label: '居合いで駆け抜けて斬る', fallback: 'just_dodge', volume: 0.9, rate: 1.1, vary: 0.02 },
+    { key: 'armor_rush',   label: '黒霧の突進', fallback: 'wolf_dash', volume: 0.9, rate: 0.7 },
+    { key: 'armor_wind',   label: '風刃を撃つ（六影風刃・風刃）', fallback: 'magic_wind', volume: 0.4, rate: 1.6, dur: 0.6, gap: 0.08 },
+    { key: 'armor_stab',   label: '刀を地面に突き立てる（分身召喚）', fallback: 'golem_thud', volume: 0.8, rate: 1.1 },
+    { key: 'armor_clone',  label: '分身が現れる', fallback: 'wolf_shot', volume: 0.9, rate: 0.8 },
+    { key: 'armor_clone_break', label: '分身が消える（本体をノックバックした）', fallback: 'magic_weak', volume: 0.8, rate: 0.8, vary: 0 },
+    { key: 'armor_eyes',   label: '暗闇で目が光る（攻撃の予告）', fallback: 'golem_charge', volume: 0.6, rate: 1.3, dur: 0.8 },
+    { key: 'armor_materialize', label: '火の明かりで実体化した（斬れるようになる）', fallback: 'magic_resist', volume: 0.7, rate: 1.4 },
+    { key: 'armor_immune', label: '魔法が効かない・実体のない時に斬った', fallback: 'magic_resist', volume: 0.45, rate: 0.6, gap: 0.3 },
+    { key: 'fire_out',     label: '火が消える（ボスが斬って消す）', fallback: 'magic_wind_hit', volume: 0.6, rate: 1.5, dur: 0.6, gap: 0.05 },
+    { key: 'fire_light',   label: '炎の魔法で火が灯る', fallback: 'magic_fire', volume: 0.9, rate: 0.9 },
+    { key: 'bgm_boss_armor',    bgm: true, label: '怨嗟の鎧戦・第1形態', fallback: 'bgm_boss_wolf', volume: 1.0 },
+    { key: 'bgm_boss_armor_p2', bgm: true, label: '怨嗟の鎧戦・第2形態（HP50%以下）', fallback: 'bgm_boss_golem_p2', volume: 1.0, start: 1.95 },
+    { key: 'bgm_boss_armor_p3', bgm: true, label: '怨嗟の鎧戦・第3形態（HP25%以下）', fallback: 'bgm_boss_golem_p3', volume: 1.0, start: 1.95 },
+    
     // ===== ふつうの敵（フリーバトル）=====
     { key: 'enemy_defeat', label: '敵が倒れて星になる', gap: 0.08 }
 ];

@@ -69,7 +69,8 @@ function getElementInfo(element) {
 // n：コマ数 / w, h：1コマの大きさ / ax, ay：基準点（弾は先頭、竜巻・雷・炎は根元、そのほかは中心）
 // coreW, coreH：光の芯の大きさ（ゲームで描く大きさを決めるのに使う）
 // 弾（*_fly）と岩の砕け（stone_hit）は右向きに描いてあるので、飛ぶ向きに回して使う
-// circle は魔法陣（画像は magic_circle_<属性>.png）
+// circle は魔法陣（画像は magic_circle_<属性>.png）。circle_<属性> があればその属性だけ別の大きさ（治癒の魔法陣は別のシートから切り出した）
+// heal_*：ヒール（rise：輪から光の柱がのびる / cross：十字が立ちのぼる光 / star：星のきらめき / plus：十字の粒）
 const MAGIC_FX = {
     circle:        { n: 5, w: 273, h: 273, ax: 138, ay: 134, coreW: 248, coreH: 249 },
     fire_fly:      { n: 4, w: 163, h: 109, ax: 144, ay: 48,  coreW: 134, coreH: 85 },
@@ -83,7 +84,12 @@ const MAGIC_FX = {
     thunder_flash: { n: 4, w: 230, h: 132, ax: 114, ay: 68,  coreW: 172, coreH: 98 },
     stone_fly:     { n: 4, w: 324, h: 154, ax: 322, ay: 76,  coreW: 311, coreH: 142 },
     stone_hit:     { n: 4, w: 373, h: 301, ax: 211, ay: 163, coreW: 304, coreH: 211 },
-    stone_dust:    { n: 4, w: 263, h: 194, ax: 126, ay: 86,  coreW: 176, coreH: 141 }
+    stone_dust:    { n: 4, w: 263, h: 194, ax: 126, ay: 86,  coreW: 176, coreH: 141 },
+    circle_heal:   { n: 1, w: 270, h: 270, ax: 134, ay: 122, coreW: 240, coreH: 235 },
+    heal_rise:     { n: 3, w: 285, h: 343, ax: 146, ay: 297, coreW: 216, coreH: 212 },
+    heal_cross:    { n: 2, w: 188, h: 243, ax: 95,  ay: 228, coreW: 150, coreH: 194 },
+    heal_star:     { n: 2, w: 181, h: 174, ax: 89,  ay: 89,  coreW: 150, coreH: 136 },
+    heal_plus:     { n: 1, w: 129, h: 164, ax: 63,  ay: 79,  coreW: 92,  coreH: 108 }
 };
 // stone_hit の1コマ目（岩の弾が当たった瞬間）の、光の中心から弾の先頭までの長さ（画像の px）
 const STONE_HIT_TIP = 107;
@@ -177,7 +183,7 @@ function drawMagicCircle(ctx, x, y, radius, element, rotation = 0, alpha = 1, sq
     
     if (img) {
         // 画像の外側の円が radius に来るように（そのまわりの光のにじみは少しはみ出す）
-        const c = MAGIC_FX.circle, k = radius * 2 / c.coreW;
+        const c = MAGIC_FX[`circle_${info.key}`] || MAGIC_FX.circle, k = radius * 2 / c.coreW;
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, -c.ax * k, -c.ay * k, c.w * k, c.h * k);
@@ -727,12 +733,17 @@ class MagicCircleEffect {
     }
 }
 
-// ヒール（治癒魔法）の光：足元に緑の魔法陣が広がり、体のまわりから光の粒が立ちのぼる（主人公についていく）
+// ヒール（治癒魔法）の光（主人公についていく）
+// 画像（art_source/magic/tools/cut.ps1 で切り出した heal_*）がある時：
+//   キャラの下：治癒の魔法陣が広がって回り、足元の光の輪から光の柱がのびて（heal_rise）、十字が立ちのぼる光に変わる（heal_cross）
+//   キャラの前：柱の光をうすく重ねて体を緑に光らせ、星のきらめき（heal_star）・十字の粒（heal_plus）・光の粒が立ちのぼる
+// 画像がない時：足元の魔法陣と、グラデーションの光の柱・四角い光の粒
 class HealEffect {
     constructor(target) {
         this.target = target;
         this.age = 0;
-        this.life = HealEffect.LIFE;
+        this.sprite = hasMagicFx('heal_rise') && hasMagicFx('heal_cross');
+        this.life = this.sprite ? HealEffect.LIFE : HealEffect.PLAIN_LIFE;
         this.active = true;
         // 立ちのぼる光の粒（角度・横の広がり・出る時間・速さ・大きさ）
         this.sparks = [];
@@ -740,6 +751,9 @@ class HealEffect {
             this.sparks.push({ x: (Math.random() - 0.5) * 2, delay: Math.random() * 0.55, speed: 70 + Math.random() * 60,
                 size: 2 + Math.floor(Math.random() * 3), cross: Math.random() < 0.45 });
         }
+        // 十字の粒（画像）：左・真ん中・右から、ばらばらの順に1つずつ立ちのぼる
+        const xs = [-0.6, 0.05, 0.6].sort(() => Math.random() - 0.5);
+        this.pluses = HealEffect.PLUS_DELAYS.map((delay, i) => ({ delay, x: xs[i] + (Math.random() - 0.5) * 0.2, size: 0.85 + Math.random() * 0.3 }));
     }
     
     update(dt) {
@@ -752,11 +766,41 @@ class HealEffect {
         return new Vector2(t.position.x, t.position.y + (t.drawSize || 90) * 0.36);
     }
     
-    // 地面：魔法陣が広がって消える（キャラの下に描く）
+    // 終わりの FADE 秒で消えていく濃さ
+    fadeOut() {
+        const a = this.age, F = HealEffect.FADE;
+        return a < this.life - F ? 1 : Math.max(0, (this.life - a) / F);
+    }
+    
+    // 光の柱の今のコマ（光がのびる → 十字の光へ、少し重ねて切りかえる）：[{ name, frame, alpha }]
+    pillarLayers() {
+        const a = this.age, R = HealEffect.RISE_TIME, X = HealEffect.CROSS_FADE, fade = this.fadeOut();
+        const layers = [];
+        if (a < R + X) {
+            const n = MAGIC_FX.heal_rise.n;
+            const frame = Math.min(n - 1, Math.floor(a / (R / n)));
+            const k = a < R ? Math.min(1, a / 0.06) : 1 - (a - R) / X;
+            layers.push({ name: 'heal_rise', frame, alpha: k * fade });
+        }
+        if (a >= R) {
+            const frame = Math.floor((a - R) / HealEffect.CROSS_FRAME) % MAGIC_FX.heal_cross.n;
+            layers.push({ name: 'heal_cross', frame, alpha: Math.min(1, (a - R) / X) * fade });
+        }
+        return layers;
+    }
+    
+    // 光の柱を1枚描く：画像の光の輪の真ん中を足元（f）に合わせる。mul：濃さの倍率
+    drawPillar(ctx, f, layer, mul) {
+        const ring = HealEffect.RING[layer.name];
+        const s = (this.target.drawSize || 90) * ring.size / ring.w;
+        drawMagicFx(ctx, layer.name, layer.frame, f.x, f.y + ring.y[layer.frame] * s, s, 0, layer.alpha * mul);
+    }
+    
+    // 地面：魔法陣が広がって消える（キャラの下に描く）。画像がある時は、その上に光の柱も（キャラの後ろになる）
     drawGround(ctx, cam) {
         const p = this.feet().sub(cam);
         const k = Math.min(1, this.age / 0.25);
-        const fade = this.age < this.life - 0.35 ? 1 : Math.max(0, (this.life - this.age) / 0.35);
+        const fade = this.fadeOut();
         const r = 34 + 26 * (1 - (1 - k) * (1 - k));
         ctx.save();
         const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 1.2);
@@ -767,14 +811,17 @@ class HealEffect {
         ctx.beginPath(); ctx.ellipse(p.x, p.y, r * 1.2, r * 0.6, 0, 0, Math.PI * 2); ctx.fill();
         ctx.restore();
         drawMagicCircle(ctx, p.x, p.y, r, '癒', this.age * 1.8, 0.9 * fade, 0.5);
+        if (this.sprite) for (const l of this.pillarLayers()) this.drawPillar(ctx, p, l, 1);
     }
     
     // 体の前：光の柱と、立ちのぼる光の粒
     draw(ctx, cam) {
         const t = this.target;
         const f = this.feet().sub(cam);
-        const h = (t.drawSize || 90) * 1.15;
-        const a = this.age, fade = a < this.life - 0.35 ? Math.min(1, a / 0.12) : Math.max(0, (this.life - a) / 0.35);
+        const base = t.drawSize || 90;
+        const a = this.age, fade = Math.min(1, a / 0.12) * this.fadeOut();
+        if (this.sprite) return this.drawSpriteFront(ctx, f, base, fade);
+        const h = base * 1.15;
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         // 光の柱（足元から上へ、だんだん薄く）
@@ -783,7 +830,44 @@ class HealEffect {
         col.addColorStop(1, 'rgba(110, 255, 160, 0)');
         ctx.fillStyle = col;
         ctx.fillRect(f.x - 26, f.y - h, 52, h);
-        // 光の粒（ドット絵らしく四角で。十字の形の物もある）
+        this.drawSparks(ctx, f, fade);
+        ctx.restore();
+    }
+    
+    // 画像がある時の、体の前の光
+    drawSpriteFront(ctx, f, base, fade) {
+        const a = this.age;
+        // 柱の光をうすく足して、体を緑に光らせる
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        for (const l of this.pillarLayers()) this.drawPillar(ctx, f, l, HealEffect.BODY_GLOW);
+        this.drawSparks(ctx, f, fade);
+        ctx.restore();
+        // 十字の粒：体のまわりから、ゆれながら立ちのぼって消える
+        if (hasMagicFx('heal_plus')) {
+            for (const p of this.pluses) {
+                const t = a - p.delay, life = HealEffect.PLUS_LIFE;
+                if (t <= 0 || t >= life) continue;
+                const alpha = Math.min(1, t / 0.12) * Math.min(1, (life - t) / 0.3) * this.fadeOut();
+                const x = f.x + p.x * base * 0.5 + Math.sin(t * 7 + p.x * 4) * 3;
+                const y = f.y - base * (0.45 + t * 0.85);
+                drawMagicFx(ctx, 'heal_plus', 0, x, y, magicFxScale('heal_plus', base * 0.4 * p.size, 'w'), 0, alpha);
+            }
+        }
+        // 星のきらめき：光が十字に変わる時に頭の上で1つ、そのあと横で小さく1つ
+        if (hasMagicFx('heal_star')) {
+            for (const s of HealEffect.STARS) {
+                const k = magicFxOnce('heal_star', a - s.at, 0.08, 0.25);
+                if (!k) continue;
+                drawMagicFx(ctx, 'heal_star', k.frame, f.x + s.x * base, f.y - s.y * base,
+                    magicFxScale('heal_star', base * s.size, 'w'), 0, k.alpha * this.fadeOut());
+            }
+        }
+    }
+    
+    // 光の粒（ドット絵らしく四角で。十字の形の物もある）。'lighter' の中で呼ぶ
+    drawSparks(ctx, f, fade) {
+        const a = this.age;
         for (const s of this.sparks) {
             const age = a - s.delay;
             if (age <= 0) continue;
@@ -800,10 +884,25 @@ class HealEffect {
                 ctx.fillRect(x - 1, y - z - 1, 2, z * 2 + 2);
             }
         }
-        ctx.restore();
     }
 }
-HealEffect.LIFE = 1.1;
+HealEffect.LIFE = 1.5;          // 画像がある時の長さ（秒）
+HealEffect.PLAIN_LIFE = 1.1;    // 画像がない時の長さ（秒）
+HealEffect.FADE = 0.35;         // 最後に消えていく秒数
+HealEffect.RISE_TIME = 0.3;     // 光の柱がのびる3コマの秒数
+HealEffect.CROSS_FADE = 0.1;    // 十字の光に切りかえる時に重ねる秒数
+HealEffect.CROSS_FRAME = 0.15;  // 十字の光の2コマをくり返す1コマの秒数
+HealEffect.BODY_GLOW = 0.3;     // 体の前に重ねる柱の光の濃さ
+HealEffect.PLUS_DELAYS = [0.32, 0.5, 0.68]; // 十字の粒が出る時間
+HealEffect.PLUS_LIFE = 0.75;
+// 星のきらめき：at 出る時間 / x, y 足元からの位置（キャラの大きさに対する割合。y は上へ）/ size 大きさ
+HealEffect.STARS = [{ at: 0.3, x: 0, y: 1.25, size: 0.7 }, { at: 0.85, x: 0.42, y: 0.9, size: 0.45 }];
+// 光の柱の画像の光の輪（切り出した画像で、濃い所がいちばん横に広い行を測った値）
+//   w：1コマ目の輪の幅（画像の px）/ size：その輪をキャラの大きさの何倍で描くか / y：コマごとの、基準点（下のはし）から輪の真ん中までの高さ
+HealEffect.RING = {
+    heal_rise:  { w: 174, size: 0.95, y: [58, 58, 76] },
+    heal_cross: { w: 131, size: 1.15, y: [35, 42] }
+};
 
 class MagicSystem {
     constructor() {
@@ -828,6 +927,8 @@ class MagicSystem {
     update(deltaTime) {
         for (const proj of this.projectiles) {
             proj.update(deltaTime);
+            // 歴戦の跡地：炎の魔法が消えた火に当たったら、火が灯って弾は消える（battlefield_map.js の onMagicShot）
+            if (proj.active && this.map && this.map.onMagicShot) this.map.onMagicShot(proj);
             // 闘技場：壁・柱・木箱などに当たったら消える（低い柵や樽は飛び越える）
             if (proj.active && this.map && this.map.isShotBlocked && this.map.isShotBlocked(proj.position)) {
                 proj.active = false;

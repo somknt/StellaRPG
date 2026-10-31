@@ -11,3 +11,8 @@ thunder_flash: { n: 4, w: 230, h: 132, ax: 114, ay: 68, coreW: 172, coreH: 98 }
 stone_fly: { n: 4, w: 324, h: 154, ax: 322, ay: 76, coreW: 311, coreH: 142 }
 stone_hit: { n: 4, w: 373, h: 301, ax: 211, ay: 163, coreW: 304, coreH: 211 }
 stone_dust: { n: 4, w: 263, h: 194, ax: 126, ay: 86, coreW: 176, coreH: 141 }
+circle_heal: { n: 1, w: 270, h: 270, ax: 134, ay: 122, coreW: 240, coreH: 235 }
+heal_rise: { n: 3, w: 285, h: 343, ax: 146, ay: 297, coreW: 216, coreH: 212 }
+heal_cross: { n: 2, w: 188, h: 243, ax: 95, ay: 228, coreW: 150, coreH: 194 }
+heal_star: { n: 2, w: 181, h: 174, ax: 89, ay: 89, coreW: 150, coreH: 136 }
+heal_plus: { n: 1, w: 129, h: 164, ax: 63, ay: 79, coreW: 92, coreH: 108 }

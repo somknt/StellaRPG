@@ -1,6 +1,7 @@
 ﻿# 魔法エフェクトのシートを切り出して js_version/assets/effects/ に置く
 #   src/magic_effects_sheet.png ：魔法陣5つ・炎・水・風・雷（ChatGPT「魔法属性エフェクト素材シート」）
 #   src/stone_cannon_sheet.png  ：ストーンキャノン（飛ぶ岩・砕ける・砂ぼこり。「岩石魔法弾の爆発スプライト集」）
+#   src/heal_effects_sheet.png  ：ヒール（治癒の魔法陣・立ちのぼる光・十字・星のきらめき。「緑とシアンの魔法エフェクト素材集」）
 # 使い方：art_source/magic で  powershell -ExecutionPolicy Bypass -File tools/cut.ps1
 # 出力：assets/effects/magic_circle_<属性>.png、assets/effects/magic/<名前>_<コマ>.png、meta.txt（magic.js の MAGIC_FX に写す値）
 $ErrorActionPreference = 'Stop'
@@ -58,6 +59,26 @@ $st.Assign(150, 30)
 Cut-Row $st 'stone_fly'  @(@(20,120,365,330), @(365,120,722,330), @(722,120,1085,330), @(1085,120,1440,330)) 'right'
 Cut-Row $st 'stone_hit'  @(@(20,400,380,760), @(380,400,770,760), @(770,400,1100,760), @(1100,400,1440,760)) 'bright'
 Cut-Row $st 'stone_dust' @(@(60,800,380,1060), @(380,800,740,1060), @(740,800,1100,1060), @(1100,800,1420,1060)) 'center'
+
+# ---------- 緑とシアンの魔法エフェクト素材集（1536x1024）：ヒール ----------
+# 使うのは一部だけ。1段目：左はしの魔法陣、右の3つ（輪から光がのびていく）/ 2段目：十字が立ちのぼる光の2つ
+# 3段目：左の2つ（星のきらめき）/ 4段目：十字の粒
+$healSheet = Join-Path $root 'src\heal_effects_sheet.png'
+# 魔法陣：大きな芯だけを芯にする（まわりの小さなきらめきで中心がずれないように）
+$hc = New-Object FxCut $healSheet
+$hc.FindSeeds(150, 5, 300)
+$hc.Assign(150, 60)
+# 1コマだけの行は @(,@(...)) と書く（@(@(...)) だと PowerShell が1段の配列にしてしまう）
+Cut-Row $hc 'circle_heal' @(,@(0,0,280,316)) 'center' $true
+Move-Item -Force (Join-Path $out 'circle_heal_1.png') (Join-Path $game 'magic_circle_heal.png')
+# ほかのコマ：コマの間が広いので、まわりに散った小さなきらめきも芯にして、そのコマに入れる
+$hl = New-Object FxCut $healSheet
+$hl.FindSeeds(150, 4, 12)
+$hl.Assign(150, 60)
+Cut-Row $hl 'heal_rise'  @(@(755,0,985,316), @(985,0,1237,316), @(1237,0,1536,316)) 'bottom'
+Cut-Row $hl 'heal_cross' @(@(895,316,1090,551), @(1090,316,1325,551)) 'bottom'
+Cut-Row $hl 'heal_star'  @(@(200,551,400,731), @(0,551,200,731)) 'bright'
+Cut-Row $hl 'heal_plus'  @(,@(665,731,815,866)) 'center'
 
 $meta | Set-Content -Encoding UTF8 (Join-Path $root 'meta.txt')
 $meta

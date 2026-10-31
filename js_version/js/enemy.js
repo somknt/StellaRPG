@@ -129,6 +129,8 @@ class Enemy {
     }
     
     update(deltaTime, player) {
+        // ボスAIの、ノックバック中・倒れた後も動かす物（怨嗟の鎧の分身・風刃・実体化。armor_ai.js の preUpdate）
+        if (this.ai && this.ai.preUpdate) this.ai.preUpdate(deltaTime);
         if (this.hitFlashTimer > 0) this.hitFlashTimer -= deltaTime;
         if (this.contactTimer > 0) this.contactTimer -= deltaTime; // 体当たりの次まで（EnemySpawner.checkEnemyAttacks）
         
@@ -576,6 +578,10 @@ class Enemy {
         if (this.ai && this.ai.invulnerable && this.isAlive()) {
             return { damage: 0, position: this.position.clone(), staggered: true };
         }
+        // ボスが受けない攻撃（怨嗟の鎧：魔法は効かない・暗闇で実体化していない時は斬ってもすり抜ける。armor_ai.js の blocksDamage）
+        if (this.ai && this.ai.blocksDamage && this.isAlive() && this.ai.blocksDamage(kind)) {
+            return { damage: 0, position: this.position.clone(), staggered: false };
+        }
         if (this.ai && this.ai.superArmor) canStagger = false;
         const def = kind === 'magic' && this.magicDefense !== null ? this.magicDefense : this.defense;
         // damageTakenMul：ボスのフェーズの防御力アップ（boss_ai.js の BossAI.PHASE_BUFF）
@@ -733,8 +739,9 @@ class Enemy {
             ctx.restore();
         }
         
-        // 画像がない敵：被弾した瞬間は白い丸で光らせる
-        if (this.hitFlashTimer > 0 && !enemyImage) {
+        // 画像がない敵：被弾した瞬間は白い丸で光らせる（怨嗟の鎧は、仮の姿そのものを白く光らせる）
+        const armorLook = Enemy.BEAST_LOOKS[this.data.name];
+        if (this.hitFlashTimer > 0 && !enemyImage && !(armorLook && armorLook.armor)) {
             ctx.globalAlpha = 0.7;
             ctx.fillStyle = this.hitFlashColor !== '#ffffff' ? this.hitFlashColor : Enemy.slowMotion ? Enemy.SLOW_TINT : '#ffffff';
             ctx.beginPath();
@@ -884,6 +891,8 @@ class Enemy {
         const look = Enemy.BEAST_LOOKS[this.data.name];
         // 魔道ゴーレム：石と金属の人型（golem_ai.js の Enemy.drawGolem）
         if (look.golem && typeof Enemy.drawGolem === 'function') { Enemy.drawGolem(this, ctx, s, hop); return; }
+        // 怨嗟の鎧：黒鉄の鎧の亡霊（armor_ai.js の Enemy.drawGrudgeArmor）
+        if (look.armor && typeof Enemy.drawGrudgeArmor === 'function') { Enemy.drawGrudgeArmor(this, ctx, s, hop); return; }
         const r = this.size * 0.5;
         const dir = this.direction;
         const side = dir === 'left' ? -1 : 1;

@@ -202,6 +202,27 @@ BGM（bgm/ フォルダ）  ※ループする曲。ジングルは1回だけ流
     golem_beam.mp3       魔法陣砲撃の光の柱（ない時は golem_rune）
     golem_shield.mp3     星の盾を張る
 
+【怨嗟の鎧】  ※ない時は（）の音の高さ・長さを変えて鳴らす
+    bgm/bgm_boss_armor.mp3     怨嗟の鎧戦・第1形態（ない時は bgm_boss_wolf）
+    bgm/bgm_boss_armor_p2.mp3  怨嗟の鎧戦・第2形態（ない時は bgm_boss_golem_p2）
+    bgm/bgm_boss_armor_p3.mp3  怨嗟の鎧戦・第3形態（ない時は bgm_boss_golem_p3）
+    armor_intro.mp3      名前が出た時のうめき（boss_intro）
+    armor_roar.mp3       怨嗟の声・形態が変わる時（wolf_wave）
+    armor_draw.mp3       刀を抜く（attack）
+    armor_sheath.mp3     刀を鞘に納める（ui_select）
+    armor_charge.mp3     居合いの集中・予告の帯が出た時（golem_charge）
+    armor_slash.mp3      刀で斬る。armor_slash_2 も置ける（wolf_claw）
+    armor_iai.mp3        居合いで駆け抜けて斬る（just_dodge）
+    armor_rush.mp3       黒霧の突進（wolf_dash）
+    armor_wind.mp3       風刃を撃つ（magic_wind）
+    armor_stab.mp3       刀を地面に突き立てる・分身召喚（golem_thud）
+    armor_clone.mp3      分身が現れる（wolf_shot）
+    armor_clone_break.mp3 分身が消える（magic_weak）
+    armor_eyes.mp3       暗闇で目が光る・攻撃の予告（golem_charge）
+    armor_materialize.mp3 火の明かりで実体化した（magic_resist）
+    armor_immune.mp3     魔法が効かない・実体のない時に斬った（magic_resist）
+    fire_out.mp3         火が消える（magic_wind_hit）
+    fire_light.mp3       炎の魔法で火が灯る（magic_fire）
 【ふつうの敵（フリーバトル）】
     enemy_defeat.mp3     敵が倒れて星になる
 

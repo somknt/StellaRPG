@@ -64,6 +64,7 @@ class BossBattle {
         this.lastHP = null;
         this.maxPhase = 1;
         this.record = null;      // クリアした時の記録（BattleRecords.recordClear の結果）
+        this.rewarded = false;   // この戦いのコインをもう渡したか（1回の戦いで2回もらえないように）
         
         const AIClass = BOSS_AI_CLASSES[def.ai];
         const stage = map.getBossStage ? map.getBossStage() : null;
@@ -189,10 +190,14 @@ class BossBattle {
             if (!this.boss.isAlive()) {
                 this.state = 'victory';
                 this.resultTimer = 2.6; // ボスが光になって消えるのを見せてから
-                // クリアの記録：バトルコイン（ボスの基本＋ランクのボーナス）とクリアタイム（マイベスト）
+                // クリアの記録：バトルコイン（ボスの基本＋ランクのボーナス）とクリアタイム（マイベスト）。1回の戦いで1回だけ
                 const p = game.player;
-                this.record = window.BattleRecords ? BattleRecords.recordClear(this.def, this.time, p && p.gender) : null;
-                this.showBanner('GAME CLEAR', '勝利！', 'victory');
+                if (!this.rewarded) {
+                    this.rewarded = true;
+                    this.record = window.BattleRecords ? BattleRecords.recordClear(this.def, this.time, p && p.gender) : null;
+                }
+                const RT = this.def.result || {};
+                this.showBanner(RT.win || 'GAME CLEAR', RT.winSub || '勝利！', 'victory');
                 playSE('boss_down');
                 playBGM('jingle_victory');
             }
@@ -272,7 +277,8 @@ class BossBattle {
         this.ai.cancel();
         this.ai.active = false; // ボスはその場で止まる
         this.record = null;
-        this.showBanner('GAME OVER', '敗北……', 'defeat');
+        const RT = this.def.result || {};
+        this.showBanner(RT.lose || 'GAME OVER', RT.loseSub || '敗北……', 'defeat');
         playBGM('jingle_defeat');
     }
     
@@ -295,6 +301,11 @@ class BossBattle {
         const hpText = `${Math.ceil(b.currentHP)} / ${b.maxHP}`;
         if (u.hp.textContent !== hpText) u.hp.textContent = hpText;
         const n = this.ai.phase.number;
+        // 形態の名前（boss_data.js の phaseNames が true のボスだけ。怨嗟の鎧：亡霊剣士・六影の怨嗟・常闇の剣鬼）
+        if (u.phaseLabel) {
+            const label = this.def.phaseNames ? (this.ai.P.label || '') : '';
+            if (u.phaseLabel.textContent !== label) u.phaseLabel.textContent = label;
+        }
         if (u.phase.dataset.phase !== String(n)) {
             u.phase.dataset.phase = String(n);
             u.hud.dataset.phase = String(n);
@@ -306,6 +317,11 @@ class BossBattle {
     // ---------- 描画 ----------
     drawGround(ctx, cam) {
         if (this.ai) this.ai.drawGround(ctx, cam);
+    }
+    
+    // 主人公・置き物と奥行き順に並べて描く物（怨嗟の鎧の分身。game.js の drawWorld）
+    getDepthDrawables() {
+        return this.ai && this.ai.getDepthDrawables && this.state !== 'idle' ? this.ai.getDepthDrawables() : [];
     }
     
     drawWorld(ctx, cam) {
@@ -373,9 +389,11 @@ class BossBattle {
         const rec = win ? this.record : null;
         const timeText = R ? R.formatTime(this.time) : `${Math.floor(this.time / 60)}:${String(Math.floor(this.time) % 60).padStart(2, '0')}`;
         const p = this.game.player;
-        u.resultTitle.textContent = win ? 'GAME CLEAR' : 'GAME OVER';
-        u.resultSub.textContent = win ? '勝利！' : '敗北……';
-        u.retry.textContent = win ? 'もう一度戦う' : '再挑戦';
+        // 文字はボスごとに変えられる（boss_data.js の result。怨嗟の鎧は VICTORY / DEFEAT）
+        const RT = this.def.result || {};
+        u.resultTitle.textContent = win ? (RT.win || 'GAME CLEAR') : (RT.lose || 'GAME OVER');
+        u.resultSub.textContent = win ? (RT.winSub || '勝利！') : (RT.loseSub || '敗北……');
+        u.retry.textContent = RT.retry || (win ? 'もう一度戦う' : '再挑戦');
         u.result.classList.toggle('win', win);
         // クリアタイムのランク（大きな文字）と、自己ベストの時の「NEW RECORD!」
         if (u.rank) {
@@ -395,7 +413,7 @@ class BossBattle {
         if (win) {
             rows.push(['残りHP', `${p ? Math.ceil(p.currentHP) : 0} / ${p ? p.maxHP : 0}`]);
             if (rec) {
-                rows.push(['獲得バトルコイン', `<i class="coin-icon"></i>+${rec.gained}枚 <small>（基本${rec.base}＋ランク${rec.bonus}）</small>`]);
+                rows.push([RT.coinLabel || '獲得バトルコイン', `<i class="coin-icon"></i>+${rec.gained}枚 <small>（基本${rec.base}＋ランク${rec.bonus}）</small>`]);
                 rows.push(['所持バトルコイン', `<i class="coin-icon"></i>${rec.coins}枚`]);
                 rows.push(['マイベスト', rec.place ? `${rec.place}位${rec.best ? '（自己ベスト！）' : ''}` : '圏外']);
             }

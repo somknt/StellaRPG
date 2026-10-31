@@ -88,6 +88,14 @@ class AssetManager {
             list[name] = `assets/tiles/ruins/${name}.png`;
         }
         
+        // 歴戦の跡地の素材（assets/tiles/battlefield/<名前>.png。battlefield_map.js が使う）
+        // 拡張子を書いた物はその形式（全体図は透明な所がないので小さい JPEG）
+        for (const name of AssetManager.BATTLEFIELD_ART_READY) {
+            const dot = name.lastIndexOf('.');
+            const key = dot > 0 ? name.slice(0, dot) : name;
+            list[key] = `assets/tiles/battlefield/${dot > 0 ? name : name + '.png'}`;
+        }
+        
         // 狼・猪の画像（assets/enemies/<名前>/<向き>_<1〜3>.png）。置いた物だけ BEAST_SPRITES_READY に足す
         for (const key of AssetManager.BEAST_SPRITES_READY) {
             for (const d of directions) {
@@ -239,14 +247,15 @@ class AssetManager {
 // 画像を置いたらここに足す
 AssetManager.CAST_SPRITES_READY = ['male', 'female'];
 // 魔法陣と魔術のエフェクト（art_source/magic/tools/cut.ps1 で切り出した物）
-AssetManager.MAGIC_CIRCLES_READY = ['fire', 'water', 'wind', 'earth', 'thunder'];
+AssetManager.MAGIC_CIRCLES_READY = ['fire', 'water', 'wind', 'earth', 'thunder', 'heal'];
 // 名前: コマ数
 AssetManager.MAGIC_FX_READY = {
     fire_fly: 4, fire_hit: 4, fire_burn: 4,
     water_fly: 3, water_hit: 4,
     wind_loop: 3, wind_edge: 4,
     thunder_bolt: 4, thunder_flash: 4,
-    stone_fly: 4, stone_hit: 4, stone_dust: 4
+    stone_fly: 4, stone_hit: 4, stone_dust: 4,
+    heal_rise: 3, heal_cross: 2, heal_star: 2, heal_plus: 1
 };
 // 闘技場の素材（素材一覧から切り出した物。arena_map.js が使う物だけ読み込む）
 AssetManager.ARENA_ART_READY = [
@@ -267,6 +276,15 @@ AssetManager.RUINS_ART_READY = [
     'ruins_crystal', 'ruins_crystal_small', 'ruins_brazier', 'ruins_brazier_b', 'ruins_pedestal_rune',
     'ruins_rubble', 'ruins_rubble_b', 'ruins_rubble_c', 'ruins_block', 'ruins_block_small',
     'ruins_waterfall', 'ruins_waterfall_small', 'ruins_sparkles'
+];
+// 歴戦の跡地の素材（art_source/battlefield/tools/cut.ps1 で、暗黒城塞の廃墟の素材集・浮遊する廃城の全体図から切り出した物）
+AssetManager.BATTLEFIELD_ART_READY = [
+    'bf_overview.jpg',
+    'bf_fire_1', 'bf_fire_2', 'bf_fire_3', 'bf_fire_4', 'bf_fire_5', 'bf_fire_6', 'bf_fire_7', 'bf_fire_8',
+    'bf_brazier', 'bf_campfire', 'bf_smoke_1', 'bf_smoke_2', 'bf_smoke_3', 'bf_smoke_4',
+    'bf_mist_1', 'bf_mist_2', 'bf_mist_3', 'bf_mist_4', 'bf_mist_5', 'bf_magic_circle',
+    'bf_tree_a', 'bf_tree_b', 'bf_tree_c', 'bf_tree_d', 'bf_spear_a', 'bf_spear_b', 'bf_stakes',
+    'bf_wheel', 'bf_planks', 'bf_rubble_wall', 'bf_rubble', 'bf_pillar_broken', 'bf_catapult'
 ];
 AssetManager.BEAST_SPRITES_READY = ['giant_forest_boar', 'black_corrupted_wolf', 'magic_golem'];  // 例: ['grass_wolf', 'corrupted_wolf', 'forest_boar']
 // ボスのモーション画像（art_source/bosses/tools/cut.ps1 で切り出した物）。

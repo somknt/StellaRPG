@@ -24,7 +24,9 @@ foreach ($r in $rows) {
     $g.DrawString("$($r.name)  $($r.w)x$($r.h)", $font, [System.Drawing.Brushes]::White, 4, $y + 2)
     $x = 4; $yy = $y + 22
     for ($k = 1; $k -le $r.n; $k++) {
-        $p = if ($r.name -eq 'circle') { Join-Path $fx ("magic_circle_" + @('fire','water','wind','earth','thunder')[$k-1] + ".png") } else { Join-Path $fx "magic\$($r.name)_$k.png" }
+        $p = if ($r.name -eq 'circle') { Join-Path $fx ("magic_circle_" + @('fire','water','wind','earth','thunder')[$k-1] + ".png") }
+             elseif ($r.name -like 'circle_*') { Join-Path $fx ("magic_circle_" + $r.name.Substring(7) + ".png") }  # circle_heal → magic_circle_heal.png
+             else { Join-Path $fx "magic\$($r.name)_$k.png" }
         $img = [System.Drawing.Image]::FromFile($p)
         $dw = [int]($img.Width * $scale); $dh = [int]($img.Height * $scale)
         $g.DrawRectangle($box, $x, $yy, $dw, $dh)
