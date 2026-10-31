@@ -286,7 +286,7 @@ AssetManager.BATTLEFIELD_ART_READY = [
     'bf_tree_a', 'bf_tree_b', 'bf_tree_c', 'bf_tree_d', 'bf_spear_a', 'bf_spear_b', 'bf_stakes',
     'bf_wheel', 'bf_planks', 'bf_rubble_wall', 'bf_rubble', 'bf_pillar_broken', 'bf_catapult'
 ];
-AssetManager.BEAST_SPRITES_READY = ['giant_forest_boar', 'black_corrupted_wolf', 'magic_golem'];  // 例: ['grass_wolf', 'corrupted_wolf', 'forest_boar']
+AssetManager.BEAST_SPRITES_READY = ['giant_forest_boar', 'black_corrupted_wolf', 'magic_golem', 'grudge_armor'];  // 例: ['grass_wolf', 'corrupted_wolf', 'forest_boar']
 // ボスのモーション画像（art_source/bosses/tools/cut.ps1 で切り出した物）。
 // モーション名: 画像がある向き（ない向きは Enemy.getEnemyImage が横向きか歩きの絵で代わりに出す）
 AssetManager.BOSS_MOTION_SPRITES_READY = {
@@ -303,6 +303,13 @@ AssetManager.BOSS_MOTION_SPRITES_READY = {
         idle: ['right', 'left', 'down', 'up'], punch: ['right', 'left', 'down', 'up'], punch2: ['down', 'up'],
         slam: ['right', 'left', 'down', 'up'], stomp: ['right', 'left', 'down', 'up'],
         armSwing: ['down'], magic: ['down'], shield: ['down'], activate: ['down'], phaseChange: ['down']
+    },
+    // 怨嗟の鎧（art_source/bosses/tools/cut_armor.ps1）：名前は AI のモーションではなく絵のポーズ（GrudgeArmorAI.spriteMotion）
+    // 正面の待機は歩きの絵。突き立て・集中・ひるみ・倒れるは横向きだけ
+    grudge_armor: {
+        idle: ['right', 'left', 'up'], drawSword: ['right', 'left', 'down', 'up'], ready: ['right', 'left', 'down', 'up'],
+        slash: ['right', 'left', 'down', 'up'], slashB: ['right', 'left', 'down', 'up'], dash: ['right', 'left', 'down', 'up'],
+        stab: ['right', 'left'], focus: ['right', 'left'], hurt: ['right', 'left'], collapse: ['right', 'left']
     }
 };
 // ボス戦のエフェクト画像（assets/effects/boss/<名前>.png）。_1〜_3 は3コマの物
@@ -312,7 +319,10 @@ AssetManager.BOSS_FX_READY = [
     // 魔道ゴーレム（星力の溜め・星力弾・地面から出る結晶・地面の輪・拳の軌跡・星の光・砲撃の光の柱）
     'golem_charge_1', 'golem_charge_2', 'golem_charge_3', 'golem_charge_4', 'golem_shot',
     'golem_crystal_1', 'golem_crystal_2', 'golem_crystal_3', 'golem_crystal_4',
-    'golem_ring_1', 'golem_ring_2', 'golem_ring_3', 'golem_slash', 'golem_spark', 'golem_beam'
+    'golem_ring_1', 'golem_ring_2', 'golem_ring_3', 'golem_slash', 'golem_spark', 'golem_beam',
+    // 怨嗟の鎧（黒紫の霧・分身の出る渦・刀を突き立てた渦・斬撃の三日月・居合いの筋・風刃）
+    'armor_mist_1', 'armor_mist_2', 'armor_mist_3', 'armor_mist_4', 'armor_swirl', 'armor_vortex',
+    'armor_slash_1', 'armor_slash_2', 'armor_slash_3', 'armor_streak', 'armor_wave'
 ];
 
 // グローバルインスタンス

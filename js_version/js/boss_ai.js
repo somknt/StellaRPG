@@ -1020,7 +1020,7 @@ class BlackWolfAI extends BossAI {
         super.update(dt);
     }
     
-    // プレイヤーのまわりを回りながら、ちょうどいい距離を保つ
+    // プレイヤーのまわりを回りながら、ちょうどいい距離（BlackWolfAI.ORBIT）を保つ
     idleMove(dt) {
         this.orbitTimer -= dt;
         if (this.orbitTimer <= 0) { this.orbitSign *= -1; this.orbitTimer = 1.2 + Math.random() * 1.5; }
@@ -1028,7 +1028,8 @@ class BlackWolfAI extends BossAI {
         const d = to.length();
         const n = to.normalize();
         const tangent = new Vector2(-n.y * this.orbitSign, n.x * this.orbitSign);
-        const radial = n.mult(Math.max(-1, Math.min(1, (d - 200 * this.R) / (80 * this.R))));
+        const O = BlackWolfAI.ORBIT;
+        const radial = n.mult(Math.max(-1, Math.min(1, (d - O.dist * this.R) / (O.soft * this.R))));
         const v = tangent.mult(0.85).add(radial).normalize();
         this.e.velocity = v.mult(this.speed * 0.8);
         if (this.blocked) this.orbitSign *= -1;
@@ -1088,7 +1089,7 @@ class BlackWolfAI extends BossAI {
             yield* this.sleep(0.08 * fo, () => { this.pose = 2; });
         }
         yield* this.recover(a.recover * 0.6);
-        yield* this.backOff(0.25);
+        yield* this.backOff(BlackWolfAI.ORBIT.backOff);
     }
     *act_doubleBite(a) { yield* this.act_bite(a); }
     
@@ -1115,7 +1116,7 @@ class BlackWolfAI extends BossAI {
             yield* this.sleep(0.12 * fo, (p) => { this.face(dir); this.pose = p < 0.5 ? 1 : 2; });
         }
         yield* this.recover(a.recover * 0.6);
-        yield* this.backOff(0.25);
+        yield* this.backOff(BlackWolfAI.ORBIT.backOff);
     }
     *act_tripleClaw(a) { yield* this.act_claw(a); }
     
@@ -1341,6 +1342,11 @@ class BlackWolfAI extends BossAI {
         super.drawAbove(ctx, cam);
     }
 }
+
+// 黒蝕狼の間合い（px。Enemy.SCALE.range 倍される）
+// dist：攻撃していない時に回る距離（200 → 150 で近くから攻める） / soft：この幅で近づく・離れる速さをゆるめる
+// backOff：噛みつき・爪の後に下がる秒数（0.25 → 0.12。下がりすぎずに次の連続攻撃へ）
+BlackWolfAI.ORBIT = { dist: 150, soft: 70, backOff: 0.12 };
 
 // boss_data.js の ai の名前 → クラス
 const BOSS_AI_CLASSES = {

@@ -681,7 +681,7 @@ class Enemy {
             const fy = screenPos.y + this.size * 0.55;
             const jx = this.ai.jitter ? (Math.random() - 0.5) * this.ai.jitter * 2 : 0;
             // 絵にポーズがある時は、伸び縮みを半分にする（絵の動きと重なりすぎないように）
-            const k = enemyImage ? 0.5 : 1;
+            const k = enemyImage || this.ai.hasArt ? 0.5 : 1;   // 怨嗟の鎧は絵を自分で描くので hasArt で見る
             ctx.translate(screenPos.x + jx, fy);
             ctx.scale(1 + (this.ai.scaleX - 1) * k, 1 + (this.ai.scaleY - 1) * k);
             ctx.translate(-screenPos.x, -fy);
@@ -839,6 +839,8 @@ class Enemy {
         const look = Enemy.BEAST_LOOKS[this.data.name];
         this._drawMul = (look && look.sprite && look.sprite.draw) || 1.5; // 画面に描く大きさ（size の何倍か）
         if (look) {
+            // 怨嗟の鎧：絵は Enemy.drawGrudgeArmor（armor_ai.js）が透かし・分身・残像に合わせて自分で描く
+            if (look.armor) return null;
             // ボス：今のモーション（突進・咆哮など）の画像
             if (this.ai && look.sprite) {
                 const b = this.getBossSprite(look);
@@ -860,9 +862,10 @@ class Enemy {
     // ボスの絵：AI のモーション（look.sprite.alias で代わりの絵に置きかえ）と、コマ（ai.spriteFrame か時間でくり返し）から選ぶ
     // look.sprite.front：正面の絵しかないモーション（どの向きでも正面の絵） / look.sprite.fallback：絵がない時に使うモーション
     // 下・上向きの絵がないモーションは、攻撃なら横向き（左右は向いている方）、待機などは下・上向きの歩きの絵
-    getBossSprite(look) {
+    // ai.spriteMotion：モーションと別に絵のポーズを決める AI（怨嗟の鎧）/ d：向き（分身・残像。書かなければ今の向き）
+    getBossSprite(look, d = null) {
         const A = window.assetManager, sp = look.sprite, ai = this.ai;
-        const motion = ai.motion || 'idle';
+        const motion = ai.spriteMotion || ai.motion || 'idle';
         const [name, fixed] = (sp.alias && sp.alias[motion]) || [motion, null];
         const speed = (sp.speed && (sp.speed[motion] || sp.speed[name])) || 0.15;
         // cycle：時間でくり返す時のコマの順番（例：歩きは 1→2→1→3）。書いていないモーションは 1→2→3
@@ -870,7 +873,7 @@ class Enemy {
         const n = Math.floor(ai.motionTime / speed);
         const frame = fixed != null ? fixed : af != null ? af : seq ? seq[n % seq.length] : n % 3;
         const file = (n, d, f) => A.get(n === 'walk' ? `${look.key}_${d}_${f + 1}` : `${look.key}_${n}_${d}_${f + 1}`);
-        const dir = sp.front && sp.front.includes(name) ? 'down' : this.direction;
+        const dir = sp.front && sp.front.includes(name) ? 'down' : (d || this.direction);
         const vertical = dir === 'up' || dir === 'down';
         const still = Enemy.BOSS_STILL_MOTIONS.includes(motion);
         let img = file(name, dir, frame);

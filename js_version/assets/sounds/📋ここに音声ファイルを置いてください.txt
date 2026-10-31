@@ -41,6 +41,9 @@
     jingle_12（se/にあった）→ jingle_victory  GAME CLEAR（オルガン）
     jingle_11（se/にあった）→ jingle_defeat   GAME OVER（和風）
     星の子タイトル画面   → bgm_title          タイトル・メインメニュー・設定（2026/10/30）
+    怨嗟の鎧第1形態      → bgm_boss_armor     怨嗟の鎧戦・第1形態（2026/10/31）
+    怨嗟の鎧第二形態     → bgm_boss_armor_p2  怨嗟の鎧戦・第2形態（HP50%以下）
+    怨嗟の鎧第3形態      → bgm_boss_armor_p3  怨嗟の鎧戦・第3形態（HP25%以下）
 
   ボス戦の BGM は「BATTLE START」の文字が出てから流れる（開始の演出の間はボスの声だけ）
   形態が変わる時（HP50%・25%）は BGM を止めて、ボスの咆哮・遠吠え・機械の咆哮だけを大きく鳴らし、

@@ -111,8 +111,8 @@ const BOSS_DATA = [
         elements: { weak: ['炎', '土', '風'], resist: ['雷'] },
         enemy: {
             enemyId: 'boss_002', name: '黒蝕狼', displayName: '黒蝕狼',
-            hp: 1000, attack: 24, defense: 4, exp: 200,   // 攻撃力 34 → 24（ダメージを10下げた）
-            size: 56, speed: 165, detectionRange: 4000, attackRange: 70,   // 歩く・走る速さ 150 → 165
+            hp: 1000, attack: 24, defense: 7, exp: 200,   // 攻撃力 34 → 24（ダメージを10下げた）。防御 4 → 7
+            size: 56, speed: 182, detectionRange: 4000, attackRange: 70,   // 歩く・走る速さ 150 → 165 → 182
             isBoss: true, knockbackScale: 0.5
         },
         look: { key: 'black_corrupted_wolf', body: '#2b2433', dark: '#16111c', outline: '#07050a', snout: '#3d3346', eye: '#d47bff', head: 0.42, ear: 0.44, tail: true, glowEyes: true, miasma: true, cracks: true,
@@ -122,16 +122,17 @@ const BOSS_DATA = [
                          corruptionAttack: ['bite', null], stun: ['leapPrepare', 2], hit: ['leapPrepare', 0], death: ['leapPrepare', 0] },
                 speed: { walk: 0.15, run: 0.09, shadowDash: 0.05, howl: 0.16 }
             } },
-        attackInterval: 2.5,   // 攻撃と攻撃の間（2.0 → 2.5 でゆっくり）
+        attackInterval: 2.2,   // 攻撃と攻撃の間（2.0 → 2.5 でゆっくり → 2.2 で少し連続して攻めてくる）
         ultimate: 'corruptionWave', // 必殺技：最終強化の侵蝕波動（広がる紫の輪）
+        // 近くで噛みつき・爪の連続攻撃を出しやすく（重み）。近づいてくるので、回避は少し控えめ
         phases: [
-            { hp: 1.0, label: '通常', speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0, dodgeChance: 0.2, aura: 0,
-              attacks: { bite: 3, claw: 3, leap: 3 } },
+            { hp: 1.0, label: '通常', speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0, dodgeChance: 0.15, aura: 0,
+              attacks: { bite: 4, claw: 4, leap: 2 } },
             // 強化の大技：侵蝕弾（扇形の5発）／最終強化の大技：必殺技の侵蝕波動
-            { hp: 0.5, label: '強化', speedMul: 1.2, intervalMul: 0.86, recoverMul: 0.85, dodgeChance: 0.3, aura: 1, transition: 'howl', opener: 'corruptionShot',
-              banner: '侵蝕の遠吠え！', attacks: { doubleBite: 3, claw: 2, leap: 2, shadowDash: 3, corruptionShot: 3 } },
-            { hp: 0.25, label: '最終強化', speedMul: 1.35, intervalMul: 0.75, recoverMul: 0.65, dodgeChance: 0.45, aura: 2, transition: 'howl', opener: 'corruptionWave',
-              banner: '星喰いの暴走！', attacks: { tripleClaw: 3, doubleBite: 2, shadowLeap: 3, corruptionShot: 2, corruptionWave: 2 } }
+            { hp: 0.5, label: '強化', speedMul: 1.2, intervalMul: 0.86, recoverMul: 0.85, dodgeChance: 0.22, aura: 1, transition: 'howl', opener: 'corruptionShot',
+              banner: '侵蝕の遠吠え！', attacks: { doubleBite: 4, claw: 3, leap: 1, shadowDash: 3, corruptionShot: 2 } },
+            { hp: 0.25, label: '最終強化', speedMul: 1.35, intervalMul: 0.75, recoverMul: 0.65, dodgeChance: 0.35, aura: 2, transition: 'howl', opener: 'corruptionWave',
+              banner: '星喰いの暴走！', attacks: { tripleClaw: 4, doubleBite: 3, shadowLeap: 2, corruptionShot: 1, corruptionWave: 2 } }
         ],
         // 範囲は小さめ。連続攻撃（噛みつき・爪）は前より2回少なく、攻撃は全体にゆっくり（溜め・隙を長く）
         // chain：2回目からの溜めの倍率（1回目の溜めに掛ける） / follow：噛みつき・ひっかいた後の動きの時間の倍率
@@ -270,13 +271,19 @@ const BOSS_DATA = [
         elements: { weak: [], resist: [] },
         enemy: {
             enemyId: 'boss_004', name: '怨嗟の鎧', displayName: '怨嗟の鎧',
-            hp: 3000, attack: 65, defense: 38, exp: 600,   // HP 3800 → 3000（長すぎたので）
+            hp: 3300, attack: 65, defense: 38, exp: 600,   // HP 3800 → 3000（長すぎたので）→ 3300（少し短すぎたので）
             size: 56, speed: 120, detectionRange: 4000, attackRange: 90,   // 速い（歩く速さ 120 × Enemy.SCALE.speed）
             isBoss: true, knockbackScale: 0.55
         },
-        // 画像が届くまでは Enemy.drawGrudgeArmor（armor_ai.js）のコードで描く仮の姿
-        // 画像を置いたら look.sprite（イノシシ・狼と同じ書き方）を足し、assets.js の BEAST_SPRITES_READY に 'grudge_armor' を足す
-        look: { key: 'grudge_armor', armor: true, cardFit: 70 },
+        // 絵：assets/enemies/grudge_armor/<ポーズ>_<向き>_<1〜3>.png（art_source/bosses/tools/cut_armor.ps1 で切り出した物）
+        // ポーズは AI のモーションと刀の構えから GrudgeArmorAI.spriteMotion が選ぶ。絵は Enemy.drawGrudgeArmor が透かして描く
+        // （画像が読めない時は、同じ所でコードで描く仮の姿）。絵は 440×440、足元は上から 348px（254 / 320 と同じ所）
+        look: { key: 'grudge_armor', armor: true, cardFit: 70,
+            sprite: {
+                draw: 3.93,
+                speed: { walk: 0.16, idle: 0.22, ready: 0.2, dash: 0.07, focus: 0.12 }
+            }
+        },
         attackInterval: 2.0,
         ultimate: ['focusIai', 'darkIai'],   // 必殺技：集中居合い・闇の居合い（当たると少し飛ばされて1秒無敵）
         phaseBuff: [
@@ -313,13 +320,14 @@ const BOSS_DATA = [
             // 第3形態で火を消しに行く時の速さ（AI が時間で使う。phases の attacks には入れない）
             extinguishFire: { range: [0, 9999], speed: 420, slash: 0.3 }
         },
-        // モーション（'temp' = コードで描いている仮の姿）。画像の名前は assets/enemies/grudge_armor/<モーション>_<向き>_<1〜3>.png
+        // モーション（'done' = 画像あり / 'alt' = 別のポーズの絵で代用）。絵のポーズ：idle / walk / drawSword / ready / slash / slashB /
+        // dash / stab / focus / hurt / collapse（GrudgeArmorAI.spriteMotion）。正面の待機・歩きは立ち絵、突き立て・集中・ひるみ・倒れるは横向きだけ
         motions: {
-            idle: 'temp', walk: 'temp', run: 'temp', drawSword: 'temp', sheathSword: 'temp', slash1: 'temp', slash2: 'temp',
-            doubleSlash: 'temp', tripleSlash: 'temp', iaiCharge: 'temp', iaiAttack: 'temp', hit: 'temp', knockback: 'temp', death: 'temp',
-            phase2Start: 'temp', cloneSummon: 'temp', windSlash: 'temp', cloneDisappear: 'temp',
-            phase3Start: 'temp', extinguishFire: 'temp', darkAura: 'temp', ghostMove: 'temp', glowingEyes: 'temp',
-            materialize: 'temp', dematerialize: 'temp', darkIai: 'temp', shadowCombo: 'temp'
+            idle: 'done', walk: 'done', run: 'alt', drawSword: 'done', sheathSword: 'alt', slash1: 'done', slash2: 'done',
+            doubleSlash: 'done', tripleSlash: 'done', iaiCharge: 'alt', iaiAttack: 'done', hit: 'done', knockback: 'alt', death: 'done',
+            phase2Start: 'alt', cloneSummon: 'done', windSlash: 'alt', cloneDisappear: 'alt',
+            phase3Start: 'alt', extinguishFire: 'alt', darkAura: 'alt', ghostMove: 'alt', glowingEyes: 'alt',
+            materialize: 'alt', dematerialize: 'alt', darkIai: 'alt', shadowCombo: 'alt'
         }
     },
     {

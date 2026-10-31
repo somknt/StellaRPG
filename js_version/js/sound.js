@@ -727,9 +727,10 @@ SoundManager.LIST = [
     { key: 'armor_immune', label: '魔法が効かない・実体のない時に斬った', fallback: 'magic_resist', volume: 0.45, rate: 0.6, gap: 0.3 },
     { key: 'fire_out',     label: '火が消える（ボスが斬って消す）', fallback: 'magic_wind_hit', volume: 0.6, rate: 1.5, dur: 0.6, gap: 0.05 },
     { key: 'fire_light',   label: '炎の魔法で火が灯る', fallback: 'magic_fire', volume: 0.9, rate: 0.9 },
-    { key: 'bgm_boss_armor',    bgm: true, label: '怨嗟の鎧戦・第1形態', fallback: 'bgm_boss_wolf', volume: 1.0 },
-    { key: 'bgm_boss_armor_p2', bgm: true, label: '怨嗟の鎧戦・第2形態（HP50%以下）', fallback: 'bgm_boss_golem_p2', volume: 1.0, start: 1.95 },
-    { key: 'bgm_boss_armor_p3', bgm: true, label: '怨嗟の鎧戦・第3形態（HP25%以下）', fallback: 'bgm_boss_golem_p3', volume: 1.0, start: 1.95 },
+    // 怨嗟の鎧：第2形態の曲だけ頭に 0.95 秒の無音がある（飛ばす。その後の入りは残す）
+    { key: 'bgm_boss_armor',    bgm: true, label: '怨嗟の鎧戦・第1形態', fallback: 'bgm_boss_wolf', volume: 1.0 },                      // ★ 怨嗟の鎧第1形態
+    { key: 'bgm_boss_armor_p2', bgm: true, label: '怨嗟の鎧戦・第2形態（HP50%以下）', fallback: 'bgm_boss_golem_p2', volume: 1.0, start: 0.95 }, // ★ 怨嗟の鎧第二形態
+    { key: 'bgm_boss_armor_p3', bgm: true, label: '怨嗟の鎧戦・第3形態（HP25%以下）', fallback: 'bgm_boss_golem_p3', volume: 1.0 },      // ★ 怨嗟の鎧第3形態
     
     // ===== ふつうの敵（フリーバトル）=====
     { key: 'enemy_defeat', label: '敵が倒れて星になる', gap: 0.08 }

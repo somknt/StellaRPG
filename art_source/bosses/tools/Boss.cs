@@ -167,3 +167,51 @@ public class Frame {
         }
     }
 }
+
+// Grudge armor (samurai ghost): the frames are not placed the same way in their cells, so each frame is stood up by its content
+public class Composed {
+    public Bitmap Bmp; public int X, Y, W, H;
+}
+public static class ArmorFrame {
+    // all parts of one frame on one bitmap (the union box, sheet px). X, Y = top-left on the sheet
+    public static Composed Compose(System.Collections.IEnumerable parts) {
+        int x0 = int.MaxValue, y0 = int.MaxValue, x1 = 0, y1 = 0;
+        foreach (Part p in parts) { x0 = Math.Min(x0, p.X); y0 = Math.Min(y0, p.Y); x1 = Math.Max(x1, p.X + p.W); y1 = Math.Max(y1, p.Y + p.H); }
+        var c = new Composed(); c.X = x0; c.Y = y0; c.W = x1 - x0; c.H = y1 - y0;
+        c.Bmp = new Bitmap(c.W, c.H, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(c.Bmp)) {
+            g.Clear(Color.Transparent);
+            foreach (Part p in parts) g.DrawImageUnscaled(p.Bmp, p.X - x0, p.Y - y0);
+        }
+        return c;
+    }
+
+    static bool Gold(byte b, byte g, byte r) { return r > 140 && g > 95 && b < 120 && r - b > 60 && g - b > 25; }
+    // a light grey pixel (the blade)
+    static bool Blade(byte b, byte g, byte r) { int mx = Math.Max(r, Math.Max(g, b)), mn = Math.Min(r, Math.Min(g, b)); return mx > 110 && mx - mn < 45; }
+
+    static double Median(List<int> v) { if (v.Count == 0) return double.NaN; v.Sort(); return v[v.Count / 2]; }
+
+    // { headX, lowerX, hornTop, hornBottom, hornLeft, hornRight } in local px of the bitmap
+    //   headX  = middle x of the gold horns (top 45% of the picture)
+    //   lowerX = middle x of the body (no blade, no gold) in the lowest 35% of the picture
+    //   [6]    = the lowest y of the body (no blade)
+    public static double[] Anchor(Bitmap b) {
+        int W = b.Width, H = b.Height;
+        var bd = b.LockBits(new Rectangle(0, 0, W, H), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        var d = new byte[W * H * 4];
+        Marshal.Copy(bd.Scan0, d, 0, d.Length); b.UnlockBits(bd);
+        var gx = new List<int>(); var lx = new List<int>();
+        int gt = H, gb = 0, gl = W, gr = 0, foot = 0;
+        for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+            int i = (y * W + x) * 4; if (d[i + 3] < 150) continue;
+            byte cb = d[i], cg = d[i + 1], cr = d[i + 2];
+            if (y < H * 0.45 && Gold(cb, cg, cr)) { gx.Add(x); gt = Math.Min(gt, y); gb = Math.Max(gb, y); gl = Math.Min(gl, x); gr = Math.Max(gr, x); continue; }
+            if (Blade(cb, cg, cr) || Gold(cb, cg, cr)) continue;
+            foot = Math.Max(foot, y);
+            if (y >= H * 0.65) lx.Add(x);
+        }
+        // [6] foot = the lowest pixel that is not the blade (a sword held low must not lift the body)
+        return new double[] { Median(gx), Median(lx), gt, gb, gl, gr, foot };
+    }
+}

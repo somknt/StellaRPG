@@ -922,7 +922,7 @@ class Game {
     }
     
     // ねらえる敵（ターゲット・自動でねらう・向き直す）。ボスAIの hideTarget が true の間はねらえない
-    // （怨嗟の鎧：分身がいる間は本体がどれか分からないように・暗闇で実体化していない間は見えないので）
+    // （怨嗟の鎧：暗闇で実体化していない間・霧になって消えている間は見えないので。分身の間も本体はねらえる）
     targetableEnemies() {
         return this.enemySpawner.enemies.filter(e => !(e.ai && e.ai.hideTarget));
     }

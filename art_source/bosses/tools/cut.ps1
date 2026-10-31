@@ -1,6 +1,7 @@
 # Cut the boss pictures (art_source/bosses/src) into game frames
 #   creatures -> js_version/assets/enemies/<boss>/<motion>_<dir>_<1-3>.png  and walk <dir>_<1-3>.png
 #   effects   -> js_version/assets/effects/boss/<name>[_<n>].png
+#   grudge armor -> cut_armor.ps1 (called at the end)
 Add-Type -AssemblyName System.Drawing
 Add-Type -Path "$PSScriptRoot/Boss.cs" -ReferencedAssemblies System.Drawing
 $root = Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
@@ -343,4 +344,7 @@ Save-FxPick $G 'golem_ring' @(@(20, 675, 165, 860), @(165, 675, 335, 860), @(335
 Save-FxPick $G 'golem_slash' @(, @(290, 915, 468, 1020)) 220
 Save-FxPick $G 'golem_spark' @(, @(30, 835, 125, 946)) 64
 Save-FxPick $G 'golem_beam' @(, @(860, 805, 1530, 1022)) 420
+
+# ---------------- grudge armor (its own script: the frames are stood up by their content) ----------------
+& "$PSScriptRoot/cut_armor.ps1" -Root $root
 "done"

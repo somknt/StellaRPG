@@ -16,9 +16,10 @@
 //                           ボスは時間で火を消しに来る（1回に消す数と間隔は TUNING。全部の火を続けて消すことはない）
 //     魔法の直接のダメージは効かない（炎の魔法は、消えた火に当てて灯すのに使う。battlefield_map.js）
 // - ステージ（battlefield_map.js の BattlefieldMap）と連動：火の明かり・暗闇・炎の魔法で火を灯す
-// - 見た目：画像が届くまでは Enemy.drawGrudgeArmor（下）でコードで描く仮の姿
-//   画像は assets/enemies/grudge_armor/<モーション>_<向き>_<1〜3>.png に置き、assets.js の BEAST_SPRITES_READY・
-//   BOSS_MOTION_SPRITES_READY に足すと使われる（モーション名は boss_data.js の motions）
+// - 見た目：assets/enemies/grudge_armor/<ポーズ>_<向き>_<1〜3>.png（art_source/bosses/tools/cut_armor.ps1 で切り出した物）
+//   ポーズとコマは spriteMotion・spriteFrame（下）がモーションと刀の構えから選ぶ。Enemy.drawGrudgeArmor が透かして描く
+//   画像が読めない時は、同じ所でコードで描く仮の姿（Enemy.drawGrudgeArmor の後半）
+// - エフェクト：assets/effects/boss/armor_*.png（黒紫の霧・渦・斬撃の三日月・居合いの筋・風刃）。画像がない時はコードで描く
 // - 状態（state）：idle / chase / attack / recovery / phaseTransition / cloneSummon / darkness / materialized /
 //   dematerialized / stunned / dead（デバッグ用。game.enemySpawner.enemies[0].ai.state で見られる）
 
@@ -45,7 +46,7 @@ class GrudgeArmorAI extends BossAI {
         this.extinguishTimer = 0;
         this.pendingStun = 0;      // 分身を消されたノックバックの後の気絶（秒）
         this.feedbackAt = -9;
-        this.texts = [];           // 小さな文字（「魔法無効」「すり抜けた」）
+        this.texts = [];           // 小さな文字（「魔法無効」「分身が消えた！」）
         this.playerWasAttacking = false;
         this.orbitSign = Math.random() < 0.5 ? 1 : -1;
         this.orbitTimer = 2;
@@ -61,8 +62,43 @@ class GrudgeArmorAI extends BossAI {
         return a;
     }
     
-    // ロックオン・自動でねらう敵にしない（分身がいる間・暗闇で実体化していない間。game.js）
-    get hideTarget() { return this.liveClones().length > 0 || (this.dark && !this.materialized); }
+    // 絵のポーズ（assets/enemies/grudge_armor/<ポーズ>_<向き>_<1〜3>.png。Enemy.getBossSprite が使う）
+    // モーションだけでなく刀の構え（this.blade）でも変わる：柄を握る＝抜刀の1コマ目 / 構え＝ready / 駆け抜け＝dash
+    get spriteMotion() {
+        const B = this.blade || {};
+        const held = B.mode === 'trail' ? 'dash' : B.mode === 'hilt' ? 'drawSword' : 'ready';
+        switch (this.motion) {
+            case 'death': return 'collapse';
+            case 'hit': case 'stun': case 'knockback': return 'hurt';
+            case 'phase2Start': case 'phase3Start': return 'focus';
+            case 'cloneSummon': return B.mode === 'raise' || B.mode === 'stab' ? 'stab' : 'focus';
+            case 'drawSword': case 'sheathSword': return 'drawSword';
+            case 'iaiCharge': case 'darkIai': case 'darkAura': case 'glowingEyes': return held;
+            case 'iaiAttack': return 'dash';
+            case 'ghostMove': return B.mode === 'trail' ? 'dash' : this.bladeOut ? 'ready' : 'walk';
+            case 'slash1': case 'slash2': case 'doubleSlash': case 'tripleSlash': case 'shadowCombo': case 'windSlash': case 'extinguishFire':
+                return (B.side || 1) < 0 ? 'slashB' : 'slash';
+            case 'walk': case 'run': case 'turn': return 'walk';
+            default: return this.bladeOut ? 'ready' : 'idle';   // 待機・実体化など
+        }
+    }
+    // 絵のコマ（0〜2。null なら時間でくり返す）。斬り：0 = 振りかぶる / 1 = 斬る / 2 = 振り抜く
+    get spriteFrame() {
+        const B = this.blade || {}, p = B.p || 0, m = this.spriteMotion;
+        if (m === 'slash' || m === 'slashB') return B.mode === 'swing' ? (p < 0.45 ? 1 : 2) : 0;
+        if (m === 'drawSword') {
+            if (B.mode === 'sheathing') return 2 - Math.min(2, Math.floor(p * 3));   // 納刀は抜刀の逆
+            return this.motion === 'drawSword' && B.mode === 'hilt' ? Math.min(2, Math.floor(p * 3)) : 0;
+        }
+        if (m === 'stab') return B.mode === 'stab' ? 2 : p < 0.5 ? 0 : 1;
+        if (m === 'collapse') return Math.min(2, Math.floor(this.motionTime / 0.22));
+        if (m === 'hurt') return 0;
+        return null;
+    }
+    
+    // ロックオン・自動でねらう敵にしない（暗闇で実体化していない間・霧になって消えている間。game.js）
+    // 分身がいる間も本体はねらえる（分身は enemies に入っていないので、ねらえない）
+    get hideTarget() { return (this.dark && !this.materialized) || this.fade < 0.4; }
     
     get state() {
         const e = this.e;
@@ -199,14 +235,15 @@ class GrudgeArmorAI extends BossAI {
     // 魔法は効かない。暗闇で実体化していない時は、斬ってもすり抜ける（Enemy.takeDamage が呼ぶ。true = ダメージなし）
     blocksDamage(kind) {
         if (kind === 'magic') { this.feedback('魔法無効', '#cdb8ff'); return true; }
-        if (this.dark && !this.materialized) { this.feedback('すり抜けた', '#9d8cff'); return true; }
+        if (this.dark && !this.materialized) { this.feedback(null); return true; }
         return false;
     }
     
+    // 効かなかった時の手ごたえ（光と音）。text が null の時は文字を出さない（すり抜けた時）
     feedback(text, color) {
         if (this.clock - this.feedbackAt < this.T.feedbackGap) return;
         this.feedbackAt = this.clock;
-        this.say(text, color);
+        if (text) this.say(text, color);
         this.addFx({ type: 'ward', follow: true, life: 0.35 });
         playSE('armor_immune');
     }
@@ -215,7 +252,7 @@ class GrudgeArmorAI extends BossAI {
         this.texts.push({ text, color, x: this.e.position.x, y: this.e.position.y - this.e.size * 1.25, age: 0, life });
     }
     
-    // 主人公のナイフの扇に分身が入っていたら、その分身がゆらいで「すり抜けた」
+    // 主人公のナイフの扇に分身が入っていたら、その分身がゆらいで、すり抜ける（文字は出さない。音だけ）
     checkCloneSwing(p) {
         const w = p.weapon || { range: 100, arc: Math.PI * 0.8 };
         const aim = p.aimVector && p.aimVector.length() > 0.01 ? p.aimVector.normalize() : new Vector2(0, -1);
@@ -231,8 +268,6 @@ class GrudgeArmorAI extends BossAI {
         }
         if (hit && this.clock - this.feedbackAt >= this.T.feedbackGap) {
             this.feedbackAt = this.clock;
-            const c = this.clones.find(k => k.shimmer >= 0.49);
-            if (c) this.texts.push({ text: 'すり抜けた', color: '#b9a8ff', x: c.x, y: c.y - this.e.size * 1.25, age: 0, life: 0.8 });
             playSE('armor_immune');
         }
     }
@@ -425,10 +460,18 @@ class GrudgeArmorAI extends BossAI {
         return len;
     }
     
+    // 斬撃の絵（紫の三日月が大きくなる armor_slash_1〜3。絵がなければ何もしない＝コードの線だけ）
+    // ang：斬る向き / r：届く距離 / reverse：逆の手で斬る（左右反転）。絵の三日月はふくらみが下なので、ang - 90度 回す
+    slashArt(ang, r, reverse = false, o = {}) {
+        return this.fxImg(['armor_slash_1', 'armor_slash_2', 'armor_slash_3'], { follow: true, ground: false, add: true,
+            dx: Math.cos(ang) * r * 0.55, dy: Math.sin(ang) * r * 0.55 - this.e.size * 0.25, rot: ang - Math.PI / 2, flip: reverse,
+            w: r * 1.8, s0: 0.85, s1: 1.1, hold: 0.35, life: 0.3, ...o });
+    }
+    
     // 残像（駆け抜けた所に体の形の影を残す）。dark = true：黒い霧の残像（暗闇でも見える）
     ghostAfter(life = 0.3, dark = false) {
         this.addFx({ type: 'armorGhost', x: this.e.position.x, y: this.e.position.y, lift: this.lift, dir: this.e.direction,
-            facing: this.facing.clone(), life, dark, seen: dark });
+            facing: this.facing.clone(), life, dark, seen: dark, img: Enemy.armorSprite(this.e, this.e.direction) });   // img：その時の絵
     }
     
     // 集中（帯の予告）→ 駆け抜けて斬る（主人公をすり抜ける）
@@ -514,6 +557,7 @@ class GrudgeArmorAI extends BossAI {
         this.addHitbox({ kind: 'arc', follow: true, ang, r, spread, damage: this.dmg(a.damage), life: 0.12 });
         playSE('armor_slash');
         this.addFx({ type: 'slash', follow: true, ang, r: r * 0.9, spread: spread * 0.92, life: 0.26, color: this.dark ? '#b48cff' : '#ecdcff', reverse: side < 0 });
+        this.slashArt(ang, r, side < 0);
         yield* this.sleep(0.16, (p) => { this.face(dir); this.motion = motion; this.blade = { mode: 'swing', side, p }; });
     }
     
@@ -553,6 +597,7 @@ class GrudgeArmorAI extends BossAI {
         this.addHitbox({ kind: 'arc', follow: true, ang, r, spread: a.spread, damage: this.dmg(a.damage), life: 0.12 });
         playSE('armor_slash');
         this.addFx({ type: 'slash', follow: true, ang, r: r * 0.9, spread: a.spread * 0.92, life: 0.26, color: '#ecdcff' });
+        this.slashArt(ang, r);
         yield* this.sleep(0.18, (p) => { this.blade = { mode: 'swing', side: 1, p }; this.motion = 'slash1'; });
         yield* this.recover(a.recover);
         yield* this.backOff(0.3);
@@ -595,6 +640,7 @@ class GrudgeArmorAI extends BossAI {
             this.spawnBlade(this.e.position, new Vector2(Math.cos(aa), Math.sin(aa)), a, 'body');
         }
         this.addFx({ type: 'slash', follow: true, ang: ang0, r: this.e.size * 0.9, spread: 2.2, life: 0.26, color: '#d8f0ff' });
+        this.slashArt(ang0, this.e.size * 0.9);
         yield* this.sleep(0.2, (p) => { this.blade = { mode: 'swing', side: 1, p }; });
         yield* this.recover(a.recover);
         yield* this.backOff(0.3);
@@ -614,17 +660,28 @@ class GrudgeArmorAI extends BossAI {
         return c ? new Vector2(c.x, c.y) : null;
     }
     
-    // 分身の並ぶ6つの点：主人公を中心にした円の 0・60・120・180・240・300 度
+    // 分身の並ぶ6つの点：主人公を中心にした正六角形の頂点（円の 0・60・120・180・240・300 度）
     // ステージの外や置き物に重なる点があれば、円ごとステージの中心の方へずらす（それでもだめな点は近くの置ける所へ）
+    // 小さくするのは少しだけ（形がくずれないよう、1点ずつ動かすのは最後の手段）
+    // 壁の近くでもなるべく広い六角形のまま囲めるように、小さくする前に少しだけずらす（主人公は円の内側に残る）
     circlePoints() {
         const map = this.e.map, foot = this.e.getFootBox(), R0 = this.T.cloneRadius;
         const ok = (q) => !map || !map.isBoxBlocked(q.x + foot.ox, q.y + foot.oy, foot.hw, foot.hh);
         const base = this.player.position.clone();
         const toC = map && map.center ? map.center.sub(base) : new Vector2(0, 0);
         const ring = (c, R) => [0, 1, 2, 3, 4, 5].map(i => new Vector2(c.x + Math.cos(i * Math.PI / 3) * R, c.y + Math.sin(i * Math.PI / 3) * R));
+        // まず大きな円のまま、主人公が円の内側に残るくらい（半径の 45% まで）中心の方へずらしてみる
+        const dirC = toC.length() > 1 ? toC.normalize() : new Vector2(0, 0);
+        for (const k of [1, 0.92, 0.87]) {
+            for (const s of [0, 0.15, 0.3, 0.45]) {
+                const shift = Math.min(toC.length(), R0 * k * s);
+                const pts = ring(base.add(dirC.mult(shift)), R0 * k);
+                if (pts.every(ok)) return pts;
+            }
+        }
         // 主人公を囲めるように、まず円を小さくしてみて、それでも置けない時だけ円を中心の方へずらす
         for (let step = 0; step <= 12; step++) {
-            for (const k of [1, 0.85, 0.72]) {
+            for (const k of [1, 0.92, 0.87, 0.78]) {
                 const pts = ring(base.add(toC.mult(step / 12)), R0 * k);
                 if (pts.every(ok)) return pts;
             }
@@ -664,6 +721,8 @@ class GrudgeArmorAI extends BossAI {
         playSE('armor_stab');
         const at = this.feet();
         this.events.push({ type: 'shake', power: 5, time: 0.3 });
+        // 刀を突き立てた所から黒紫の渦が地面に広がる（armor_vortex。絵がなければ出さない）
+        this.fxImg('armor_vortex', { x: at.x, y: at.y, w: this.e.size * 2.6, flat: 0.5, s0: 0.3, s1: 1.25, hold: 0.55, life: 1.3, alpha: 0.85 });
         this.addFx({ type: 'crack', x: at.x, y: at.y, r: this.e.size * 1.1, life: 1.6, seed: Math.random(), color: 'rgba(120, 60, 170, 1)' });
         this.addFx({ type: 'mistBurst', x: at.x, y: at.y, r: this.e.size * 1.3, life: 1.0, n: 9 });
         const pts = this.circlePoints();
@@ -803,6 +862,7 @@ class GrudgeArmorAI extends BossAI {
             this.motion = 'extinguishFire';
             yield* this.sleep(0.28, (p) => { this.face(v); this.motion = 'extinguishFire'; this.blade = { mode: 'raised', side: 1, p }; });
             this.addFx({ type: 'slash', follow: true, ang: Math.atan2(v.y, v.x), r: this.e.size * 1.0, spread: 2.4, life: 0.25, color: '#e8d8ff', seen: true });
+            this.slashArt(Math.atan2(v.y, v.x), this.e.size, false, { seen: true });
             playSE('armor_slash');
             map.extinguish(f);
             yield* this.sleep(a.slash, (p) => { this.blade = { mode: 'swing', side: 1, p }; });
@@ -1064,6 +1124,15 @@ class GrudgeArmorAI extends BossAI {
             ctx.fillStyle = g;
             ctx.fillRect(-b.r * 2.2, -b.r * 2.2, b.r * 4.4, b.r * 4.4);
             ctx.globalCompositeOperation = 'source-over';
+            // 絵（紫の三日月 armor_wave）があれば、ふくらみ（絵の下側）を進む向きに向けて「）」の形で飛ばす
+            const art = BossAI.fxImage('armor_wave');
+            if (art) {
+                const w = b.r * 3.4;
+                ctx.rotate(-Math.PI / 2);
+                ctx.drawImage(art, -w / 2, -w * 0.62, w, w);
+                ctx.restore();
+                continue;
+            }
             ctx.lineCap = 'round';
             ctx.strokeStyle = 'rgba(120, 80, 220, 0.6)';
             ctx.lineWidth = 9;
@@ -1112,6 +1181,20 @@ class GrudgeArmorAI extends BossAI {
                 ctx.globalAlpha = a * 0.85;
                 if (img) ctx.drawImage(img, x - w / 2, y - h / 2, w, h);
                 else { ctx.strokeStyle = '#b77bff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(x, y, w / 2, h / 2, 0, 0, Math.PI * 2); ctx.stroke(); }
+                // 渦を巻く黒紫の霧（armor_swirl）：地面に寝かせて回す
+                const sw = BossAI.fxImage('armor_swirl');
+                if (sw) {
+                    ctx.save();
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.globalAlpha = a * 0.75;
+                    ctx.translate(x, y);
+                    ctx.scale(1, 0.5);
+                    ctx.rotate(this.time * 2.2 + f.x * 0.01);
+                    const ww = w * 1.15;
+                    ctx.drawImage(sw, -ww / 2, -ww / 2, ww, ww);
+                    ctx.restore();
+                    ctx.globalCompositeOperation = 'lighter';
+                }
                 const g = ctx.createRadialGradient(x, y - 30, 0, x, y - 30, 70);
                 g.addColorStop(0, `rgba(210, 160, 255, ${0.7 * a})`);
                 g.addColorStop(1, 'rgba(120, 40, 200, 0)');
@@ -1131,7 +1214,7 @@ class GrudgeArmorAI extends BossAI {
                 // 残像：体の形の紫の影（黒霧の突進は黒い霧の影で、長く残る）
                 const s = new Vector2(f.x - cam.x, f.y - cam.y);
                 Enemy.drawGrudgeArmor(this.e, ctx, s, f.lift || 0, { clone: true, alpha: (f.dark ? 0.55 : 0.4) * (1 - t), dir: f.dir, facing: f.facing,
-                    tint: f.dark ? '#1a0826' : '#7a45c8', eyes: f.dark ? 0.4 : 0 });
+                    tint: f.dark ? '#1a0826' : '#7a45c8', eyes: f.dark ? 0.4 : 0, img: f.img });
             }
             ctx.restore();
         }
@@ -1156,6 +1239,17 @@ class GrudgeArmorAI extends BossAI {
                     ctx.strokeStyle = f.dark ? '#b48cff' : '#ffffff';
                     ctx.lineWidth = 3;
                     ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+                    // 紫の筋の絵（armor_streak。絵の筋は右上がり 0.25 ラジアンくらいなので、その分だけ戻す）
+                    const art = BossAI.fxImage('armor_streak');
+                    const len = Math.hypot(x1 - x0, y1 - y0);
+                    if (art && len > 20) {
+                        ctx.globalCompositeOperation = 'lighter';
+                        ctx.globalAlpha = (1 - t) * (f.dark ? 0.7 : 0.9);
+                        ctx.translate((x0 + x1) / 2, (y0 + y1) / 2 - this.e.size * 0.3);
+                        ctx.rotate(Math.atan2(y1 - y0, x1 - x0) + 0.25);
+                        const w = len * 1.15;
+                        ctx.drawImage(art, -w / 2, -w / 2, w, w);
+                    }
                     break;
                 }
                 case 'glint': {
@@ -1172,10 +1266,10 @@ class GrudgeArmorAI extends BossAI {
                     break;
                 }
                 case 'mistBurst': {
-                    // 黒い霧が広がって消える
-                    const img = window.assetManager && window.assetManager.get(`bf_mist_${1 + ((f.n || 5) % 5)}`);
+                    // 黒い霧が広がって消える（黒紫の霧の絵 armor_mist_1〜4。なければステージの霧の絵）
                     const n = f.n || 5;
                     for (let i = 0; i < n; i++) {
+                        const img = BossAI.fxImage(`armor_mist_${1 + i % 4}`) || (window.assetManager && window.assetManager.get(`bf_mist_${1 + (n % 5)}`));
                         const a = i / n * Math.PI * 2 + (f.seed || 0);
                         const rr = f.r * (0.3 + t * 0.9);
                         const x = p.x + Math.cos(a) * rr, y = p.y + Math.sin(a) * rr * 0.45 - t * 20;
@@ -1218,7 +1312,17 @@ class GrudgeArmorAI extends BossAI {
                     break;
                 }
                 case 'darkAura': {
-                    // 黒い炎のような霧が体から立ちのぼる
+                    // 黒い炎のような霧が体から立ちのぼる（黒紫の霧の絵 armor_mist_1〜4 も重ねる）
+                    for (let i = 0; i < 4; i++) {
+                        const img = BossAI.fxImage(`armor_mist_${i + 1}`);
+                        if (!img) break;
+                        const k = (t * 1.2 + i / 4) % 1;
+                        const w = this.e.size * (0.9 + k * 0.6);
+                        const x = p.x + Math.sin(i * 1.9 + this.time * 2) * this.e.size * 0.35;
+                        const y = p.y + this.e.size * 0.3 - k * this.e.size * 1.3 - this.lift;
+                        ctx.globalAlpha = (1 - k) * 0.55 * (1 - t * 0.5);
+                        ctx.drawImage(img, x - w / 2, y - w / 2, w, w);
+                    }
                     for (let i = 0; i < 10; i++) {
                         const k = (t * 1.6 + i / 10) % 1;
                         const x = p.x + Math.sin(i * 2.4 + this.time * 3) * this.e.size * 0.5;
@@ -1251,7 +1355,7 @@ GrudgeArmorAI.dirName = function (v) {
 //   fireCam = 火を回る間、カメラがボスを追いかける速さ（ふつうは BossBattle.CINE.speed）
 GrudgeArmorAI.TUNING = {
     keepDist: 420, keepDistDark: 470,
-    cloneRadius: 330, cloneCooldown: 10, stun: 1.5,
+    cloneRadius: 380, cloneCooldown: 10, stun: 1.5,   // 分身の六角形 330 → 380（少し広く囲う）
     materializeMin: 1.5,
     extinguishInterval: 13, extinguishPerWave: 2, firstExtinguish: 16,
     feedbackGap: 0.6,
@@ -1301,6 +1405,10 @@ Enemy.drawGrudgeArmor = function (e, ctx, s, hop, o = {}) {
         ctx.beginPath(); ctx.ellipse(x, y, r * 0.32 * (1 - k * 0.4), r * 0.18 * (1 - k * 0.4), 0, 0, Math.PI * 2); ctx.fill();
     }
     ctx.restore();
+    
+    // ---- 絵（画像がある時）。o.img：残像を作った時の絵 ----
+    const art = o.img || Enemy.armorSprite(e, dir);
+    if (art) { Enemy.drawGrudgeArmorArt(e, ctx, s, hop, art, { ...o, alpha, clone, hitFlash: flash, feetY }); return; }
     
     // ---- 体はいったん別のキャンバスに描いて、まとめて透かす（部品の重なりが透けて見えないように）----
     const W = Math.ceil(r * 6.4), H = Math.ceil(r * 5.6);
@@ -1580,23 +1688,143 @@ Enemy.drawGrudgeArmor = function (e, ctx, s, hop, o = {}) {
     } else {
         eyes.push({ x: mirror(hx - hr * 0.24), y: ey, k: 1 }, { x: mirror(hx + hr * 0.24), y: ey, k: 1 });
     }
-    if (eyeK > 0) {
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        const a = Math.min(1, alpha * 2.2) * eyeK * (flash ? 0.5 : 1);
-        for (const q of eyes) {
-            const rr = 7 * (q.k || 1) * (clone ? 0.9 : 1.15);
-            const gr = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, rr * 2);
-            gr.addColorStop(0, `rgba(255, 235, 255, ${a})`);
-            gr.addColorStop(0.35, `rgba(200, 120, 255, ${a * 0.85})`);
-            gr.addColorStop(1, 'rgba(120, 40, 200, 0)');
-            ctx.fillStyle = gr;
-            ctx.fillRect(q.x - rr * 2, q.y - rr * 2, rr * 4, rr * 4);
-        }
-        ctx.restore();
-    }
     // 本体の目の位置（暗闇の上に目を描き直す時に使う。drawEyes）。画面の座標（同じフレームの、同じ揺れの中で使う）
     if (!clone && ai) e._armorEyes = eyes;
+    Enemy.drawArmorEyeGlow(ctx, eyes, eyeK, alpha, clone, flash);
+};
+
+// 今の絵（assets/enemies/grudge_armor/。画像がまだ読めていない時は null → コードで描く）
+// AI のない時（ボス選びのカード）は待機の絵
+Enemy.armorSprite = function (e, dir) {
+    const look = Enemy.BEAST_LOOKS[e.data.name];
+    if (!look || !look.sprite || !window.assetManager) return null;
+    if (e.ai) return e.getBossSprite(look, dir) || null;
+    const A = window.assetManager, f = (e.animationFrame || 0) % 3 + 1;
+    return A.get(`${look.key}_idle_${dir}_${f}`) || A.get(`${look.key}_${dir}_${f}`) || null;
+};
+
+// 絵で描く：足元を霧の所に合わせ、まとめて透かす（o.tint は1色の影、被弾・スローは体の形のまま光らせる）
+Enemy.drawGrudgeArmorArt = function (e, ctx, s, hop, img, o) {
+    const look = Enemy.BEAST_LOOKS[e.data.name];
+    const size = e.size * ((look.sprite && look.sprite.draw) || 3.93);
+    const k = size / img.width;
+    const dx = Math.round(s.x - size / 2), dy = Math.round(o.feetY - hop - Enemy.ARMOR_ART.foot * size);
+    let src = img;
+    if (o.tint) {
+        let cv = Enemy._armorArtCanvas;
+        if (!cv) cv = Enemy._armorArtCanvas = document.createElement('canvas');
+        if (cv.width !== img.width || cv.height !== img.height) { cv.width = img.width; cv.height = img.height; }
+        const g = cv.getContext('2d');
+        g.globalCompositeOperation = 'source-over';
+        g.clearRect(0, 0, cv.width, cv.height);
+        g.drawImage(img, 0, 0);
+        g.globalCompositeOperation = 'source-in';
+        g.fillStyle = o.tint;
+        g.fillRect(0, 0, cv.width, cv.height);
+        g.globalCompositeOperation = 'source-over';
+        src = cv;
+    }
+    ctx.save();
+    ctx.globalAlpha *= o.alpha;
+    ctx.drawImage(src, dx, dy, size, size);
+    // 被弾した瞬間（ふつうは白・有利属性は赤・不利属性は青）・ジャスト回避のスロー中（薄い水色）：体の形のまま光らせる
+    if (!o.clone && (o.hitFlash || Enemy.slowMotion)) {
+        const slowOnly = Enemy.slowMotion && !(o.hitFlash && e.hitFlashColor !== '#ffffff');
+        ctx.globalAlpha = o.alpha * (slowOnly ? 0.6 : 0.75);
+        ctx.drawImage(Enemy.getWhiteSilhouette(img, slowOnly ? Enemy.SLOW_TINT : e.hitFlashColor), dx, dy, size, size);
+    }
+    // 分身の撃つ瞬間：体が白く光る
+    if (o.flash) {
+        ctx.globalAlpha = o.alpha * o.flash;
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(src, dx, dy, size, size);
+    }
+    ctx.restore();
+    // 目：絵の中の紫に光る所に、光を重ねる（暗闇の上にも drawEyes が描き直す）
+    const eyes = Enemy.armorEyesOf(img).map(q => ({ x: dx + q.x * k, y: dy + q.y * k, k: q.k }));
+    if (!o.clone && e.ai) e._armorEyes = eyes;
+    Enemy.drawArmorEyeGlow(ctx, eyes, o.eyes ?? 1, o.alpha, o.clone, o.hitFlash);
+};
+// 絵の足元（上からの割合：440 の絵の 348px）
+Enemy.ARMOR_ART = { foot: 348 / 440 };
+
+// 目の光（紫）。本体は分身より少し明るい
+Enemy.drawArmorEyeGlow = function (ctx, eyes, eyeK, alpha, clone, flash) {
+    if (!(eyeK > 0) || !eyes.length) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const a = Math.min(1, alpha * 2.2) * eyeK * (flash ? 0.5 : 1);
+    for (const q of eyes) {
+        const rr = 7 * (q.k || 1) * (clone ? 0.9 : 1.15);
+        const gr = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, rr * 2);
+        gr.addColorStop(0, `rgba(255, 235, 255, ${a})`);
+        gr.addColorStop(0.35, `rgba(200, 120, 255, ${a * 0.85})`);
+        gr.addColorStop(1, 'rgba(120, 40, 200, 0)');
+        ctx.fillStyle = gr;
+        ctx.fillRect(q.x - rr * 2, q.y - rr * 2, rr * 4, rr * 4);
+    }
+    ctx.restore();
+};
+
+// 絵の目の位置（絵の中の座標）。紫に明るく光る画素を探す。絵ごとに1回だけ調べて使い回す
+// 目が見えない絵（背中）は、兜の金の角の少し下に、兜のすき間からもれる弱い光（k 0.55）
+Enemy.armorEyesOf = function (img) {
+    if (!Enemy._armorEyeCache) Enemy._armorEyeCache = new WeakMap();
+    let res = Enemy._armorEyeCache.get(img);
+    if (res) return res;
+    res = [];
+    try {
+        const W = img.width, H = img.height;
+        const c = document.createElement('canvas');
+        c.width = W; c.height = H;
+        const g = c.getContext('2d', { willReadFrequently: true });
+        g.drawImage(img, 0, 0);
+        const d = g.getImageData(0, 0, W, H).data;
+        let top = -1, bottom = -1;
+        for (let y = 0; y < H && top < 0; y++) for (let x = 0; x < W; x++) if (d[(y * W + x) * 4 + 3] > 150) { top = y; break; }
+        for (let y = H - 1; y >= 0 && bottom < 0; y--) for (let x = 0; x < W; x++) if (d[(y * W + x) * 4 + 3] > 150) { bottom = y; break; }
+        const BH = Math.max(1, bottom - top);
+        const isGold = (R, G, B) => R > 140 && G > 95 && B < 120 && R - B > 60 && G - B > 25;
+        const isEye = (R, G, B) => R >= 185 && B >= 220 && B - G >= 40;
+        // 頭：上の 35% にある金の角（x はまん中、下のふち＝兜の前）。振り上げた刀の柄の金が混ざらないように中央値で見る
+        const gx = [], gy = [];
+        for (let y = Math.max(0, top); y < top + BH * 0.35; y++) {
+            for (let x = 0; x < W; x++) {
+                const i = (y * W + x) * 4;
+                if (d[i + 3] >= 200 && isGold(d[i], d[i + 1], d[i + 2])) { gx.push(x); gy.push(y); }
+            }
+        }
+        const med = (a, q = 0.5) => a.slice().sort((p, r) => p - r)[Math.floor((a.length - 1) * q)];
+        const head = gx.length >= 6 ? { x: med(gx), y: med(gy, 0.9) } : null;
+        // 目を探す所：角の下（兜の中）。角が見つからない絵は上の 60%
+        const x0 = head ? Math.max(0, Math.floor(head.x - BH * 0.2)) : 0, x1 = head ? Math.min(W, Math.ceil(head.x + BH * 0.2)) : W;
+        const y0 = head ? Math.max(0, Math.floor(head.y - BH * 0.04)) : Math.max(0, top), y1 = head ? Math.min(H, Math.ceil(head.y + BH * 0.22)) : top + BH * 0.6;
+        const pts = [];
+        for (let y = y0; y < y1; y++) {
+            for (let x = x0; x < x1; x++) {
+                const i = (y * W + x) * 4;
+                if (d[i + 3] >= 200 && isEye(d[i], d[i + 1], d[i + 2])) pts.push(x, y);
+            }
+        }
+        const mean = (a, from, to) => { let sx = 0, sy = 0, n = 0; for (let i = 0; i < a.length; i += 2) { const x = a[i]; if (x < from || x > to) continue; sx += x; sy += a[i + 1]; n++; } return n ? { x: sx / n, y: sy / n } : null; };
+        if (pts.length >= 4) {
+            let lo = W, hi = 0;
+            for (let i = 0; i < pts.length; i += 2) { lo = Math.min(lo, pts[i]); hi = Math.max(hi, pts[i]); }
+            const mid = (lo + hi) / 2;
+            // 横に離れた2か所（正面の2つの目）なら2つ、そうでなければ1つ
+            if (hi - lo > W * 0.015) res = [mean(pts, lo, mid), mean(pts, mid, hi)].filter(Boolean).map(q => ({ ...q, k: 1 }));
+            else res = [{ ...mean(pts, lo, hi), k: 1 }];
+        } else if (head) {
+            // 背中：兜のすき間から光がもれる
+            const ey = head.y + BH * 0.06, ex = W * 0.022;
+            res = [{ x: head.x - ex, y: ey, k: 0.55 }, { x: head.x + ex, y: ey, k: 0.55 }];
+        }
+    } catch (err) {
+        // 画像の中身が読めない（ファイルを直接開いた時など）：目の光は重ねない
+        res = [];
+    }
+    Enemy._armorEyeCache.set(img, res);
+    return res;
 };
 
 window.GrudgeArmorAI = GrudgeArmorAI;
