@@ -31,6 +31,7 @@ class SoundManager {
         this.muted = false;
         this.duck = 1;           // 一時停止中は BGM を小さくする
         this.unlocked = false;   // 画面をさわって、音を出せるようになったか
+        this.autoplayOK = false; // さわる前でも音を出せると確かめたか（tryAutoplay）
         this.lastPlay = {};      // 同じ効果音が重なりすぎないように、最後に鳴らした時間
         this.active = {};        // 鳴っている効果音（名前 → [{ src, g }]。stop で止める）
         this.entries = {};
@@ -208,6 +209,46 @@ class SoundManager {
         });
     }
     
+    // 今、BGM を流せるか：画面をさわった後か、さわる前でもブラウザが音を許していると確かめた時（tryAutoplay）
+    get canPlay() {
+        return this.unlocked || this.autoplayOK;
+    }
+    
+    // さわる前に音を出せるか確かめる（起動した時。main.js が「タップしてください」を出すかを決める）
+    // ホーム画面に追加したアプリ・よく遊んでいるサイトなどは、さわる前から音を出せる。その時は待っていた BGM をすぐ流す
+    // Web Audio が動くか（resume）と、BGM の <audio> で無音を流せるかの両方を見る（片方だけ許すブラウザがあるため）
+    // 許されていない時、resume()・play() はさわるまで終わらないことがあるので、ms 秒で見切る
+    async tryAutoplay(ms = 400) {
+        if (this.canPlay) return true;
+        const timeout = () => new Promise(r => setTimeout(() => r(false), ms));
+        if (this.ac && this.ac.state !== 'running') {
+            try { await Promise.race([this.ac.resume(), timeout()]); } catch (e) { /* 許されていない */ }
+            if (this.ac.state !== 'running') return false;
+        }
+        this.makeBGMSlots();
+        const slot = this.bgmSlots[0];
+        try {
+            slot.el.src = SoundManager.SILENT_WAV;
+            const p = slot.el.play();
+            if (!p || !p.then) return false;
+            const ok = await Promise.race([p.then(() => true, () => false), timeout()]);
+            if (!ok) return false;
+            slot.el.pause();
+            slot.primed = true;
+        } catch (e) {
+            return false;
+        }
+        this.autoplayOK = true;
+        if (this.wantBGM && !this.bgm) this.playBGM(this.wantBGM);
+        return true;
+    }
+    
+    // その BGM のファイルがあって、聞こえる音量か（ない・聞こえない時は、タイトルで音を待たない）
+    hasAudibleBGM(key) {
+        const k = this.resolve(key);
+        return !!(k && this.bgmUrls[k]) && !this.muted && this.volumes.master > 0 && this.volumes.bgm > 0;
+    }
+    
     // BGM の <audio> を2つ作る（Web Audio につないで音量を変えられるようにする。iPhone は <audio> の音量を変えられないため）
     makeBGMSlots() {
         if (this.bgmSlots.length) return;
@@ -382,7 +423,7 @@ class SoundManager {
         if (this.bgm && this.bgm.key === k && !this.bgm.ended) return;
         const paused = this.pausedBGM;
         this.pausedBGM = null;
-        if (opts.resume && paused && paused.key === k && this.unlocked && !this.bgm) {
+        if (opts.resume && paused && paused.key === k && this.canPlay && !this.bgm) {
             // 止めた所から続ける
             paused.slot.token++;
             this.lastSlot = paused.slot;
@@ -392,7 +433,7 @@ class SoundManager {
             return;
         }
         this.fadeOutBGM(0.6);
-        if (!k || !this.unlocked) return;         // 画面をさわった時に流す
+        if (!k || !this.canPlay) return;          // 画面をさわった時に流す
         this.makeBGMSlots();
         const e = this.entries[k] || {};
         // 今フェードアウトしている方ではない <audio> を使う（2つを交互に）

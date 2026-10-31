@@ -46,6 +46,8 @@ class BossBattle {
     get isOver() { return this.state === 'victory' || this.state === 'defeat'; }
     // 開始演出中はプレイヤーも敵も動かない
     get isFrozen() { return this.state === 'intro'; }
+    // 最後の形態に変わる演出中（カメラがボスを映している・主人公に戻っている途中）：主人公は操作できない（game.js）
+    get isCinematic() { return !!this.cine && this.state === 'fight'; }
     
     // ---------- 開始 ----------
     start(map, def) {
@@ -63,6 +65,7 @@ class BossBattle {
         this.trailDelay = 0;
         this.lastHP = null;
         this.maxPhase = 1;
+        this.cine = null;        // 最後の形態に変わる演出（onCine）
         this.record = null;      // クリアした時の記録（BattleRecords.recordClear の結果）
         this.rewarded = false;   // この戦いのコインをもう渡したか（1回の戦いで2回もらえないように）
         
@@ -179,8 +182,10 @@ class BossBattle {
             else if (ev.type === 'roar') this.onRoar(ev.key);
             else if (ev.type === 'shake') game.addShake(ev.power, ev.time || 0.25);
             else if (ev.type === 'hit') game.addShake(ev.power, 0.2);
+            else if (ev.type === 'cine') this.onCine(ev.camera, ev.speed);
         }
         this.ai.events = [];
+        this.updateCine(dt);
         this.updateMusic(dt);
         if (!this.boss.isAlive()) this.ai.updateFx(dt); // 倒れた後も演出は消えるまで動かす
         
@@ -270,10 +275,62 @@ class BossBattle {
         this.phaseMusic = { index, t: 0, roarAt: null, roarLen: 0, prevKey: prevKey && sm.resolve(this.bgmFor(index)) === prevKey ? prevKey : null };
     }
     
+    // ---------- 最後の形態に変わる演出（どのボスも。BossAI.finalTransition が知らせる） ----------
+    //   camera: true ：カメラがボスを追いかける（speed：追いかける速さ）。この間、主人公は操作できない
+    //   camera: false：カメラを主人公に戻す。戻りきったら（長くても CINE.maxBack 秒で）操作できるようになる
+    // 怨嗟の鎧は、火を斬り消して回る所までボスを追い、暗闇になる所で主人公に戻す（armor_ai.js の phase3Start）
+    onCine(on, speed) {
+        const cam = this.game.camera;
+        if (!cam) return;
+        if (on) {
+            if (!this.cine) this.cine = { back: false, t: 0, speed: cam.followSpeed };
+            this.cine.back = false;
+            cam.follow(this.boss);
+            cam.followSpeed = speed || BossBattle.CINE.speed;
+        } else if (this.cine && !this.cine.back) {
+            this.cine.back = true;
+            this.cine.t = 0;
+            cam.follow(this.game.player);
+            cam.followSpeed = BossBattle.CINE.backSpeed;
+        }
+    }
+    
+    updateCine(dt) {
+        const c = this.cine;
+        if (!c) return;
+        // ボスの演出が終わったのに、カメラがボスのまま（途中で止まった時など）：主人公に戻す
+        if (!c.back && this.ai.actionName !== 'transition') this.onCine(false);
+        if (!c.back) return;
+        c.t += dt;
+        if (c.t >= BossBattle.CINE.maxBack || this.cameraOnPlayer()) this.endCine();
+    }
+    
+    endCine() {
+        const c = this.cine;
+        if (!c) return;
+        this.cine = null;
+        const cam = this.game.camera;
+        if (!cam) return;
+        cam.follow(this.game.player);
+        cam.followSpeed = c.speed;
+    }
+    
+    // カメラが主人公を映す位置（マップの端では、はみ出さない所）まで戻ったか
+    cameraOnPlayer() {
+        const cam = this.game.camera, p = this.game.player.position, b = cam.bounds;
+        let x = p.x - cam.width / 2, y = p.y - cam.height / 2;
+        if (b) {
+            x = Math.min(Math.max(x, 0), Math.max(0, b.width - cam.width));
+            y = Math.min(Math.max(y, 0), Math.max(0, b.height - cam.height));
+        }
+        return Math.hypot(cam.position.x - x, cam.position.y - y) <= BossBattle.CINE.settle;
+    }
+    
     onDefeat() {
         if (this.isOver) return;
         this.state = 'defeat';
         this.resultTimer = 1.6;
+        this.endCine();
         this.ai.cancel();
         this.ai.active = false; // ボスはその場で止まる
         this.record = null;
@@ -457,6 +514,7 @@ class BossBattle {
     hidePause() { if (this.ui.pause) this.ui.pause.classList.remove('show'); }
     
     stop() {
+        this.endCine();
         this.state = 'idle';
         this.musicTimer = 0;
         this.phaseMusic = null;
@@ -477,6 +535,11 @@ class BossBattle {
 //   roarTail  ：声の長さのこの割合まで聞いたら次の曲（声の最後の小さくなる所に曲を重ねる）
 //   maxRoar   ：声を待つのはここまで / noFileRoar：声のファイルがない時（コードで作った音）の長さ
 //   noRoarWait：吠えないまま演出が終わった時に待つ秒数
-BossBattle.MUSIC = { afterStart: 0.7, fadeOut: 0.25, minSilence: 1.2, maxSilence: 6, roarTail: 0.85, maxRoar: 3.5, noFileRoar: 1.5, noRoarWait: 1.2 };
+//   （maxSilence は、怨嗟の鎧の最後の形態の演出＝火を全部斬り消して暗闇になるまで（約 8 秒）より長くする）
+BossBattle.MUSIC = { afterStart: 0.7, fadeOut: 0.25, minSilence: 1.2, maxSilence: 10, roarTail: 0.85, maxRoar: 3.5, noFileRoar: 1.5, noRoarWait: 1.2 };
+// 最後の形態に変わる演出のカメラ（onCine）
+//   speed：ボスを追いかける速さ（ふつうのカメラは 5） / backSpeed：主人公に戻る速さ
+//   settle：主人公からこの距離(px)まで戻ったら操作できる / maxBack：戻り始めてから、長くてもこの秒数で操作できる
+BossBattle.CINE = { speed: 5, backSpeed: 4.5, settle: 24, maxBack: 1.4 };
 
 window.BossBattle = BossBattle;

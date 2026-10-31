@@ -866,20 +866,37 @@ class GrudgeArmorAI extends BossAI {
         this.invulnerable = true;
     }
     
-    // 第3形態「常闇の剣鬼」：ステージ中を駆けて火をすべて斬り消す → 黒い霧 → 暗闇 → 遠くに目だけが光る
+    // 第3形態「常闇の剣鬼」：怨嗟の咆哮 → ステージ中を駆けて火をすべて斬り消す → 黒い霧 → 暗闇 → 遠くに目だけが光る
+    // カメラ（BossAI.finalTransition）：咆哮から火を斬り消し終わるまではボスを追いかけ、暗闇になる所で主人公に戻す
     *phase3Start() {
-        const map = this.map;
+        const map = this.map, T = this.T;
         this.motion = 'phase3Start';
         this.dispelClones(true);
+        // 怨嗟の咆哮：紫の衝撃波と黒い霧
         this.roarVoice('armor_roar');
-        this.addFx({ type: 'darkAura', follow: true, life: 1.0 });
+        this.events.push({ type: 'shake', power: 8, time: 0.8 });
+        this.addFx({ type: 'darkAura', follow: true, life: T.p3Roar + 0.5 });
+        let wave = 0;
+        yield* this.sleep(T.p3Roar, (p, dt) => {
+            this.motion = 'phase3Start';
+            this.face(new Vector2(0, 1));
+            this.jitter = 1.8;
+            this.roarPush(dt);
+            wave -= dt;
+            if (wave <= 0) {
+                wave = 0.3;
+                this.addFx({ type: 'shock', follow: true, feet: true, r0: 30, r1: 250, life: 0.65, width: 6, color: '#b98aff' });
+                this.addFx({ type: 'roar', follow: true, life: 0.42, seed: Math.random(), color: '#e0ccff' });
+            }
+        });
         yield* this.readyBlade();
-        yield* this.sleep(0.6, (p, dt) => { this.motion = 'phase3Start'; this.jitter = 1.5; this.roarPush(dt); });
         // 火を1つずつ斬り消す（演出なので、壁があっても霧になって通る。止まる所は火のそばの歩ける所）
+        // ステージ中を速く駆けるので、カメラも速く追いかける
+        this.cineCamera(true, T.fireCam);
         for (const f of this.fireRoute()) {
             const from = this.e.position.clone(), to = f.stand;
             let next = 0;
-            yield* this.sleep(0.2, (p, dt) => {
+            yield* this.sleep(T.fireDash, (p, dt) => {
                 this.motion = 'ghostMove';
                 this.e.position = from.add(to.sub(from).mult(1 - (1 - p) * (1 - p)));
                 this.face(to.sub(from));
@@ -889,10 +906,10 @@ class GrudgeArmorAI extends BossAI {
             const v = new Vector2(f.x - this.e.position.x, f.y - this.e.position.y);
             this.face(v);
             this.motion = 'extinguishFire';
-            this.addFx({ type: 'slash', follow: true, ang: Math.atan2(v.y, v.x), r: this.e.size * 1.0, spread: 2.6, life: 0.22, color: '#f0e0ff' });
+            this.addFx({ type: 'slash', follow: true, ang: Math.atan2(v.y, v.x), r: this.e.size * 1.0, spread: 2.6, life: 0.3, color: '#f0e0ff' });
             playSE('armor_slash');
             if (map) map.extinguish(f);
-            yield* this.sleep(0.07, (p) => { this.blade = { mode: 'swing', side: 1, p }; });
+            yield* this.sleep(T.fireHold, (p) => { this.blade = { mode: 'swing', side: 1, p }; });
         }
         // 外の城壁の松明も、風で一度に消える
         if (map) { for (const f of map.fires) if (f.ambient) map.extinguish(f, true); }
@@ -902,6 +919,8 @@ class GrudgeArmorAI extends BossAI {
         this.addFx({ type: 'mistBurst', x: at.x, y: at.y, r: this.e.size * 2.2, life: 1.4, n: 14 });
         this.motion = 'darkAura';
         if (map) map.setDarkness(1);
+        // カメラを主人公に戻す（暗闇の中で主人公だけが見え、遠くに目が光るのを映す）
+        this.cineCamera(false);
         this.dark = true;
         this.materialized = false;
         yield* this.sleep(0.9, (p) => { this.fade = 1 - p; this.motion = 'darkAura'; });
@@ -1228,12 +1247,15 @@ GrudgeArmorAI.dirName = function (v) {
 // materializeMin：実体化してから最低この秒数は斬れる
 // extinguishInterval：第3形態で火を消しに行く間隔(秒) / extinguishPerWave：1回で消す火の数（灯っている火が1つなら消さない。最後の1つは残す）
 // firstExtinguish：暗闇になってから、最初に火を消しに行くまで(秒) / feedbackGap：「魔法無効」などの文字を出す間隔(秒)
+// 第3形態への移行（phase3Start）：p3Roar = 咆哮の長さ(秒) / fireDash = 次の火まで駆ける時間(秒) / fireHold = 火を斬った後に止まる時間(秒)
+//   fireCam = 火を回る間、カメラがボスを追いかける速さ（ふつうは BossBattle.CINE.speed）
 GrudgeArmorAI.TUNING = {
     keepDist: 420, keepDistDark: 470,
     cloneRadius: 330, cloneCooldown: 10, stun: 1.5,
     materializeMin: 1.5,
     extinguishInterval: 13, extinguishPerWave: 2, firstExtinguish: 16,
-    feedbackGap: 0.6
+    feedbackGap: 0.6,
+    p3Roar: 1.1, fireDash: 0.22, fireHold: 0.1, fireCam: 9
 };
 
 // ---------- 怨嗟の鎧の仮の見た目（画像が届くまで。コードで描く） ----------

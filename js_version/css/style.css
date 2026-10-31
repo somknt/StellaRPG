@@ -780,6 +780,20 @@ body.touch.portrait #fullscreen-btn {
     color: #aaa;
 }
 
+/* 読み込みの後：音を出すために画面をさわってもらう（main.js の waitForTap） */
+#loading-screen.wait-tap { cursor: pointer; }
+#loading-tap {
+    margin-top: 18px;
+    font-size: 20px;
+    letter-spacing: 2px;
+    color: #fff6dc;
+    text-shadow: 0 0 10px rgba(255, 200, 110, 0.75);
+    animation: title-blink 2s ease-in-out infinite;
+}
+#loading-tap small { display: block; margin-top: 6px; font-size: 13px; letter-spacing: 1px; color: #aaa; text-shadow: none; }
+#loading-tap .touch-only { display: none; }
+body.touch #loading-tap .touch-only { display: inline; }
+
 /* ==========================================================
    バトルモード（闘技場）
    ========================================================== */
@@ -1592,7 +1606,50 @@ body.touch .title-start .touch-only { display: inline; }
 .gear-slot.shake { animation: card-shake 0.35s; }
 .gear-note { font-size: 13px; line-height: 1.55; color: #b8b0d8; }
 /* 魔法パレット */
-.equip-magic { width: 590px; display: flex; flex-direction: column; }
+.equip-magic { position: relative; width: 590px; display: flex; flex-direction: column; }
+/* はじめての時だけ：魔法の入れ方の案内（screens.js の startEquipTutorial）
+   魔法の札の上に吹き出しを出し、札の並びと「次に魔法が入る星の枠」を光らせる。押す操作のじゃまはしない
+   left：星の輪の絵（270px）とすき間のぶん右から始めて、魔法の札と同じ幅にする（しっぽが札の真ん中を指す） */
+.equip-tut {
+    position: absolute;
+    z-index: 5;
+    left: calc(270px + 14px + 14px);
+    right: 14px;
+    top: -46px;
+    padding: 6px 12px 7px;
+    text-align: center;
+    white-space: nowrap;
+    color: #2a1606;
+    background: linear-gradient(180deg, #fff3c8, #ffd76a);
+    border: 2px solid #5a3408;
+    border-radius: 6px;
+    box-shadow: 0 0 0 2px rgba(255, 215, 110, 0.35), 0 6px 18px rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+    animation: tut-bob 0.9s ease-in-out infinite alternate;
+}
+.equip-tut[hidden] { display: none; }
+.equip-tut b { display: block; font-weight: normal; font-size: 18px; letter-spacing: 1px; }
+.equip-tut small { display: block; font-size: 13px; color: #6a4410; }
+/* 吹き出しのしっぽ（下の魔法の札を指す） */
+.equip-tut::before, .equip-tut::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 100%;
+    border: solid transparent;
+}
+.equip-tut::before { margin-left: -11px; border-width: 11px; border-top-color: #5a3408; }
+.equip-tut::after { margin-left: -8px; border-width: 8px; border-top-color: #ffd76a; }
+@keyframes tut-bob {
+    from { transform: translateY(0); }
+    to { transform: translateY(-5px); }
+}
+.magic-list.tut-glow { border-radius: 4px; animation: tut-glow 0.9s ease-in-out infinite alternate; }
+@keyframes tut-glow {
+    from { box-shadow: 0 0 0 2px rgba(255, 215, 110, 0.25), 0 0 6px rgba(255, 215, 110, 0.2); }
+    to { box-shadow: 0 0 0 3px rgba(255, 230, 140, 0.95), 0 0 18px rgba(255, 215, 110, 0.65); }
+}
+.ps-slot.tut-dest { border-color: #fff4c0; animation: slot-target 0.8s ease-in-out infinite alternate; }
 .em-body { display: flex; gap: 14px; }
 /* 星の5つの枠：バトル中のパレットと同じ輪の絵（magic_palette/palette_bg.png。丸の中心は中心から幅の 26.5% の所） */
 .palette-star {

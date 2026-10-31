@@ -33,6 +33,7 @@ const TouchControls = {
         this.setupMagicPalette();
         this.loadMagicSkin();
         this.setupFullscreen();
+        this.setupAutoLandscape();
         
         // iOS Safari はピンチ操作を独自イベントで送ってくるので止める
         document.addEventListener('gesturestart', (e) => e.preventDefault());
@@ -479,17 +480,7 @@ const TouchControls = {
         
         document.body.classList.add('can-fullscreen');
         const btn = document.getElementById('fullscreen-btn');
-        btn.addEventListener('click', async () => {
-            try {
-                await request.call(el);
-                // 対応端末（主に Android）では横向きに固定
-                if (screen.orientation && screen.orientation.lock) {
-                    await screen.orientation.lock('landscape').catch(() => {});
-                }
-            } catch (err) {
-                console.warn('全画面にできませんでした:', err);
-            }
-        });
+        btn.addEventListener('click', () => this.enterLandscape(true));
         
         const onChange = () => {
             const fs = document.fullscreenElement || document.webkitFullscreenElement;
@@ -498,6 +489,56 @@ const TouchControls = {
         };
         document.addEventListener('fullscreenchange', onChange);
         document.addEventListener('webkitfullscreenchange', onChange);
+    },
+    
+    // ---------- 横向き ----------
+    // ホーム画面から開いたアプリ：起動した時に横向きに固定する（manifest.webmanifest の orientation と同じ。戻ってきた時も）
+    // ブラウザで開いた時（スマホ・タブレット）：最初に画面をさわった時（読み込みの後の「タップしてください」）に全画面にして、横向きに固定する
+    // 固定できない端末（iPhone など）は、縦向きの間「横向きにしてください」の案内（#rotate-notice）が出る
+    setupAutoLandscape() {
+        if (this.isStandalone()) {
+            this.lockLandscape();
+            document.addEventListener('visibilitychange', () => { if (!document.hidden) this.lockLandscape(); });
+            return;
+        }
+        if (!(window.matchMedia && matchMedia('(pointer: coarse)').matches)) return; // パソコン（マウス）はしない
+        const once = (e) => {
+            if (e.pointerType === 'mouse') return;
+            window.removeEventListener('pointerup', once, true);
+            this.enterLandscape(false);
+        };
+        window.addEventListener('pointerup', once, true);
+    },
+    
+    // ホーム画面に追加して開いたアプリか（全画面・アプリの画面で表示している）
+    isStandalone() {
+        const mq = (q) => window.matchMedia && matchMedia(q).matches;
+        const fsApi = document.fullscreenElement || document.webkitFullscreenElement;
+        return !!(navigator.standalone || mq('(display-mode: standalone)') || (mq('(display-mode: fullscreen)') && !fsApi));
+    },
+    
+    // 横向きに固定する（できない端末・ブラウザでは何もしない）
+    async lockLandscape() {
+        try {
+            if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape');
+        } catch (err) { /* 固定できない（全画面でない・対応していない） */ }
+    },
+    
+    // 全画面にしてから横向きに固定する（ブラウザは、全画面の時だけ向きを固定できる）
+    // 画面をさわった時（タップ・クリック）の中で呼ぶ
+    // fromButton：全画面ボタンから（アプリで開いていても全画面にする・できなかった時はコンソールに出す）
+    async enterLandscape(fromButton) {
+        const el = document.documentElement;
+        const request = el.requestFullscreen || el.webkitRequestFullscreen;
+        const fs = document.fullscreenElement || document.webkitFullscreenElement;
+        if (request && !fs && (fromButton || !this.isStandalone())) {
+            try {
+                await request.call(el);
+            } catch (err) {
+                if (fromButton) console.warn('全画面にできませんでした:', err);
+            }
+        }
+        await this.lockLandscape();
     }
 };
 

@@ -165,7 +165,9 @@ class BossAI {
             const op = this.P.opener;
             this.opener = op && this.atk(op) && this['act_' + op] ? { name: op, t: 0 } : null;
             if (op && !this.opener) console.warn('ボスAIに大技（opener）の攻撃がありません:', op);
-            this.startAction('transition', this.transition(changed));
+            // 最後の形態に変わる時は、カメラがボスを映してから吠える（finalTransition）
+            const last = changed === this.phase.phases.length - 1;
+            this.startAction('transition', last ? this.finalTransition(changed) : this.transition(changed));
         }
         
         if (this.action) {
@@ -246,6 +248,7 @@ class BossAI {
         this.superArmor = false;
         this.invulnerable = false;
         this.airborne = false;
+        this.cineCam = false;
         this.hitboxes = [];
         this.fx = this.fx.filter(f => !f.warn); // 予告は消す（演出は残す）
     }
@@ -357,6 +360,36 @@ class BossAI {
     // フェーズ移行の演出（ボスごとに上書き）
     *transition(index) {
         yield* this.sleep(1.0);
+    }
+    
+    // 最後の形態に変わる演出（どのボスも）：カメラがボスを映す → 咆哮（transition）→ カメラが主人公に戻る → 最後の形態が始まる
+    // カメラが動いている間（BossAI.CINE の lead・back 秒）は、その場で構えて待つ
+    // カメラがボスを映している間、主人公は操作できない（boss_battle.js の isCinematic）
+    *finalTransition(index) {
+        this.superArmor = true;
+        this.invulnerable = true;
+        this.cineCamera(true);
+        yield* this.sleep(BossAI.CINE.lead, (p) => {
+            this.motion = 'idle';
+            this.face(this.dirToPlayer());
+            this.jitter = p * 0.8; // 力をためて、少しずつ震える
+        });
+        yield* this.transition(index);
+        // 咆哮の後、カメラが主人公に戻るまでは攻撃しない（怨嗟の鎧は、演出の途中でもう戻している）
+        this.superArmor = true;
+        this.invulnerable = true;
+        if (this.cineCam) {
+            this.cineCamera(false);
+            yield* this.sleep(BossAI.CINE.back, () => { this.motion = 'idle'; this.face(this.dirToPlayer()); });
+        }
+    }
+    
+    // カメラにボスを映してもらう（on = true）/ 主人公に戻してもらう（false）。BossBattle が読む
+    // speed：カメラが追いかける速さ（省略すると BossBattle.CINE.speed。速く動き回るボスは大きくする）
+    cineCamera(on, speed) {
+        if (!on && !this.cineCam) return;
+        this.cineCam = on;
+        this.events.push({ type: 'cine', camera: on, speed });
     }
     
     // ---------- 当たり判定 ----------
@@ -691,6 +724,9 @@ class BossAI {
 BossAI.TUNING = { interval: 0.35, recover: 0.55, behindRange: 300, roarRange: 330, roarKnock: 260 };
 // フェーズが変わった後の大技（opener）が届かない時に、近づくのを待つ長さ（秒）。過ぎたら届かなくても出す
 BossAI.OPENER_WAIT = 4.0;
+// 最後の形態に変わる演出（finalTransition）の待ち時間（秒）
+// lead：カメラがボスの所へ動く間（この後に吠える） / back：吠えた後、カメラが主人公に戻る間（この後に最後の形態の攻撃が始まる）
+BossAI.CINE = { lead: 0.8, back: 0.6 };
 // 攻撃範囲の予告（円・扇・突進の帯・ゴーレムの危険床・体の光）の色。全ボス共通のはっきりした赤
 // WARN_DARK：ふちの下に敷く濃い色（明るい地面でも見えるように）
 // WARN_HOT ：溜めの最後のこの割合は「もうすぐ来る」（中が濃くなり、ふちが白と赤ですばやく点滅する）

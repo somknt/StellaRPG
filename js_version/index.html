@@ -358,6 +358,11 @@
                     </div>
                     <!-- 右：魔法パレット（星の5つの枠。上から時計回り＝バトル中のパレットと同じ並び） -->
                     <div class="equip-col equip-magic">
+                        <!-- はじめての時だけ：魔法の入れ方の案内（魔法の札を指す吹き出し。screens.js の startEquipTutorial） -->
+                        <div class="equip-tut" id="equip-tut" role="status" aria-live="polite" hidden>
+                            <b>ここから魔法を選ぼう！</b>
+                            <small>押すと、左の星の枠に入ります</small>
+                        </div>
                         <h3>魔法パレット <small id="equip-magic-count">0/5</small></h3>
                         <div class="em-body">
                             <div class="palette-star" id="equip-palette">
@@ -530,6 +535,11 @@
                 <div class="loading-bar-fill" id="loading-bar-fill"></div>
             </div>
             <p id="loading-text">読み込み中...</p>
+            <!-- 読み込みの後、音を出すために画面をさわってもらう（音をすぐ出せる時は出さない。main.js の waitForTap） -->
+            <p id="loading-tap" hidden>
+                <span class="touch-only">画面をタップしてください</span><span class="pc-only">クリック または キーを押してください</span>
+                <small>♪ タイトルの曲が流れます</small>
+            </p>
         </div>
     </div>
     

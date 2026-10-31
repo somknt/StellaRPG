@@ -532,27 +532,35 @@ class Game {
             return;
         }
         
+        // ボスが最後の形態に変わる演出中（カメラがボスを映している間。boss_battle.js の isCinematic）：主人公は操作できない
+        // 入力は「何も押していない」ことにする。咆哮で飛ばされる動き・魔法の弾・ボスはそのまま動き、敵の攻撃には当たらない
+        const cine = !!(arena && battle && battle.isCinematic);
+        if (cine) {
+            this.attackBuffer = 0;
+            this.player.dodgeBuffer = 0;
+        }
+        
         // 近接攻撃の向き：ターゲット（PC のクリック・スマホのタップ）はいつも、それ以外は攻撃している間だけ、敵の方を向く
-        this.updateLockTarget(deltaTime);
+        if (!cine) this.updateLockTarget(deltaTime);
         // 連打：攻撃の間隔より速く押した分は少しの間（Game.ATTACK_BUFFER 秒）覚えておき、間隔が空いたらすぐ斬る
         if (this.attackBuffer > 0) this.attackBuffer = Math.max(0, this.attackBuffer - deltaTime);
-        const attackPressed = this.input.isAttackPressed();
+        const attackPressed = !cine && this.input.isAttackPressed();
         if (attackPressed) this.attackBuffer = Game.ATTACK_BUFFER;
         // 続けて攻撃に当たって近接攻撃がキャンセルされた：それより前に押していた分は捨てる
         if (this.player.attackCancelled) {
             this.player.attackCancelled = false;
             if (!attackPressed) this.attackBuffer = 0;
         }
-        const attackInput = attackPressed || this.attackBuffer > 0 || this.input.isAttackHeld() || this.input.isAttackSliding();
+        const attackInput = !cine && (attackPressed || this.attackBuffer > 0 || this.input.isAttackHeld() || this.input.isAttackSliding());
         const meleeMode = attackInput || this.player.attackAnimTimer > 0 || this.player.attackTimer > 0;
         this.player.faceTarget = this.getLockTarget() || (meleeMode ? this.getMeleeTarget(this.getAimDirection()) : null);
         
         // プレイヤー更新（動く前の位置を覚えておく：敵の体から押し出す向きに使う）
         const prevPlayerPos = this.player.position.clone();
-        this.player.update(deltaTime, this.input);
+        this.player.update(deltaTime, cine ? Game.NO_INPUT : this.input);
         
         // 魔法：ボタンで詠唱開始 → 頭上のゲージが満タンになったら発動
-        if (this.input.isMagicPressed()) {
+        if (!cine && this.input.isMagicPressed()) {
             this.player.startChant();
         }
         // ねらう向き（スマホ：ボタンを押したままスライド / PC：マウスカーソル）。なければ近くの敵を自動でねらう
@@ -574,7 +582,8 @@ class Game {
             this.player.setDirectionFromVector(this.castAim.dir);
         }
         
-        const cast = this.player.consumeReadyCast(this.targetableEnemies(), this.castAim ? this.castAim.dir : aim, !!this.castAim);
+        // 演出中に詠唱が終わった魔法は、演出が終わってから撃つ
+        const cast = cine ? null : this.player.consumeReadyCast(this.targetableEnemies(), this.castAim ? this.castAim.dir : aim, !!this.castAim);
         if (cast && cast.magic.category === '治癒') {
             this.castHeal(cast);
             this.input.clearTouchAim('magic');
@@ -664,8 +673,8 @@ class Game {
         // 敵の体はすり抜けられない（主人公を来た側へ押し出す）
         this.enemySpawner.resolveBodyCollisions(this.player, prevPlayerPos);
         
-        // 敵の攻撃
-        this.enemySpawner.checkEnemyAttacks(this.player);
+        // 敵の攻撃（最後の形態に変わる演出中は当たらない。主人公は操作できず、よけられないので）
+        if (!cine) this.enemySpawner.checkEnemyAttacks(this.player);
         
         // 回避中に攻撃を避けていたらジャスト回避発動
         // スロー中にもう一度ジャスト回避が決まったら、スローと無敵をそこから延ばす（連続でできる）
@@ -1319,6 +1328,15 @@ Game.LOCK_SNAP_TIME = 0.3;   // 決めた瞬間に、かぎが外から閉じて
 Game.UNLOCK_FX_TIME = 0.25;  // 解除した時に、かぎが広がって消える時間
 // 連打で、攻撃の間隔（ナイフは 0.35秒）の途中に押した分を覚えておく時間（秒）
 Game.ATTACK_BUFFER = 0.4;
+
+// 主人公を操作できない時（ボスが最後の形態に変わる演出）に Player.update へ渡す、何も押していない入力
+// （Player.update が使う入力の関数だけ。player.js の input.〜 を足したら、ここにも足す）
+Game.NO_INPUT = {
+    isKeyPressed: () => false,
+    isDodgePressed: () => false,
+    getMovementVector: () => new Vector2(0, 0),
+    consumeMagicSelection: () => null
+};
 // 属性の相性のダメージ倍率
 Game.ELEMENT_MUL = { weak: 1.5, resist: 0.5, normal: 1 };
 // 魔法が当たった時の敵の光の色（有利属性は赤・不利属性は青。ふつうは白）と、光る時間（秒）

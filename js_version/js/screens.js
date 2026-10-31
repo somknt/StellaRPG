@@ -605,6 +605,7 @@ class ScreenManager {
         const el = this.$(def.id);
         if (document.activeElement && InputManager.isTyping(document.activeElement)) document.activeElement.blur();
         if (name === 'title') this.bg.logoTime = 0; // ロゴの登場をもう一度
+        if (name !== 'equip') this.endEquipTutorial(); // 装備画面の案内（戻った時は、次に開いた時にまた出す）
         if (name === 'account') this.enterAccount();
         if (name === 'profile') this.enterProfile();
         if (name === 'main_menu') this.refreshMenuUser();
@@ -1340,6 +1341,7 @@ class ScreenManager {
         const A = window.Account;
         const gender = A && A.hasProfile() ? A.gender : (this.selectedHero || 'male');
         const bossId = this.selectedBoss;
+        this.endEquipTutorial(true); // 魔法を入れずに出撃した時も、案内はもう出さない
         if (this.equip && A && A.loggedIn) A.setLoadout(this.equip);
         this.game.loadout = this.equip && A ? A.normalizeLoadout(this.equip) : null;
         this.game.playerName = A ? A.playerName : '';
@@ -1473,6 +1475,59 @@ class ScreenManager {
         // 最初は「出撃する」を選んだ状態（魔法がまだなら、最初の魔法の札）
         const first = this.equip.magic.some(Boolean) ? this.$('equip-ok') : this.equipCards[0];
         for (const el of this.root.querySelectorAll('#scr-equip [data-nav]')) el.classList.toggle('focused', el === first);
+        this.startEquipTutorial();
+    }
+    
+    // ---------- 装備画面の案内（はじめての時だけ） ----------
+    // 魔法パレットが空の時：魔法の札の上に「ここから魔法を選ぼう！」の吹き出しを出し、札の並びと次に魔法が入る星の枠を光らせる
+    // 魔法を1つ入れたら（入れずに出撃した時も）消えて、この端末ではもう出さない（ScreenManager.TUTORIAL_KEY）
+    // 吹き出しは押せない飾りなので、マウス・タップ・キーボードの操作はそのまま使える
+    startEquipTutorial() {
+        this.endEquipTutorial();
+        if (ScreenManager.tutorialSeen('equipMagic')) return;
+        // もう魔法を入れたことがある（前の版で遊んでいた）：使い方を知っているので出さない
+        if (this.equip.magic.some(Boolean)) { ScreenManager.markTutorial('equipMagic'); return; }
+        this.equipTut = true;
+        const el = this.$('equip-tut');
+        if (el) el.hidden = false;
+        this.updateEquipTutorial();
+    }
+    
+    // 光らせる所を今の状態に合わせる（renderEquip のたびに呼ぶ）
+    updateEquipTutorial() {
+        const on = !!this.equipTut;
+        const list = this.$('equip-magic-list');
+        if (list) list.classList.toggle('tut-glow', on);
+        // 次に魔法が入る枠：選んだ枠、なければ最初の空き
+        const dest = on && this.equip ? (this.equipSlot >= 0 ? this.equipSlot : this.equip.magic.indexOf(null)) : -1;
+        (this.equipSlots || []).forEach((s, i) => s.classList.toggle('tut-dest', i === dest));
+    }
+    
+    // done：見終わった（もう出さない）。false なら、次に装備画面を開いた時にまた出す
+    endEquipTutorial(done = false) {
+        if (!this.equipTut) return;
+        this.equipTut = false;
+        if (done) ScreenManager.markTutorial('equipMagic');
+        const el = this.$('equip-tut');
+        if (el) el.hidden = true;
+        this.updateEquipTutorial();
+    }
+    
+    // はじめての時だけ出す案内を、もう見たか（この端末の localStorage に { 名前: true } で保存）
+    static tutorialSeen(name) {
+        try {
+            const d = JSON.parse(localStorage.getItem(ScreenManager.TUTORIAL_KEY) || '{}');
+            return !!(d && d[name]);
+        } catch (e) { return false; }
+    }
+    
+    static markTutorial(name) {
+        try {
+            const raw = JSON.parse(localStorage.getItem(ScreenManager.TUTORIAL_KEY) || '{}');
+            const d = raw && typeof raw === 'object' ? raw : {};
+            d[name] = true;
+            localStorage.setItem(ScreenManager.TUTORIAL_KEY, JSON.stringify(d));
+        } catch (e) { /* 保存できなくても遊べる（次も案内が出るだけ） */ }
     }
     
     renderEquip() {
@@ -1505,6 +1560,7 @@ class ScreenManager {
                 : n >= 5 ? '入れかえる時は、外したい枠を押してください' : '魔法を押すと空いている枠に入ります。枠を押すと外れます';
             hint.classList.toggle('warn', n === 0);
         }
+        this.updateEquipTutorial();
     }
     
     // 魔法を押した：セットしてあれば外す。なければ選んだ枠（なければ最初の空き）に入れる
@@ -1525,6 +1581,11 @@ class ScreenManager {
             this.equipSlot = -1;
             this.flashEquipSlot(slot);
             playSE('ui_select');
+            // はじめての案内：入った所を知らせて終わり
+            if (this.equipTut) {
+                this.endEquipTutorial(true);
+                this.toast(`星の枠${slot + 1}に入りました！ 枠を押すと外せます`);
+            }
         }
         this.showEquipDetail(id);
         this.saveEquip();
@@ -1694,6 +1755,7 @@ ScreenManager.EQUIP_STAR_R = 71.5; // 装備画面の魔法パレット：星の
 // 装備画面で選べる魔法（最初から覚えている魔法。Player の learnedMagic と同じ）
 ScreenManager.EQUIP_MAGIC = ['magic_201', 'magic_202', 'magic_203', 'magic_204', 'magic_205', 'magic_206'];
 ScreenManager.TYPING_TOP = 40;     // スマホで文字を入力する時、入力欄が来る高さ（1280×720 の画面の上から px）
+ScreenManager.TUTORIAL_KEY = 'hoshinoko.tutorial.v1'; // はじめての時だけ出す案内を見たか（localStorage。装備画面の魔法パレット = equipMagic）
 ScreenManager.SAMPLE_DUR = 0.8; // 設定で音量を変えた時に鳴らす、確かめの音の長さ（秒）
 
 window.UINav = UINav;

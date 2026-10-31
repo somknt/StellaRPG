@@ -270,7 +270,7 @@ const BOSS_DATA = [
         elements: { weak: [], resist: [] },
         enemy: {
             enemyId: 'boss_004', name: '怨嗟の鎧', displayName: '怨嗟の鎧',
-            hp: 3800, attack: 65, defense: 38, exp: 600,
+            hp: 3000, attack: 65, defense: 38, exp: 600,   // HP 3800 → 3000（長すぎたので）
             size: 56, speed: 120, detectionRange: 4000, attackRange: 90,   // 速い（歩く速さ 120 × Enemy.SCALE.speed）
             isBoss: true, knockbackScale: 0.55
         },

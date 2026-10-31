@@ -26,17 +26,62 @@ window.addEventListener('load', async () => {
     try {
         await game.init();
         
-        // ローディング画面を隠す
-        setTimeout(() => {
-            game.ui.hideLoadingScreen();
-            game.start();
-        }, 500);
+        // 音の準備（BGM のファイル探し・効果音の読み込み）を待つ。長くても BOOT.soundWait 秒で先へ進む
+        const sm = window.soundManager;
+        if (sm && sm.ready) {
+            game.ui.updateLoadingProgress(1, 'サウンド読み込み中...');
+            await Promise.race([sm.ready, wait(BOOT.soundWait)]);
+        }
+        game.ui.updateLoadingProgress(1, '読み込み完了');
+        
+        // タイトルの曲は、タイトル画面が出た時から流す
+        // ブラウザは画面をさわる前の音を止めるので、音を出せない時だけ「画面をタップしてください」を出して待つ
+        // （さわった瞬間に音が有効になってタイトルの曲が流れ出す：sound.js の bindUnlock。スマホはここで全画面・横向きになる：touch_controls.js）
+        // ホーム画面から開いたアプリなど、さわる前から音を出せる時は、そのままタイトルへ
+        const needTap = !!(sm && sm.hasAudibleBGM('bgm_title')) && !(await sm.tryAutoplay());
+        if (needTap) await waitForTap();
+        else await wait(500);
+        
+        // ローディング画面を隠す（さわった時のキー・クリックで、タイトルを飛ばさないように入力を消す）
+        game.input.resetAll();
+        game.input.endFrame();
+        game.ui.hideLoadingScreen();
+        game.start();
         
     } catch (error) {
         console.error('ゲーム初期化エラー:', error);
         document.getElementById('loading-text').textContent = 'エラーが発生しました: ' + error.message;
     }
 });
+
+// 起動の設定
+//   soundWait：音の準備を待つ最長の秒数(ms) / ignoreKeys：押しても「さわった」にしないキー（ブラウザが音を許さないキー）
+const BOOT = { soundWait: 5000, ignoreKeys: /^(Escape|Shift|Control|Alt|Meta|Tab|CapsLock|F\d+)$/ };
+
+function wait(ms) {
+    return new Promise(r => setTimeout(r, ms));
+}
+
+// 読み込みの後：「画面をタップしてください」を出して、クリック・タップ・キーを待つ
+// 指を離した時（touchend）ではなく click で進める（先に読み込み画面を消すと、同じタップがタイトルに届いて飛ばしてしまうため）
+function waitForTap() {
+    const screen = document.getElementById('loading-screen');
+    const msg = document.getElementById('loading-tap');
+    if (msg) msg.hidden = false;
+    if (screen) screen.classList.add('wait-tap'); // cursor: pointer（iPhone はこれがないと click が来ない）
+    return new Promise((resolve) => {
+        const done = (e) => {
+            if (e.type === 'keydown' && BOOT.ignoreKeys.test(e.key)) return;
+            window.removeEventListener('click', done);
+            window.removeEventListener('keydown', done);
+            if (msg) msg.hidden = true;
+            if (screen) screen.classList.remove('wait-tap');
+            resolve();
+        };
+        window.addEventListener('click', done);
+        window.addEventListener('keydown', done);
+    });
+}
 
 // ウィンドウリサイズ対応は touch_controls.js の fitGame で行う
 
