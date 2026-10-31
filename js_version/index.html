@@ -257,6 +257,8 @@
                     <button class="menu-item ui-btn" id="menu-battle" type="button" data-nav>バトルモード</button>
                     <button class="menu-item ui-btn" id="menu-account" type="button" data-nav>アカウント</button>
                     <button class="menu-item ui-btn" id="menu-settings" type="button" data-nav>設定</button>
+                    <!-- タイトルへ戻る（PC の Esc と同じ。スマホにはキーがないのでボタンで） -->
+                    <button class="menu-item ui-btn back" id="menu-title" type="button" data-nav>タイトルへ戻る</button>
                     <div class="menu-deco">✦ ─────── ✧ ─────── ✦</div>
                 </div>
                 <p class="screen-hint pc-only">↑↓ で選んで Enter で決定 ／ Esc でタイトルへ</p>
@@ -535,11 +537,6 @@
                 <div class="loading-bar-fill" id="loading-bar-fill"></div>
             </div>
             <p id="loading-text">読み込み中...</p>
-            <!-- 読み込みの後、音を出すために画面をさわってもらう（音をすぐ出せる時は出さない。main.js の waitForTap） -->
-            <p id="loading-tap" hidden>
-                <span class="touch-only">画面をタップしてください</span><span class="pc-only">クリック または キーを押してください</span>
-                <small>♪ タイトルの曲が流れます</small>
-            </p>
         </div>
     </div>
     

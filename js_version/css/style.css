@@ -780,20 +780,6 @@ body.touch.portrait #fullscreen-btn {
     color: #aaa;
 }
 
-/* 読み込みの後：音を出すために画面をさわってもらう（main.js の waitForTap） */
-#loading-screen.wait-tap { cursor: pointer; }
-#loading-tap {
-    margin-top: 18px;
-    font-size: 20px;
-    letter-spacing: 2px;
-    color: #fff6dc;
-    text-shadow: 0 0 10px rgba(255, 200, 110, 0.75);
-    animation: title-blink 2s ease-in-out infinite;
-}
-#loading-tap small { display: block; margin-top: 6px; font-size: 13px; letter-spacing: 1px; color: #aaa; text-shadow: none; }
-#loading-tap .touch-only { display: none; }
-body.touch #loading-tap .touch-only { display: inline; }
-
 /* ==========================================================
    バトルモード（闘技場）
    ========================================================== */

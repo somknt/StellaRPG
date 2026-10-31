@@ -604,7 +604,7 @@ class Game {
         // プレイヤーの近接攻撃（ナイフ）：敵の方へ向き直って斬る（ターゲット → ねらった向きの敵 → 近くの敵。いなければねらう向き）
         // 連打でも、押したまま（マウスの左ボタン・Space・スマホの攻撃ボタン）でも、攻撃の間隔ごとに続けて斬る
         if (attackInput) {
-            const attackData = this.player.startAttack(this.targetableEnemies(), aim, this.getMeleeTarget(aim));
+            const attackData = this.player.startAttack(this.meleeTargets(), aim, this.getMeleeTarget(aim));
             if (attackData) {
                 this.attackBuffer = 0;
                 const hits = this.enemySpawner.checkMeleeAttack(attackData);
@@ -947,16 +947,29 @@ class Game {
     }
     
     // 近接攻撃で向く敵：ターゲット → ねらった向き（カーソル・スライド）の近くの敵 → いちばん近い敵（Game.MELEE_FACE_RANGE 以内）
+    // 怨嗟の鎧の分身も「近くの敵」に入れる（向いて斬ると、すり抜ける。ロックオンと魔法のねらいは本体だけ）
     getMeleeTarget(aim) {
         const t = this.getLockTarget();
         if (t) return t;
         const p = this.player, range = Game.MELEE_FACE_RANGE;
-        const enemies = this.targetableEnemies().filter(e => e.isAlive() && !e.dying);
+        const enemies = this.meleeTargets();
         if (aim) {
             const a = p.pickAimTarget(enemies, aim, range, 0.5);
             if (a) return a;
         }
-        return this.nearestEnemy(range);
+        let best = null, bd = Infinity;
+        for (const e of enemies) {
+            const d = e.position.distance(p.position);
+            if (d <= range && d < bd) { bd = d; best = e; }
+        }
+        return best;
+    }
+    
+    // 近接攻撃で向き直す相手：ねらえる敵と、ボスAIのおとり（怨嗟の鎧の分身。GrudgeArmorAI.decoyTargets）
+    meleeTargets() {
+        const list = this.targetableEnemies().filter(e => e.isAlive() && !e.dying);
+        const decoys = this.enemySpawner.enemies.flatMap(e => (e.ai && e.ai.decoyTargets && e.isAlive() ? e.ai.decoyTargets() : []));
+        return list.concat(decoys);
     }
     
     // ターゲットの印（ロックオン）

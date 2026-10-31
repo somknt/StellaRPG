@@ -446,7 +446,7 @@ class BossBattle {
         const rec = win ? this.record : null;
         const timeText = R ? R.formatTime(this.time) : `${Math.floor(this.time / 60)}:${String(Math.floor(this.time) % 60).padStart(2, '0')}`;
         const p = this.game.player;
-        // 文字はボスごとに変えられる（boss_data.js の result。怨嗟の鎧は VICTORY / DEFEAT）
+        // 文字はボスごとに変えられる（boss_data.js の result。今はどのボスも書いていないので GAME CLEAR / GAME OVER）
         const RT = this.def.result || {};
         u.resultTitle.textContent = win ? (RT.win || 'GAME CLEAR') : (RT.lose || 'GAME OVER');
         u.resultSub.textContent = win ? (RT.winSub || '勝利！') : (RT.loseSub || '敗北……');

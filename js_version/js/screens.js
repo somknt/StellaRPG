@@ -735,6 +735,7 @@ class ScreenManager {
         on('menu-battle', () => this.go('battle_select'));
         on('menu-account', () => this.go('account_info'));
         on('menu-settings', () => this.go('settings'));
+        on('menu-title', () => this.go('title'));
         on('story-back', () => this.go('main_menu'));
         on('battle-solo', () => this.go(this.freeBattle ? 'equip' : 'monster_select'));
         on('battle-multi', () => this.toast('マルチプレイは今後実装予定です'));

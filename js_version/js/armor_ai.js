@@ -45,6 +45,7 @@ class GrudgeArmorAI extends BossAI {
         this.materialUntil = 0;
         this.extinguishTimer = 0;
         this.pendingStun = 0;      // 分身を消されたノックバックの後の気絶（秒）
+        this.shotFlash = 0;        // 六影風刃を撃った瞬間に本体が白く光る（分身の flash と同じ）
         this.feedbackAt = -9;
         this.texts = [];           // 小さな文字（「魔法無効」「分身が消えた！」）
         this.playerWasAttacking = false;
@@ -97,7 +98,7 @@ class GrudgeArmorAI extends BossAI {
     }
     
     // ロックオン・自動でねらう敵にしない（暗闇で実体化していない間・霧になって消えている間。game.js）
-    // 分身がいる間も本体はねらえる（分身は enemies に入っていないので、ねらえない）
+    // 分身がいる間も本体はねらえる（分身は enemies に入っていないので、ロックオンできない。近接攻撃で向くのは decoyTargets）
     get hideTarget() { return (this.dark && !this.materialized) || this.fade < 0.4; }
     
     get state() {
@@ -114,6 +115,13 @@ class GrudgeArmorAI extends BossAI {
     
     darkLevel() { return this.map ? this.map.darkness : 0; }
     liveClones() { return this.clones.filter(c => !c.dying); }
+    
+    // おとり（game.js の meleeTargets）：主人公が近接攻撃で向き直す相手に、見えている分身も入れる（本体と見分けにくいように）
+    // 斬っても、すり抜けるだけ（checkCloneSwing）。ロックオン・魔法のねらいには入らない
+    decoyTargets() {
+        return this.liveClones().filter(c => !c.hidden && c.fade > 0.4).map(c => ({
+            position: new Vector2(c.x, c.y), size: this.e.size, dying: false, isAlive: () => true, decoy: true }));
+    }
     
     // ---------- 毎フレーム（ノックバック中も。Enemy.update が呼ぶ） ----------
     preUpdate(dt) {
@@ -141,9 +149,12 @@ class GrudgeArmorAI extends BossAI {
             const src = this.shooterPos(q.src);
             if (!src) continue;
             this.spawnBlade(src, q.dir, this.atk('sixWind'), q.src);
+            // 撃った体が白く光る（本体も分身と同じに光る。光らない1体が本体、と分からないように）
             const c = this.clones.find(k => k.id === q.src);
             if (c) c.flash = 0.25;
+            if (q.src === 'body') this.shotFlash = 0.25;
         }
+        if (this.shotFlash > 0) this.shotFlash = Math.max(0, this.shotFlash - dt);
         this.shotQueue = this.shotQueue.filter(q => !q.done);
         
         // 風刃を動かす（ステージの外へ出たら消える）
@@ -1016,6 +1027,16 @@ class GrudgeArmorAI extends BossAI {
                 this.events.push({ type: 'hit', power: 4 });
             }
         }
+        // 分身の体にふれてもダメージ（本体の体当たりと同じ。Enemy.CONTACT。同じ分身からは cooldown 秒に1回。回避中はふれない）
+        if (player.isDodging || BossAI.skipHit(player)) return;
+        const B = Enemy.BODY, s = this.e.size;
+        const rx = s * B.rx + B.player + 6, ry = s * B.ry + B.player * 0.75 + 6;
+        for (const c of this.liveClones()) {
+            if (c.hidden || c.fade < 0.5 || (c.contactAt || 0) > this.clock) continue;
+            if (Math.hypot((player.position.x - c.x) / rx, (player.position.y - (c.y + s * B.oy)) / ry) > 1) continue;
+            const dealt = player.takeDamage(Math.max(1, Math.round(this.e.attack * Enemy.CONTACT.damage)), new Vector2(c.x, c.y));
+            if (dealt > 0) c.contactAt = this.clock + Enemy.CONTACT.cooldown;
+        }
     }
     
     // ---------- 奥行き順に描く物（分身。game.js が主人公・置き物と一緒に並べる） ----------
@@ -1023,14 +1044,15 @@ class GrudgeArmorAI extends BossAI {
         return this.clones.map(c => ({ sortY: c.y + this.e.size * 0.55, draw: (ctx, cam) => this.drawClone(ctx, cam, c) }));
     }
     
-    // 分身：半透明で、足元の影がない。目は本体より少し暗い。斬られるとゆらぐ
+    // 分身：本体と見分けにくいように、濃さ・足元の影と霧（drawGround）は本体と同じ。ちがうのは、目が光らないことと、
+    // 本体にだけ出るほんの少しのオーラ（Enemy.drawGrudgeArmorArt の aura）。斬られるとゆらぐ
     drawClone(ctx, cam, c) {
         if (c.fade <= 0.01) return;
         const s = new Vector2(c.x - cam.x, c.y - cam.y);
         const flick = c.shimmer > 0 ? 0.45 + 0.55 * Math.abs(Math.sin(c.shimmer * 40)) : 1;
         const wob = c.shimmer > 0 ? Math.sin(c.shimmer * 60) * 6 : 0;
         Enemy.drawGrudgeArmor(this.e, ctx, new Vector2(s.x + wob, s.y), this.lift, {
-            clone: true, alpha: 0.5 * c.fade * flick, dir: c.dir, facing: c.facing, eyes: 0.55, flash: c.flash > 0 ? 0.6 : 0 });
+            clone: true, alpha: 0.9 * c.fade * flick, dir: c.dir, facing: c.facing, eyes: 0, flash: c.flash > 0 ? 0.6 : 0 });
     }
     
     // ---------- 描画 ----------
@@ -1046,17 +1068,25 @@ class GrudgeArmorAI extends BossAI {
         // 暗闇の時、予告と「見える」残像は暗闇の上に描く（drawAbove）
         this.withFx(f => !(dark && (f.warn || f.seen)), () => { super.drawGround(ctx, cam); this.drawMyGround(ctx, cam); });
         // 黒い霧のもや（足元）
-        if (this.e.isAlive() && this.bodyAlpha > 0.05) {
-            const p = this.feet().sub(cam);
+        const mist = (x, y, a) => {
             const r = this.e.size * 0.95;
-            const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
-            g.addColorStop(0, `rgba(40, 10, 60, ${0.35 * this.bodyAlpha})`);
+            const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+            g.addColorStop(0, `rgba(40, 10, 60, ${0.35 * a})`);
             g.addColorStop(1, 'rgba(20, 0, 30, 0)');
-            ctx.save();
             ctx.fillStyle = g;
-            ctx.beginPath(); ctx.ellipse(p.x, p.y, r, r * 0.45, 0, 0, Math.PI * 2); ctx.fill();
-            ctx.restore();
+            ctx.beginPath(); ctx.ellipse(x, y, r, r * 0.45, 0, 0, Math.PI * 2); ctx.fill();
+        };
+        ctx.save();
+        if (this.e.isAlive() && this.bodyAlpha > 0.05) { const p = this.feet().sub(cam); mist(p.x, p.y, this.bodyAlpha); }
+        // 分身にも本体と同じ足元の影（Enemy.draw の影と同じ）と霧（どれが本体か、足元で分からないように）
+        for (const c of this.clones) {
+            if (c.fade <= 0.01) continue;
+            const x = c.x - cam.x, y = c.y - cam.y, s = this.e.size;
+            ctx.fillStyle = `rgba(0, 0, 0, ${0.22 * c.fade})`;
+            ctx.beginPath(); ctx.ellipse(x, y + s * 0.55, s * 0.42, s * 0.14, 0, 0, Math.PI * 2); ctx.fill();
+            mist(x, y + s * 0.45, 0.9 * c.fade);
         }
+        ctx.restore();
     }
     
     drawAbove(ctx, cam) {
@@ -1379,6 +1409,8 @@ Enemy.drawGrudgeArmor = function (e, ctx, s, hop, o = {}) {
     const ai = e.ai;
     const r = e.size * 0.5;
     const clone = !!o.clone;
+    // 本体が六影風刃を撃った瞬間：分身と同じように白く光る（ai.shotFlash）
+    if (!clone && ai && ai.shotFlash > 0 && o.flash === undefined) o = { ...o, flash: 0.6 };
     const alpha = o.alpha ?? (ai ? ai.bodyAlpha : 0.92);
     if (alpha <= 0.01) return;
     const t = ai ? ai.time : performance.now() / 1000;
@@ -1408,7 +1440,9 @@ Enemy.drawGrudgeArmor = function (e, ctx, s, hop, o = {}) {
     
     // ---- 絵（画像がある時）。o.img：残像を作った時の絵 ----
     const art = o.img || Enemy.armorSprite(e, dir);
-    if (art) { Enemy.drawGrudgeArmorArt(e, ctx, s, hop, art, { ...o, alpha, clone, hitFlash: flash, feetY }); return; }
+    // 分身がいる間の本体だけ、ほんの少しのオーラ（aura：0〜1。ゆっくり強くなったり弱くなったり）
+    const aura = !clone && ai && ai.liveClones && ai.liveClones().length ? 0.75 + 0.25 * Math.sin(t * 2.6) : 0;
+    if (art) { Enemy.drawGrudgeArmorArt(e, ctx, s, hop, art, { ...o, alpha, clone, hitFlash: flash, feetY, aura }); return; }
     
     // ---- 体はいったん別のキャンバスに描いて、まとめて透かす（部品の重なりが透けて見えないように）----
     const W = Math.ceil(r * 6.4), H = Math.ceil(r * 5.6);
@@ -1724,8 +1758,21 @@ Enemy.drawGrudgeArmorArt = function (e, ctx, s, hop, img, o) {
         g.globalCompositeOperation = 'source-over';
         src = cv;
     }
+    const base = ctx.globalAlpha;
     ctx.save();
-    ctx.globalAlpha *= o.alpha;
+    // 本体のオーラ（分身がいる間だけ。o.aura）：体の形を少しだけ大きくした紫を、ほんのうすく後ろに重ねる（足元は動かさない）
+    if (o.aura > 0) {
+        const sil = Enemy.getWhiteSilhouette(img, Enemy.ARMOR_ART.aura);
+        const footY = dy + Enemy.ARMOR_ART.foot * size;
+        ctx.globalCompositeOperation = 'lighter';
+        for (const [kk, aa] of [[1.08, 0.09], [1.04, 0.11]]) {
+            const w = size * kk;
+            ctx.globalAlpha = base * o.alpha * o.aura * aa;
+            ctx.drawImage(sil, s.x - w / 2, footY - Enemy.ARMOR_ART.foot * w, w, w);
+        }
+        ctx.globalCompositeOperation = 'source-over';
+    }
+    ctx.globalAlpha = base * o.alpha;
     ctx.drawImage(src, dx, dy, size, size);
     // 被弾した瞬間（ふつうは白・有利属性は赤・不利属性は青）・ジャスト回避のスロー中（薄い水色）：体の形のまま光らせる
     if (!o.clone && (o.hitFlash || Enemy.slowMotion)) {
@@ -1745,8 +1792,8 @@ Enemy.drawGrudgeArmorArt = function (e, ctx, s, hop, img, o) {
     if (!o.clone && e.ai) e._armorEyes = eyes;
     Enemy.drawArmorEyeGlow(ctx, eyes, o.eyes ?? 1, o.alpha, o.clone, o.hitFlash);
 };
-// 絵の足元（上からの割合：440 の絵の 348px）
-Enemy.ARMOR_ART = { foot: 348 / 440 };
+// foot：絵の足元（上からの割合：440 の絵の 348px） / aura：分身がいる間の本体のオーラの色
+Enemy.ARMOR_ART = { foot: 348 / 440, aura: '#9a62ff' };
 
 // 目の光（紫）。本体は分身より少し明るい
 Enemy.drawArmorEyeGlow = function (ctx, eyes, eyeK, alpha, clone, flash) {

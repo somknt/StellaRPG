@@ -1332,6 +1332,20 @@ class EnemySpawner {
             const pulse = 1 + Math.sin(p.age * 20) * 0.15;
             const r = p.radius * pulse;
             ctx.save();
+            // 弾幕の星力弾（魔道ゴーレムの星の輪・うず・嵐）：小さな光の粒。白い芯の大きさ＝当たりの大きさ（たくさん出ても見分けやすく）
+            if (p.kind === 'starlet') {
+                const g2 = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, p.radius * 1.9);
+                g2.addColorStop(0, 'rgba(160, 235, 255, 0.55)');
+                g2.addColorStop(1, 'rgba(40, 120, 255, 0)');
+                ctx.fillStyle = g2;
+                ctx.beginPath(); ctx.arc(s.x, s.y, p.radius * 1.9, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#f4fdff';
+                ctx.strokeStyle = '#36b6ff';
+                ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.arc(s.x, s.y, p.radius * 0.8 * pulse, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+                ctx.restore();
+                continue;
+            }
             // 侵蝕弾・星力弾（魔道ゴーレム）の画像：進む向きに回して描く（光る玉が当たり判定の位置に来るように）
             const star = p.kind === 'star';
             const shot = window.assetManager && (p.kind === 'corrupt' ? window.assetManager.get('bossfx_corrupt_shot')
