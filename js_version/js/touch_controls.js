@@ -66,9 +66,8 @@ const TouchControls = {
         const vw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
         const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
         
-        // 画面に収まる最大の倍率（パソコンでは等倍より大きくしない）
-        let scale = Math.min(vw / this.LOGICAL_W, vh / this.LOGICAL_H);
-        if (!this.isTouch) scale = Math.min(scale, 1);
+        // 画面に収まる最大の倍率（パソコンでも、ウィンドウいっぱいまで大きくする。前は等倍までだった）
+        const scale = Math.min(vw / this.LOGICAL_W, vh / this.LOGICAL_H);
         this.container.style.setProperty('--scale', scale);
         
         // スマホでは画面が縮むぶん、左上のステータスを拡大して読める大きさを保つ
