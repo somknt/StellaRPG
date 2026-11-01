@@ -864,7 +864,8 @@ class Game {
     
     // ---------- ターゲット（ロックオン） ----------
     // ターゲットにした敵の方を主人公はいつも向き、近接攻撃・魔法もその敵をねらう
-    //   PC：敵を左クリック → ターゲット（クリックはそのまま攻撃にもなる。ターゲットの敵をクリックしても外れない）
+    //   PC：敵を左クリック → ターゲット。ターゲットの敵をもう一度クリック → 解除（クリックはそのまま攻撃にもなる。
+    //       連打して斬っている間は外れない：Game.UNLOCK_CLICK_GAP）
     //       ホイールのクリック（敵の上）・F キー → 切りかえ（ターゲットがいれば解除。いなければカーソルの下か近くの敵）
     //   スマホ：画面で敵をタップ → ターゲット。同じ敵をもう一度タップ → 解除
     // ターゲットは、その敵が倒れるか、解除するか、別の敵を選ぶまで続く
@@ -889,8 +890,13 @@ class Game {
                 if (e) this.setLockTarget(e);
             }
         } else if (inp.isLeftMouseClicked && inp.mouseAim) {
-            const e = under();
-            if (e && e !== this.lockTarget) this.setLockTarget(e);
+            const e = under(), now = performance.now();
+            // ターゲットの敵をもう一度クリック → 解除。ただし続けてクリックして斬っている間
+            // （前のクリックから Game.UNLOCK_CLICK_GAP 秒以内）は外さない（連打のたびに外れたり付いたりしないように）
+            if (e && e === this.lockTarget) {
+                if (now - (this.lastLeftClickAt || 0) > Game.UNLOCK_CLICK_GAP * 1000) this.setLockTarget(null);
+            } else if (e) this.setLockTarget(e);
+            this.lastLeftClickAt = now;
         }
     }
     
@@ -1368,6 +1374,7 @@ Game.LOCK_DARK = '#2a0614';
 Game.LOCK_LIGHT = '#ffe2ec';
 Game.LOCK_SNAP_TIME = 0.3;   // 決めた瞬間に、かぎが外から閉じてくる時間
 Game.UNLOCK_FX_TIME = 0.25;  // 解除した時に、かぎが広がって消える時間
+Game.UNLOCK_CLICK_GAP = 0.6; // PC：ターゲットの敵をクリックして解除するのは、前の左クリックからこの秒数より空いた時だけ（連打中は外さない）
 // 連打で、攻撃の間隔（ナイフは 0.35秒）の途中に押した分を覚えておく時間（秒）
 Game.ATTACK_BUFFER = 0.4;
 
