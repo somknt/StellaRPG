@@ -139,7 +139,7 @@ class MagicGolemAI extends BossAI {
         this.facing = new Vector2(Math.cos(a), Math.sin(a));
         this.e.faceTowards(this.facing);
         this.lockFacing = true;
-        // 弾幕のフェーズ（phases[].keepAway）：近すぎたらプレイヤーの方を向いたまま下がり、ほどよく離れていれば（keepAway の 1.9 倍まで）止まる
+        // 遠距離のフェーズ（phases[].keepAway）：近すぎたらプレイヤーの方を向いたまま下がり、ほどよく離れていれば（keepAway の 1.9 倍まで）止まる
         const keep = this.P.keepAway ? this.P.keepAway * this.R : 0;
         if (keep && this.dist() < keep) {
             this.motion = 'walk';
@@ -167,7 +167,7 @@ class MagicGolemAI extends BossAI {
     }
     
     // 拳が届かない時は、半分くらいの確率でもう少し歩いて近づく（遠くから叩きつけばかりにならないように）
-    // フェーズが変わった後の大技（opener）を出す時は待たない。拳を使わないフェーズ（強化・最終強化の弾幕）は近づかない
+    // フェーズが変わった後の大技（opener）を出す時は待たない。拳を使わないフェーズ（遠距離が中心の強化・最終強化）は近づかない
     chooseAttack(force = false) {
         const punch = this.atk('punch');
         const melee = MagicGolemAI.MELEE.some(n => this.P.attacks[n]);
@@ -413,93 +413,6 @@ class MagicGolemAI extends BossAI {
             playSE('golem_shot');
             yield* this.sleep(0.4, () => { this.frame = 1; this.pose.charge = 1; });
         }
-        yield* this.recover(a.recover);
-    }
-    
-    // ---------- 弾幕（強化・最終強化でよく使う。近接の代わり） ----------
-    // 弾幕の星力弾を1つ撃つ（胸の核などから ang の向きへ。弾は EnemyManager がまっすぐ動かす）
-    // kind 'starlet'：小さな光の粒（Enemy の弾の描き方。たくさん出ても見分けられるように、見た目の大きさ＝当たりの大きさ）
-    shootStar(from, ang, speed, dmgMul, life = 4.2) {
-        const shot = (typeof Enemy !== 'undefined' && Enemy.SCALE.shot) || 1;
-        this.pendingProjectiles.push({ position: from.clone(), velocity: new Vector2(Math.cos(ang), Math.sin(ang)).mult(speed),
-            damage: this.dmg(dmgMul), radius: 9 * shot, life, age: 0, kind: 'starlet' });
-    }
-    
-    // 弾幕の溜め：胸の魔導核に力がたまる（予告）
-    *barrageCharge(t) {
-        this.motion = 'magicCharge';
-        this.coreChargeFx(t);
-        playSE('golem_charge', { dur: t + 0.1 });
-        yield* this.sleep(t, (p) => { this.face(this.dirToPlayer()); this.frame = 0; this.pose.charge = p; this.pose.core = 0.6 + 0.4 * p; this.jitter = p > 0.7 ? 1 : 0; });
-        this.motion = 'magicShot';
-    }
-    
-    // 星の輪：胸の核から全方向へ星力弾の輪（waves 回。1回ごとに半分ずらして、前の輪のすき間に次の弾が来る）
-    // 最終強化は輪が1つ多く、弾も2つ多い
-    *act_starRing(a) {
-        yield* this.barrageCharge(a.windup);
-        const p3 = this.phase.index >= 2;
-        const waves = a.waves + (p3 ? 1 : 0), n = a.count + (p3 ? 2 : 0);
-        const base = Math.atan2(this.dirToPlayer().y, this.dirToPlayer().x);
-        for (let w = 0; w < waves; w++) {
-            const from = this.corePos();
-            const off = base + (w % 2 ? Math.PI / n : 0);
-            for (let i = 0; i < n; i++) this.shootStar(from, off + i * Math.PI * 2 / n, a.speed, a.damage);
-            this.addFx({ type: 'shock', x: from.x, y: from.y, r0: 10, r1: 90, life: 0.3, width: 6, color: '#c8f4ff' });
-            playSE('golem_shot');
-            this.events.push({ type: 'shake', power: 2, time: 0.12 });
-            yield* this.sleep(a.between, () => { this.face(this.dirToPlayer()); this.frame = 1; this.pose.charge = 1; this.pose.core = 1; });
-        }
-        yield* this.recover(a.recover);
-    }
-    
-    // 星のうず：その場で回りながら、何本もの腕の形に星力弾をばらまき続ける（arms 本。最終強化は1本多い）
-    *act_starSpiral(a) {
-        yield* this.barrageCharge(a.windup);
-        const arms = a.arms + (this.phase.index >= 2 ? 1 : 0);
-        yield* this.spiralFire(a, arms, a.time);
-        yield* this.recover(a.recover);
-    }
-    
-    // うずを撃ち続ける（every 秒ごとに、腕の数だけ撃って step ラジアン回す）。fan：fanEvery 秒ごとにプレイヤーへ扇の弾も撃つ
-    *spiralFire(a, arms, time, fan = null) {
-        const turn = Math.random() < 0.5 ? 1 : -1;
-        let ang = Math.atan2(this.dirToPlayer().y, this.dirToPlayer().x), next = 0, nextFan = fan ? fan.every * 0.5 : Infinity, se = 0;
-        yield* this.sleep(time, (p, dt) => {
-            this.frame = 1;
-            this.pose.charge = 1;
-            this.pose.core = 0.8 + 0.2 * Math.sin(this.time * 20);
-            this.face(new Vector2(Math.cos(ang), Math.sin(ang)));
-            next -= dt; nextFan -= dt; se -= dt;
-            const from = this.corePos();
-            while (next <= 0) {
-                next += a.every;
-                for (let k = 0; k < arms; k++) this.shootStar(from, ang + k * Math.PI * 2 / arms, a.speed, a.damage);
-                ang += a.step * turn;
-                if (se <= 0) { se = 0.3; playSE('golem_shot'); }
-            }
-            if (nextFan <= 0) {
-                nextFan += fan.every;
-                const d = this.dirToPlayer(), aim = Math.atan2(d.y, d.x);
-                for (let i = 0; i < fan.count; i++) {
-                    const k = fan.count === 1 ? 0 : i / (fan.count - 1) - 0.5;
-                    this.shootStar(from, aim + k * fan.spread * (fan.count - 1), fan.speed, a.damage);
-                }
-                this.addFx({ type: 'shock', x: from.x, y: from.y, r0: 6, r1: 60, life: 0.25, width: 5, color: '#e6fbff' });
-            }
-        });
-    }
-    
-    // 星の嵐（最終強化）：うず（2本）を撃ちながら、ときどきプレイヤーへ扇の弾 → 撃ち終わると少し機能停止（攻撃のチャンス）
-    *act_starStorm(a) {
-        this.superArmor = true;
-        if (this.stage) { this.stage.flashPillars(1); this.stage.pulseCircle(1); }
-        yield* this.barrageCharge(a.windup);
-        this.events.push({ type: 'shake', power: 4, time: 0.3 });
-        // fanSpeed は Enemy.SCALE.speed がかかっていない（scaleAttacks は speed だけ）ので、ここでかける
-        yield* this.spiralFire(a, a.arms, a.time, { every: a.fanEvery, count: a.fanCount, spread: a.fanSpread, speed: a.fanSpeed * this.SP });
-        this.superArmor = false;
-        yield* this.breakdown(a.breakdown || 0.9);
         yield* this.recover(a.recover);
     }
     

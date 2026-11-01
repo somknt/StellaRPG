@@ -205,16 +205,17 @@ const BOSS_DATA = [
         ],
         // フェーズ：HP50%以下で2、25%以下で3（イノシシ・狼と同じ）
         // フェーズ1にも腕の振り回し（armSwing）と衝撃波を入れて、最初から手ごわく
-        // 強化・最終強化は弾幕が中心（拳・叩きつけは使わない。強化だけ、たまに腕の振り回し）。最終強化はほぼ弾幕
-        // keepAway：弾幕のフェーズで保つ距離（× Enemy.SCALE.range。近すぎたら下がる。MagicGolemAI.idleMove）
+        // 水色の遠距離攻撃（星力弾 magicShot・上から光の柱が落ちる魔法陣砲撃 magicCannon）を、フェーズ1から使う
+        // 強化は遠距離が中心（拳・叩きつけは使わない。たまに腕の振り回し）。最終強化はほぼ遠距離だけ
+        // keepAway：遠距離のフェーズで保つ距離（× Enemy.SCALE.range。近すぎたら下がる。MagicGolemAI.idleMove）
         phases: [
             { hp: 1.0, label: '通常', speedMul: 1.0, intervalMul: 1.0, recoverMul: 1.0,
-              attacks: { punch: 4, slam: 3, armSwing: 3, shockwave: 1 } },
-            // 強化の大技：星の輪（ステージが起動した直後）／最終強化の大技：星の嵐。必殺技の魔法陣砲撃もときどき
-            { hp: 0.5, label: '強化', speedMul: 1.15, intervalMul: 0.9, recoverMul: 0.9, transition: 'activate', opener: 'starRing', keepAway: 170,
-              attacks: { armSwing: 1, magicShot: 4, starRing: 3, starSpiral: 3, hazardFloor: 2, shockwave: 1, shield: 1 } },
-            { hp: 0.25, label: '最終強化', speedMul: 1.25, intervalMul: 0.8, recoverMul: 0.8, transition: 'activate', opener: 'starStorm', keepAway: 180,
-              attacks: { starStorm: 3, starSpiral: 3, starRing: 3, magicShot: 2, hazardBarrage: 2, magicCannon: 2, bigShockwave: 1 } }
+              attacks: { punch: 4, slam: 3, armSwing: 3, shockwave: 1, magicShot: 3, magicCannon: 2 } },
+            // 強化の大技：魔法陣の危険床（ステージが起動した直後に床が光る）／最終強化の大技：必殺技の魔法陣砲撃
+            { hp: 0.5, label: '強化', speedMul: 1.15, intervalMul: 0.9, recoverMul: 0.9, transition: 'activate', opener: 'hazardFloor', keepAway: 170,
+              attacks: { armSwing: 1, magicShot: 5, magicCannon: 4, hazardFloor: 3, shockwave: 1, shield: 1 } },
+            { hp: 0.25, label: '最終強化', speedMul: 1.25, intervalMul: 0.8, recoverMul: 0.8, transition: 'activate', opener: 'magicCannon', keepAway: 180,
+              attacks: { magicCannon: 4, magicShot: 4, hazardBarrage: 3, bigShockwave: 1 } }
         ],
         // 距離（range・reach・radius・maxRadius・band）は Enemy.SCALE.range 倍、弾の速さは Enemy.SCALE.speed 倍される
         // 全体的に溜め・隙を短く、範囲攻撃（叩きつけ・衝撃波・危険床・砲撃・盾）を広く
@@ -230,15 +231,7 @@ const BOSS_DATA = [
             slam:          { range: [0, 200],  windup: 1.05, damage: 1.3, reach: 60, radius: 95, stuck: 0.7, recover: 0.95 },
             shockwave:     { range: [0, 260],  windup: 0.8,  damage: 1.2, maxRadius: 210, band: 28, time: 0.8, waves: 1, recover: 0.7 },
             bigShockwave:  { range: [0, 300],  windup: 0.78, damage: 1.3, maxRadius: 260, band: 30, time: 0.85, waves: 3, recover: 0.65 },
-            magicShot:     { range: [0, 1200], windup: 0.65, damage: 0.9, count: 5, spread: 0.24, speed: 190, recover: 0.65 },
-            // 弾幕（MagicGolemAI の act_starRing / act_starSpiral / act_starStorm）。speed は弾の速さ（× Enemy.SCALE.speed）
-            // 星の輪：count 個の輪を waves 回（1回ごとに半分ずらす）。最終強化は輪が1つ・弾が2つ多い
-            starRing:      { range: [0, 1200], windup: 0.6, damage: 0.7, count: 14, waves: 3, between: 0.5, speed: 125, recover: 0.6 },
-            // 星のうず：arms 本の腕の形に、every 秒ごとに撃って step ラジアン回す（time 秒）。最終強化は腕が1本多い
-            starSpiral:    { range: [0, 1200], windup: 0.55, damage: 0.6, arms: 3, every: 0.14, step: 0.3, time: 2.6, speed: 115, recover: 0.7 },
-            // 星の嵐（最終強化）：うず（arms 本）＋ fanEvery 秒ごとにプレイヤーへ fanCount 個の扇 → 撃ち終わると breakdown 秒の機能停止
-            starStorm:     { range: [0, 1200], windup: 0.8, damage: 0.65, arms: 2, every: 0.15, step: 0.33, time: 3.6, speed: 110,
-                             fanEvery: 0.9, fanCount: 5, fanSpread: 0.2, fanSpeed: 160, breakdown: 1.0, recover: 0.5 },
+            magicShot:     { range: [110, 1200], windup: 0.65, damage: 0.9, count: 5, spread: 0.24, speed: 190, recover: 0.65 },
             hazardFloor:   { range: [0, 1200], windup: 0.85, damage: 1.1, count: 3, radius: 64, waves: 1, recover: 0.65 },
             hazardBarrage: { range: [0, 1200], windup: 0.85, damage: 1.1, count: 4, radius: 64, waves: 4, between: 0.55, recover: 0.6 },
             magicCannon:   { range: [0, 1200], windup: 1.0, damage: 1.6, count: 4, radius: 86, between: 0.42, breakdown: 1.6, recover: 0.5 },
