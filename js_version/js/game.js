@@ -1095,6 +1095,7 @@ class Game {
     // 砲弾系（ファイヤーボール・ウォーターボール・ストーンキャノン・テンペスト）は「向き」、
     // その場系（ライトニング）は「落とす場所」を決める。詠唱中は毎フレーム呼ぶ
     // 1回押し → 自動：ターゲット（ロックオン）の敵、いなければいちばん近い敵をねらう（主人公はその敵の方を向いたまま詠唱する）
+    //   炎の魔法は消えた火もねらう（怨嗟の鎧の最後の形態）。近くに何もない・遠すぎる時は、PC ならマウスカーソルの方向・場所
     // 長押し → 自分で決める
     //   スマホ：押したままスライド（砲弾系）→ その向き / 長押し（その場系）→ ターゲットカーソル（スライドで動かす）
     //   PC：Q を長押し → マウスカーソルの方向・場所（敵の近くなら敵に吸いつく）
@@ -1108,6 +1109,13 @@ class Game {
         if (!playSE('magic_heal') && window.soundManager && soundManager.playHealChime) soundManager.playHealChime();
     }
     
+    // 炎の魔法でねらえる消えた火（怨嗟の鎧のステージ。ほかのステージ・ほかの属性は空）。敵と同じ形（position・size・isAlive）
+    fireTargets(magic) {
+        const fires = magic.element === '炎' && this.map && this.map.battleFires ? this.map.battleFires : [];
+        return fires.filter(f => f.state === 'extinguished')
+            .map(f => ({ position: new Vector2(f.x, f.y), size: 40, dying: false, isAlive: () => true, fire: f }));
+    }
+    
     computeCastAim(magic) {
         // 自分にかける魔法（ヒール）は、ねらう向きも場所もない
         if (magic.shape === 'self') return null;
@@ -1119,9 +1127,25 @@ class Game {
         const touchSlide = t.source === 'magic' && (t.active || now < t.until) && Math.hypot(t.x, t.y) > 0.01;
         const touchHold = t.source === 'magic' && t.held && now - t.since >= Game.TARGET_HOLD_MS;
         const mouse = this.input.mouseAim && this.castManual && !(t.source === 'magic' && (t.held || touchSlide));
-        // 自動でねらう敵：ターゲット（ロックオン）を先に。いなければ range 以内のいちばん近い敵
+        // 炎の魔法：消えた火（怨嗟の鎧の最後の形態）も、敵と同じように自動でねらう（当てると火が灯る。battlefield_map.js の onMagicShot）
+        const fires = this.fireTargets(magic);
+        // 自動でねらう敵：ターゲット（ロックオン）を先に。いなければ range 以内のいちばん近い敵か消えた火
+        // 魔法が効かないボス（怨嗟の鎧）より、消えた火を先にねらう
         const locked = this.getLockTarget();
-        const nearest = (range) => locked || this.nearestEnemy(range);
+        const nearest = (range) => {
+            if (locked) return locked;
+            let best = this.nearestEnemy(range);
+            if (best && fires.length && best.ai && best.ai.def && best.ai.def.magicImmune) best = null;
+            let bd = best ? best.position.distance(p.position) : Infinity;
+            for (const f of fires) { const d = f.position.distance(p.position); if (d <= range && d < bd) { bd = d; best = f; } }
+            return best;
+        };
+        // 自動でねらう相手がいない・遠すぎる時の向き：PC はマウスカーソルの方へ（スマホ・マウスを使っていない時は null）
+        const cursorDir = () => {
+            if (!this.input.mouseAim || t.source === 'magic') return null;
+            const v = this.input.mousePos.sub(p.position.sub(this.camera.position));
+            return v.length() > 8 ? v.normalize() : null;
+        };
         const facing = p.aimVector && p.aimVector.length() > 0.01 ? p.aimVector.normalize() : p.directionToVector(p.direction);
         
         if (magic.shape === 'strike') {
@@ -1143,7 +1167,10 @@ class Game {
             } else {
                 const e = nearest(range);
                 lock = e;
-                target = e ? e.position.clone() : p.position.add(facing.mult(range * 0.6));
+                // 届く所に敵がいない：PC はマウスカーソルの所へ（届く距離まで。下で縮める）、それ以外は前の方
+                if (e) target = e.position.clone();
+                else if (cursorDir()) { target = this.camera.screenToWorld(this.input.mousePos); manual = true; }
+                else target = p.position.add(facing.mult(range * 0.6));
             }
             // 届く距離まで
             let v = target.sub(p.position);
@@ -1168,11 +1195,13 @@ class Game {
         }
         const reachMax = magic.shape === 'tornado' ? (magic.travel || 110) : (magic.range || 400);
         if (manual) {
-            // ねらった向きの近く（約30度以内）に敵がいれば、その敵に吸いつける
-            lock = p.pickAimTarget(enemies, dir, reachMax + 140, Player.AIM_ASSIST_DOT);
+            // ねらった向きの近く（約30度以内）に敵（炎の魔法は消えた火も）がいれば、それに吸いつける
+            lock = p.pickAimTarget(enemies.concat(fires), dir, reachMax + 140, Player.AIM_ASSIST_DOT);
         } else {
-            // 何も指定していない：いちばん近い敵の方向へ（いなければ向いている方向）
-            lock = nearest(Game.AUTO_AIM_RANGE);
+            // 何も指定していない：いちばん近い敵の方向へ（魔法の届く距離の 1.5 倍まで。Game.AUTO_AIM_RANGE より遠くは見ない）
+            // いない・遠すぎる時は、PC ならマウスカーソルの方向、スマホなら向いている方向
+            lock = nearest(Math.min(Game.AUTO_AIM_RANGE, reachMax * 1.5));
+            if (!lock) { dir = cursorDir(); if (dir) manual = true; }
         }
         if (lock) dir = lock.position.sub(p.position).normalize();
         if (!dir) dir = facing;
