@@ -7,6 +7,6 @@
 //
 // 2つとも空の間は、アカウントはこの端末（ブラウザ）だけに保存される（ほかの端末からはログインできない）
 window.ONLINE_CONFIG = {
-    url: '',
-    key: ''
+    url: 'https://fxysitoyveepaznjlbcg.supabase.co',
+    key: 'sb_publishable_Fsg6yvVtEkXClGIoubxQCA_ELCS5BhZ'
 };
