@@ -549,6 +549,8 @@ class ScreenManager {
         if (window.Account) Account.onChange(() => {
             if (this.current === 'main_menu') this.refreshMenuUser();
             if (this.current === 'account_info') { const m = this.$('ai-mode'); if (m) m.textContent = Account.storageLabel(); }
+            // ほかの端末で遊んだ分を読み直した時も、コインの数を合わせる
+            if (this.current === 'monster_select' || this.current === 'ranking') this.showCoins();
         });
     }
     
@@ -753,6 +755,7 @@ class ScreenManager {
         on('profile-back', () => this.back());
         on('ai-profile', () => { this.profileFrom = 'account_info'; this.go('profile'); });
         on('ai-logout', (el) => this.confirmLogout(el));
+        on('ai-import', (el) => this.confirmImport(el));
         on('ai-back', () => this.go('main_menu'));
         // 装備
         on('equip-ok', () => this.startBattle());
@@ -825,7 +828,8 @@ class ScreenManager {
     
     enterAccount() {
         const A = window.Account;
-        const last = A ? A.lastUsername : '';
+        const cand = this.moveCandidate();
+        const last = (A ? A.lastUsername : '') || (cand ? cand.username : '');
         // この端末で前にログインしたことがあればログイン、なければアカウント作成から
         this.setAccountTab(last ? 'login' : 'create', false);
         const user = this.$('acc-user');
@@ -835,10 +839,30 @@ class ScreenManager {
         const note = this.$('acc-note');
         if (note) {
             note.textContent = A && A.mode === 'cloud'
-                ? 'アカウントはオンラインに保存されます。PC とスマホで同じアカウントを使えます'
+                ? (this.moveNote() || 'アカウントはオンラインに保存されます。PC とスマホで同じアカウントを使えます')
                 : 'いまはオンラインの準備中のため、アカウントはこの端末だけに保存されます';
             note.classList.toggle('local', !(A && A.mode === 'cloud'));
         }
+    }
+    
+    // オンラインにする前に、この端末で自動ログインしていたアカウント（account.js が古い時は null）
+    moveCandidate() {
+        const A = window.Account;
+        return A && typeof A.localAccounts === 'function' ? A.moveCandidate : null;
+    }
+    
+    // この端末に、オンラインにする前のアカウントのデータがある時の案内（なければ ''）
+    moveNote() {
+        const A = window.Account;
+        if (!A || typeof A.localAccounts !== 'function') return '';
+        const cand = A.moveCandidate;
+        if (cand && cand.hasData) {
+            return `この端末の「${cand.username}」のデータを引きつげます。同じユーザー名とパスワードでログインするか、パスワードを忘れた時は「はじめて遊ぶ」でアカウントを作ってください`;
+        }
+        const list = A.localAccounts();
+        if (!list.length) return '';
+        const names = list.slice(0, 3).map(x => `「${x.username}」`).join('');
+        return `この端末の前のアカウント${names}のデータは、同じユーザー名とパスワードでログインすると引きつげます`;
     }
     
     setAccountTab(tab, byUser) {
@@ -918,9 +942,9 @@ class ScreenManager {
         if (document.activeElement && InputManager.isTyping(document.activeElement)) document.activeElement.blur();
         this.setAccountBusy(true);
         this.showAccountError('');
+        let res = null;
         try {
-            if (create) await A.register(user, pass);
-            else await A.login(user, pass);
+            res = create ? await A.register(user, pass) : await A.login(user, pass);
         } catch (e) {
             this.setAccountBusy(false);
             playSE('ui_error');
@@ -930,7 +954,10 @@ class ScreenManager {
         }
         this.setAccountBusy(false);
         playSE('ui_select');
-        this.toast(create ? 'アカウントを作りました' : `ログインしました（${A.user.username}）`);
+        // この端末のアカウントのデータを引きついだ時は、そう知らせる
+        const moved = res && res.moved;
+        this.toast(moved ? `この端末のデータを引きつぎました（${moved.username}）`
+            : create ? 'アカウントを作りました' : `ログインしました（${A.user.username}）`);
         this.go(this.afterLoginScreen());
     }
     
@@ -1007,6 +1034,42 @@ class ScreenManager {
         const lo = this.$('ai-logout');
         if (lo) { lo.textContent = 'ログアウト'; lo.classList.remove('confirm'); }
         clearTimeout(this._logoutTimer);
+        this.refreshImportButton();
+    }
+    
+    // 「この端末の前のデータを入れる」：オンラインにする前に、この端末で使っていたアカウントのデータがある時だけ出す
+    refreshImportButton() {
+        const A = window.Account;
+        const btn = this.$('ai-import');
+        if (!btn) return;
+        const info = A && typeof A.importable === 'function' ? A.importable() : null;
+        btn.hidden = !info;
+        btn.toggleAttribute('data-nav', !!info);
+        btn.classList.remove('confirm');
+        clearTimeout(this._importTimer);
+        if (info) btn.textContent = `この端末の「${info.username}」のデータを入れる`;
+    }
+    
+    // 2回押すと入れる（まちがえて押さないように）
+    async confirmImport(btn) {
+        const A = window.Account;
+        const info = A && typeof A.importable === 'function' ? A.importable() : null;
+        if (!info) { this.refreshImportButton(); return; }
+        if (!btn.classList.contains('confirm')) {
+            btn.classList.add('confirm');
+            btn.textContent = `もう一度押すと入れる（コイン${info.coins}枚）`;
+            clearTimeout(this._importTimer);
+            this._importTimer = setTimeout(() => this.refreshImportButton(), 4000);
+            return;
+        }
+        clearTimeout(this._importTimer);
+        btn.textContent = '入れています…';
+        const moved = await A.importLocal();
+        this.toast(moved ? `この端末のデータを入れました（${moved.username}）` : A.message('SERVER'));
+        if (this.current === 'account_info') {
+            this.enterAccountInfo();
+            this.nav = new UINav(this.$('scr-accinfo'), 'vertical');
+        }
     }
     
     // ログアウトは2回押す（まちがえて押さないように）

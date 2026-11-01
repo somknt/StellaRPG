@@ -1512,6 +1512,10 @@ body.touch .title-start .touch-only { display: inline; }
 .acc-info dt { color: #ffd76a; }
 .acc-info dd { color: #fff4d0; word-break: break-all; }
 #ai-logout.confirm { color: #ffc2b4; border-color: rgba(255, 130, 110, 0.75); }
+/* この端末の前のデータを入れる（ある時だけ。ユーザー名が入って長いので、少し小さい文字） */
+#ai-import[hidden] { display: none; }
+#scr-accinfo #ai-import { font-size: 18px; color: #9fd6a8; }
+#scr-accinfo #ai-import.confirm { color: #fff0a8; border-color: rgba(255, 215, 110, 0.8); }
 
 /* ---- 装備 ---- */
 #scr-equip { gap: 6px; }

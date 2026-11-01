@@ -16,6 +16,13 @@
 // 変更は「できごと」（{ t: 'profile' | 'loadout' | 'clear', ... }）にして、手元のデータに当ててからサーバーにも送る
 // 送る時はサーバーの最新のデータを読み直してから当てるので、PC とスマホで交互に遊んでも記録が消えない
 // 送れなかったできごと（電波がない時など）は、この端末に残しておき、次につながった時に送る
+// ほかの端末で遊んだ分は、ページに戻ってきた時（タブを開き直した・ウィンドウを選んだ）にサーバーから読み直す
+//
+// この端末だけのアカウント（オンラインにする前に作った物）の引っ越し
+//   - 同じユーザー名・パスワードでログインすると、オンラインのアカウントに引っ越す（オンラインになければ、そのユーザー名で作る）
+//   - オンラインにする前に自動ログインしていた端末は、パスワードを忘れていても「はじめて遊ぶ」でアカウントを作ると引きつぐ
+//   - オンラインのアカウントにデータがある時は、足し合わせる（コイン・クリアの回数は足す、マイベストは合わせて速い順）
+//   - 引っ越したアカウントには印を付ける（2回入れないように）。この端末のデータは消さずに残す
 
 class AccountError extends Error {
     constructor(code, detail = '') {
@@ -33,6 +40,7 @@ const Account = {
     LAST_USER_KEY: 'hoshinoko.lastuser',      // 最後にログインしたユーザー名（ログインの画面に入れておく）
     OLD_BATTLE_KEY: 'hoshinoko.battle.v1',    // アカウントを作る前のバトルの記録（最初のアカウントに引きつぐ）
     CARRIED_KEY: 'hoshinoko.battle.v1.carried',
+    MOVE_KEY: 'hoshinoko.move.v1',            // オンラインにする前に、この端末で自動ログインしていたアカウント（引っ越しの候補）
     USERNAME_RE: /^[A-Za-z0-9_]{3,16}$/,
     PASSWORD_MIN: 6,
     PASSWORD_MAX: 64,
@@ -43,6 +51,8 @@ const Account = {
     SAVE_TRIES: 4,     // ほかの端末と同時に保存した時（CONFLICT）に、読み直して保存し直す回数
     PBKDF2_ITER: 120000,
     APPLIED_MAX: 60,
+    REFRESH_GAP_MS: 5000, // ページに戻ってきた時にサーバーから読み直すのは、この間に1回まで
+    MOVE_COIN_CAP: 500,   // オンラインのアカウントに足す時、1回のクリアで足せるコイン（サーバーの check_data と同じ）
 
     user: null,        // { username, key（小文字のユーザー名）, mode: 'cloud' | 'local' }
     data: null,        // セーブデータ
@@ -54,6 +64,9 @@ const Account = {
     _flushTimer: null,
     _flushing: false,
     _flushAgain: false,
+    _saveGen: 0,       // 保存できた回数（読み直している間に保存した時は、古い読み直しを使わない）
+    _lastRefresh: 0,
+    moveFrom: null,    // このページでパスワードを確かめた、この端末のアカウントの key（新しいユーザー名で作る時に引きつぐ）
     _listeners: [],
 
     // ---------- 状態 ----------
@@ -132,6 +145,7 @@ const Account = {
             BAD_DATA: 'セーブデータの中身がおかしいので、保存できませんでした',
             CONFLICT: 'ほかの端末と同時に保存しました。少し待つと、もう一度保存します',
             RATE_LIMIT: 'アクセスが多すぎます。少し待ってから、もう一度やってみてください',
+            MOVE_TAKEN: 'このユーザー名は、オンラインではちがうパスワードで使われています。オンラインのパスワードでログインするか、「はじめて遊ぶ」で新しいユーザー名を作ると、この端末のデータを引きつぎます',
             NO_CRYPTO: 'このブラウザではパスワードを確かめられません',
             SERVER: 'サーバーでエラーが起きました。少し待ってから、もう一度やってみてください'
         };
@@ -194,12 +208,52 @@ const Account = {
             // 速い順（同じタイムなら先に出した記録が上）
             list.sort((a, c) => a.time - c.time || (a.date < c.date ? -1 : 1));
             b.records[ev.boss] = list.slice(0, (window.BattleRecords && BattleRecords.MAX_RECORDS) || 10);
+        } else if (ev.t === 'merge') {
+            // この端末のデータを足す（引っ越し）
+            const m = this.mergeData(d, ev.data, true);
+            d.profile = m.profile;
+            d.loadout = m.loadout;
+            d.battle = m.battle;
         } else {
             return false;
         }
         d.applied.push(ev.id);
         if (d.applied.length > this.APPLIED_MAX) d.applied.splice(0, d.applied.length - this.APPLIED_MAX);
         return true;
+    },
+
+    // base に add を足したデータ（どちらも変えない）
+    //   コイン・クリアの回数は足す。マイベストは合わせて速い順に MAX_RECORDS 件。プレイヤー名・装備は base になければ add の物
+    //   capCoins：足すコインを「足したクリアの回数 × MOVE_COIN_CAP」までにする（オンラインのアカウントに足す時。サーバーの決まり）
+    mergeData(base, add, capCoins = false) {
+        const d = this.normalize(base);
+        const a = this.normalize(add);
+        if (!d.profile && a.profile) d.profile = a.profile;
+        if (!d.loadout.magic.some(Boolean) && a.loadout.magic.some(Boolean)) d.loadout = a.loadout;
+        const b = d.battle;
+        const num = (n) => (Number.isFinite(n) && n > 0 ? Math.floor(n) : 0);
+        let added = 0;
+        for (const [id, n] of Object.entries(a.battle.clears)) {
+            const k = num(n);
+            if (!k) continue;
+            b.clears[id] = num(b.clears[id]) + k;
+            added += k;
+        }
+        const coins = capCoins ? Math.min(num(a.battle.coins), added * this.MOVE_COIN_CAP) : num(a.battle.coins);
+        b.coins = num(b.coins) + coins;
+        const max = (window.BattleRecords && BattleRecords.MAX_RECORDS) || 10;
+        for (const [id, list] of Object.entries(a.battle.records)) {
+            const seen = new Set();
+            const all = (b.records[id] || []).concat(list).filter(r => {
+                const k = r.date + '|' + r.time;
+                if (seen.has(k)) return false;
+                seen.add(k);
+                return true;
+            });
+            all.sort((x, y) => x.time - y.time || (x.date < y.date ? -1 : 1));
+            b.records[id] = all.slice(0, max);
+        }
+        return d;
     },
 
     // ---------- 起動 ----------
@@ -209,12 +263,40 @@ const Account = {
             this._readyPromise = this._resume()
                 .catch((e) => console.warn('自動ログインできませんでした:', e))
                 .then(() => { this.ready = true; this._emit(); });
-            window.addEventListener('online', () => this.flushSoon(300));
-            document.addEventListener('visibilitychange', () => { if (!document.hidden) this.flushSoon(300); });
+            // つながった・ページに戻ってきた：送れていない分を送り、ほかの端末で遊んだ分を読み直す
+            window.addEventListener('online', () => { this.flushSoon(300); this.refresh(); });
+            window.addEventListener('focus', () => this.refresh());
+            document.addEventListener('visibilitychange', () => { if (!document.hidden) { this.flushSoon(300); this.refresh(); } });
         }
         return this._readyPromise;
     },
     whenReady() { return this.init(); },
+
+    // サーバーの最新のデータを読み直す（ほかの端末で遊んだ分を、この端末にも出す）
+    //   送っていないできごとがある時・送っている最中は読み直さない（送る時に読み直すので）
+    async refresh() {
+        if (!this.ready || !this.user || this.user.mode !== 'cloud' || !this.token) return;
+        if (this._flushing || this.pending.length) return;
+        const now = Date.now();
+        if (now - this._lastRefresh < this.REFRESH_GAP_MS) return;
+        this._lastRefresh = now;
+        const token = this.token, gen = this._saveGen;
+        let r;
+        try {
+            r = await this.rpc('hk_load', { p_token: token });
+        } catch (e) {
+            if (this.token !== token) return;
+            if (e.code === 'SESSION') this._dropLogin();
+            else this.online = false;
+            this._emit();
+            return;
+        }
+        // 読んでいる間に、ログアウトした・ほかのアカウントにした・この端末から保存した時は使わない
+        if (this.token !== token || this._saveGen !== gen || this._flushing) return;
+        this.online = true;
+        this._acceptServer(r);
+        this._emit();
+    },
 
     async _resume() {
         const s = this._readJSON(this.SESSION_KEY);
@@ -243,6 +325,11 @@ const Account = {
             }
             return;
         }
+        // オンラインにする前に、この端末だけのアカウントで自動ログインしていた：引っ越しの候補として覚えておく
+        // （この端末で遊んでいた人なので、パスワードを忘れていても、アカウントを作ると引きつげる）
+        if (s.mode === 'local' && this.mode === 'cloud' && this._localUser(s.key)) {
+            this._writeJSON(this.MOVE_KEY, { key: s.key, at: new Date().toISOString() });
+        }
         // 保存先が変わった（オンラインの設定を足した・消した）：もう一度ログインしてもらう
         this._clearSession();
     },
@@ -254,13 +341,21 @@ const Account = {
         if (bad) throw new AccountError(bad);
         const key = username.toLowerCase();
         const carry = this._carryOver();
-        const initial = this.normalize({ ...this.blankData(), ...(carry || {}) });
+        let initial = this.normalize({ ...this.blankData(), ...(carry || {}) });
+        let moved = null;
         if (this.mode === 'cloud') {
+            // この端末だけのアカウントのデータがあれば、それを入れて作る（引っ越し）
+            const src = await this._moveSource(key, password);
+            if (src) {
+                moved = this._localInfo(src);
+                initial = this.mergeData(initial, this._localData(src));
+            }
             const r = await this.rpc('hk_register', { p_username: username, p_password: password, p_data: initial });
             this.online = true;
             this._startSession({ username: r.username || username, key, mode: 'cloud' }, r.token);
             this.pending = [];
             this._acceptServer(r);
+            if (src) this._markMoved(src, this.user.username);
         } else {
             const users = this._users();
             if (users[key]) throw new AccountError('USERNAME_TAKEN');
@@ -275,20 +370,49 @@ const Account = {
         if (carry) this._markCarried();
         this._rememberUser(username);
         this._emit();
+        return { moved };
     },
 
+    // 戻り値：{ moved }（この端末のアカウントのデータを入れた時は { username, coins, clears }、なければ null）
     async login(username, password) {
         username = String(username || '').trim();
         if (!username) throw new AccountError('EMPTY_USERNAME');
         if (!password) throw new AccountError('EMPTY_PASSWORD');
         const key = username.toLowerCase();
+        let moved = null;
         if (this.mode === 'cloud') {
-            const r = await this.rpc('hk_login', { p_username: username, p_password: password });
+            // 同じユーザー名の、この端末だけのアカウントがある時は、そのパスワードかどうかを先に確かめる
+            const local = this._localUser(key);
+            const localOk = local ? await this._localPasswordOk(local, password) : false;
+            if (localOk) this.moveFrom = key;
+            let r;
+            try {
+                r = await this.rpc('hk_login', { p_username: username, p_password: password });
+            } catch (e) {
+                if (e.code !== 'BAD_LOGIN' || !localOk) throw e;
+                // オンラインにまだないユーザー名：この端末のアカウントを、同じユーザー名・パスワードでオンラインに作る
+                try {
+                    return await this.register(local.username || username, password);
+                } catch (e2) {
+                    // オンラインでは、ほかの人（か、ちがうパスワード）が使っているユーザー名
+                    if (e2.code === 'USERNAME_TAKEN') throw new AccountError('MOVE_TAKEN');
+                    throw e2;
+                }
+            }
             this.online = true;
             this._startSession({ username: r.username || username, key, mode: 'cloud' }, r.token);
             // 前にこの端末で送れなかったできごとがあれば、続きを送る
             this.pending = this._readJSON(this._pendingKey()) || [];
             this._acceptServer(r);
+            // 同じユーザー名の、この端末のアカウントのデータを足す（パスワードを確かめた時か、この端末で自動ログインしていた時）
+            const cand = this.moveCandidate;
+            if (local && (localOk || this.moveFrom === key || (cand && cand.key === key))) moved = this._importLocal(key);
+            // アカウントを作る前のバトルの記録（この端末で、まだどのアカウントにも入れていない物）
+            const carry = this._carryOver();
+            if (carry) {
+                this.update({ t: 'merge', data: carry });
+                this._markCarried();
+            }
             if (this.pending.length) await this.flush().catch(() => {});
         } else {
             const u = this._users()[key];
@@ -300,6 +424,88 @@ const Account = {
         }
         this._rememberUser(this.user.username);
         this._emit();
+        return { moved };
+    },
+
+    // ---------- この端末だけのアカウントの引っ越し ----------
+    // まだ引っ越していない、この端末だけのアカウント（なければ null）
+    _localUser(key) {
+        const u = key ? this._users()[key] : null;
+        return u && typeof u === 'object' && u.hash && !u.moved ? u : null;
+    },
+    _localData(key) { return this.normalize(this._readJSON(this.SAVE_PREFIX + 'local.' + key)); },
+    // 画面に出す、この端末のアカウントのようす（まだ引っ越していない物だけ。なければ null）
+    _localInfo(key) {
+        const u = this._localUser(key);
+        if (!u) return null;
+        const d = this._localData(key);
+        const clears = Object.values(d.battle.clears).reduce((s, n) => s + (Number.isFinite(n) && n > 0 ? n : 0), 0);
+        const hasData = !!(d.profile || d.battle.coins > 0 || clears > 0 || Object.keys(d.battle.records).length || d.loadout.magic.some(Boolean));
+        return { key, username: u.username || key, name: d.profile ? d.profile.name : '', coins: d.battle.coins, clears, hasData };
+    },
+    // まだ引っ越していない、この端末だけのアカウント（データがある物）
+    localAccounts() {
+        if (this.mode !== 'cloud') return [];
+        return Object.keys(this._users()).map(k => this._localInfo(k)).filter(x => x && x.hasData);
+    },
+    // オンラインにする前に、この端末で自動ログインしていたアカウント（パスワードを入れなくても引っ越せる）
+    get moveCandidate() {
+        if (this.mode !== 'cloud') return null;
+        const m = this._readJSON(this.MOVE_KEY);
+        return m && m.key ? this._localInfo(m.key) : null;
+    },
+    // ログインしている今のアカウントに入れられる、この端末のデータ（パスワードを確かめた物か、自動ログインしていた物）
+    importable() {
+        if (!this.loggedIn || this.user.mode !== 'cloud') return null;
+        const info = (this.moveFrom && this._localInfo(this.moveFrom)) || this.moveCandidate;
+        return info && info.hasData ? info : null;
+    },
+    // ログインしている今のアカウントに、この端末のデータを入れる（アカウントの画面のボタン）
+    async importLocal() {
+        const info = this.importable();
+        if (!info) return null;
+        const moved = this._importLocal(info.key);
+        // 送れなくても、この端末に残しておき、次につながった時に送る
+        await this.flush().catch(() => {});
+        this._emit();
+        return moved;
+    },
+    // アカウントを作る時に引きつぐ、この端末のアカウントの key（なければ null）
+    //   1. 同じユーザー名・同じパスワード / 2. このページでパスワードを確かめた物 / 3. 自動ログインしていた物
+    async _moveSource(key, password) {
+        const local = this._localUser(key);
+        if (local && await this._localPasswordOk(local, password)) return key;
+        if (this.moveFrom && this._localUser(this.moveFrom)) return this.moveFrom;
+        const cand = this.moveCandidate;
+        return cand ? cand.key : null;
+    },
+    async _localPasswordOk(u, password) {
+        try {
+            return (await this._hash(password, u.salt, u.iter || this.PBKDF2_ITER, u.hash)) === u.hash;
+        } catch (e) {
+            return false;
+        }
+    },
+    // ログインしている今のアカウントに、この端末のアカウント（key）のデータを足す（できごと 'merge' にして送る）
+    _importLocal(key) {
+        const info = this._localInfo(key);
+        if (!info || !this.data) return null;
+        this.update({ t: 'merge', data: this._localData(key) });
+        this._markMoved(key, this.user.username);
+        return info;
+    },
+    // 引っ越した印（この端末のデータは消さない）
+    _markMoved(key, to) {
+        const users = this._users();
+        if (users[key]) {
+            users[key].moved = { to, at: new Date().toISOString() };
+            this._writeJSON(this.USERS_KEY, users);
+        }
+        const m = this._readJSON(this.MOVE_KEY);
+        if (m && m.key === key) {
+            try { localStorage.removeItem(this.MOVE_KEY); } catch (e) { /* 保存できない端末 */ }
+        }
+        if (this.moveFrom === key) this.moveFrom = null;
     },
 
     async logout() {
@@ -307,6 +513,7 @@ const Account = {
             try { await this.flush(); } catch (e) { /* 送れなかった分はこの端末に残る（次にログインした時に送る） */ }
             try { await this.rpc('hk_logout', { p_token: this.token }); } catch (e) { /* つながらなくてもログアウトはする */ }
         }
+        this.moveFrom = null;
         this._dropLogin();
         this._emit();
     },
@@ -353,6 +560,7 @@ const Account = {
                 for (const ev of sending) this.applyEvent(latest, ev);
                 try {
                     await this.rpc('hk_save', { p_token: this.token, p_data: latest, p_version: Number.isFinite(r.version) ? r.version : null });
+                    this._saveGen++;
                     break;
                 } catch (e) {
                     if (e.code !== 'CONFLICT' || tryNo >= this.SAVE_TRIES) throw e;
