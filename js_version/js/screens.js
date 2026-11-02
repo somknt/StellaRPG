@@ -1233,11 +1233,16 @@ class ScreenManager {
         const b = p.kind === 'coop' ? getBossData(p.boss) : null;
         const set = (id, s) => { const el = this.$(id); if (el && el.textContent !== s) el.textContent = s; };
         set('mpp-title', p.kind === 'pvp' ? 'PvP 準備' : '協力プレイ 準備');
-        set('mpp-sub', b ? `VS ${b.name}　─　${b.fieldName}　（推奨 Lv.${b.playerLevel || 1}）` : '1対1の対戦（対戦のルールとステージは今後実装予定）');
+        const PB = window.PvpBattle;
+        const fields = PB ? PB.FIELDS : { arena: { name: '星の闘技場' } };
+        const field = fields[p.field] ? p.field : 'arena';
+        set('mpp-sub', b ? `VS ${b.name}　─　${b.fieldName}　（推奨 Lv.${b.playerLevel || 1}）`
+            : `1対1の対戦　─　${fields[field].name}　（2人とも Lv.${PB ? PB.LEVEL : 10}・制限時間 ${PB ? PB.TIME_LIMIT / 60 : 3}分）`);
         root.classList.toggle('pvp', p.kind === 'pvp');
+        this.refreshMpFields(p, fields, field);
         const slots = this.$('mpp-slots');
         const n = p.kind === 'pvp' ? 2 : 4;
-        const lv = b && b.playerLevel ? b.playerLevel : 1;
+        const lv = b && b.playerLevel ? b.playerLevel : p.kind === 'pvp' && PB ? PB.LEVEL : 1;
         const magic = this.equipMagicList();
         const key = JSON.stringify(p.members.map(m => [m.pid, m.ready, m.loadout, m.leader, m.name, m.gender]));
         if (first || key !== this._mppKey) {
@@ -1287,13 +1292,56 @@ class ScreenManager {
         const hint = this.$('mpp-hint');
         if (hint) {
             hint.textContent = p.leader_is_me
-                ? (all ? (p.kind === 'pvp' ? '2人とも準備完了！（PvP の対戦は今後実装予定です）' : '全員が準備完了！「バトル開始」で出発します') : '全員の準備完了を待っています。装備を変えると準備完了は解除されます')
-                : (all ? 'リーダーが出発するのを待っています' : '装備を整えて「準備完了」を押してください（装備を変えると解除されます）');
+                ? (all ? (p.kind === 'pvp' ? '2人とも準備完了！「対戦開始」で始まります' : '全員が準備完了！「バトル開始」で出発します')
+                    : (p.kind === 'pvp' ? 'フィールドを選んでください。2人とも準備完了になると対戦開始できます' : '全員の準備完了を待っています。装備を変えると準備完了は解除されます'))
+                : (all ? (p.kind === 'pvp' ? 'リーダーが対戦を始めるのを待っています' : 'リーダーが出発するのを待っています')
+                    : (p.kind === 'pvp' ? 'フィールドはリーダーが選びます。装備を整えて「準備完了」を押してください' : '装備を整えて「準備完了」を押してください（装備を変えると解除されます）'));
         }
         if (navChanged && this.current === 'mp_prep') {
             const keep = this.nav && this.nav.current;
             this.nav = new UINav(this.$('scr-mpprep'), 'grid');
             const i = keep ? this.nav.items.indexOf(keep) : -1;
+            if (i >= 0) this.nav.setIndex(i);
+        }
+    }
+    
+    // PvP の準備画面：フィールドを選ぶボタン（リーダーだけ押せる。ほかの人は、選ばれた物が光るだけ）
+    refreshMpFields(p, fields, field) {
+        const box = this.$('mpp-fields');
+        if (!box) return;
+        box.hidden = p.kind !== 'pvp';
+        if (p.kind !== 'pvp') return;
+        const key = `${field}|${p.leader_is_me ? 1 : 0}`;
+        if (box.dataset.key === key) return;
+        const firstBuild = !box.dataset.key;
+        box.dataset.key = key;
+        const keep = this.nav && this.nav.current && box.contains(this.nav.current) ? this.nav.current.dataset.field : null;
+        box.innerHTML = '';
+        const lab = document.createElement('span');
+        lab.className = 'mpp-flabel';
+        lab.textContent = 'フィールド';
+        box.appendChild(lab);
+        for (const [id, f] of Object.entries(fields)) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'ui-btn mpp-field' + (id === field ? ' on' : '') + (p.leader_is_me ? '' : ' locked');
+            b.dataset.field = id;
+            b.dataset.f = id;
+            if (p.leader_is_me) b.dataset.nav = '';
+            b.textContent = f.name;
+            b.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (this.busy) return;
+                pressEffect(b);
+                const t = this.game.tavern;
+                if (t) t.setField(id);
+            });
+            box.appendChild(b);
+        }
+        if (!firstBuild && this.current === 'mp_prep') {
+            this.nav = new UINav(this.$('scr-mpprep'), 'grid');
+            const el = keep ? box.querySelector(`[data-field="${keep}"]`) : null;
+            const i = el ? this.nav.items.indexOf(el) : -1;
             if (i >= 0) this.nav.setIndex(i);
         }
     }

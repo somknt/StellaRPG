@@ -600,6 +600,8 @@ create table if not exists hk_private.hk_parties (
 );
 -- 最後に終わった戦い（戦いの後、パーティーの人が結果と報酬を見られるように）
 alter table hk_private.hk_parties add column if not exists last_battle uuid;
+-- PvP のフィールド（'arena'：星の闘技場 / 'ruins'：古代星紋遺跡 / 'battlefield'：歴戦の跡地。準備画面でリーダーが選ぶ）
+alter table hk_private.hk_parties add column if not exists field text not null default 'arena';
 create table if not exists hk_private.hk_party_members (
     party_id   uuid not null references hk_private.hk_parties(id) on delete cascade,
     account_id uuid not null references hk_private.hk_accounts(id) on delete cascade,
@@ -624,6 +626,8 @@ create table if not exists hk_private.hk_battles (
     result      text,
     reward      integer
 );
+-- PvP の勝った人（戦いが終わった時に書く。報酬はない）
+alter table hk_private.hk_battles add column if not exists winner_id uuid;
 create table if not exists hk_private.hk_boss_rewards (
     boss_id     text primary key,
     coins       integer not null,
@@ -769,10 +773,11 @@ begin
             select * into b from hk_private.hk_battles where id = p.last_battle;
             if found then
                 v_last := jsonb_build_object('id', b.id, 'boss', b.boss_id, 'result', b.result, 'reward', coalesce(b.reward, 0),
-                    'secs', extract(epoch from coalesce(b.finished_at, now()) - b.started_at));
+                    'secs', extract(epoch from coalesce(b.finished_at, now()) - b.started_at),
+                    'winner', case when b.winner_id is null then null else hk_private.mp_pid(b.winner_id) end);
             end if;
         end if;
-        v_party := jsonb_build_object('id', p.id, 'kind', p.kind, 'boss', p.boss_id, 'room', p.room, 'closed', p.closed,
+        v_party := jsonb_build_object('id', p.id, 'kind', p.kind, 'boss', p.boss_id, 'field', p.field, 'room', p.room, 'closed', p.closed,
             'status', p.status, 'leader_is_me', p.leader_id = p_me, 'leader', hk_private.mp_pid(p.leader_id),
             'cap', hk_private.mp_cap(p.kind), 'count', n, 'entered', e, 'all_entered', e = n,
             'members', v_members, 'battle', v_battle, 'last', v_last);
@@ -1036,8 +1041,45 @@ begin
     return hk_private.mp_view(v_me, true);
 end $$;
 
+-- PvP の準備画面：リーダーだけがフィールドを選ぶ。変えたら、2人とも準備完了をやり直す（知らない所で戦わないように）
+create or replace function public.hk_mp_field(p_token text, p_field text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+    v_me uuid := hk_private.session_account(p_token);
+    p hk_private.hk_parties;
+begin
+    if v_me is null then
+        return jsonb_build_object('ok', false, 'error', 'SESSION');
+    end if;
+    if hk_private.over_limit('mp_account', v_me::text) then
+        return jsonb_build_object('ok', false, 'error', 'RATE_LIMIT');
+    end if;
+    if p_field is null or p_field not in ('arena', 'ruins', 'battlefield') then
+        return jsonb_build_object('ok', false, 'error', 'BAD_FIELD');
+    end if;
+    select * into p from hk_private.hk_parties
+    where id = (select party_id from hk_private.hk_party_members where account_id = v_me) for update;
+    if not found then
+        return jsonb_build_object('ok', false, 'error', 'NO_PARTY');
+    end if;
+    if p.kind <> 'pvp' then
+        return jsonb_build_object('ok', false, 'error', 'BAD_FIELD');
+    end if;
+    if p.leader_id <> v_me then
+        return jsonb_build_object('ok', false, 'error', 'NOT_LEADER');
+    end if;
+    if p.status = 'battle' then
+        return jsonb_build_object('ok', false, 'error', 'BUSY');
+    end if;
+    if p.field is distinct from p_field then
+        update hk_private.hk_parties set field = p_field, updated_at = now() where id = p.id;
+        update hk_private.hk_party_members set ready = false where party_id = p.id;
+    end if;
+    return hk_private.mp_view(v_me, true);
+end $$;
+
 -- リーダーだけ：バトル開始（全員が準備完了の時だけ）。参加者とボスの HP の倍率（2人 1.5・3人 2.0・4人 2.5）をここで決める
--- 戦いを動かす人（ホスト）はリーダー。PvP の戦いはまだないので PVP_SOON を返す
+-- 戦いを動かす人（ホスト）はリーダー。PvP は2人そろった時だけ、選んだフィールドで（ボスの代わりに 'pvp:フィールド'）
 create or replace function public.hk_mp_start(p_token text)
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
@@ -1071,13 +1113,13 @@ begin
     if n < 2 then
         return jsonb_build_object('ok', false, 'error', 'NEED_TWO');
     end if;
-    if p.kind = 'pvp' then
-        return jsonb_build_object('ok', false, 'error', 'PVP_SOON');
+    if p.kind = 'pvp' and n <> 2 then
+        return jsonb_build_object('ok', false, 'error', 'NEED_TWO');
     end if;
     insert into hk_private.hk_battles(party_id, boss_id, host_id, members, hp_mult)
-    values (p.id, p.boss_id, v_me,
+    values (p.id, case when p.kind = 'pvp' then 'pvp:' || coalesce(p.field, 'arena') else p.boss_id end, v_me,
             (select array_agg(m.account_id order by m.joined_at) from hk_private.hk_party_members m where m.party_id = p.id),
-            case n when 2 then 1.5 when 3 then 2.0 when 4 then 2.5 else 1 end)
+            case when p.kind = 'pvp' then 1 when n = 2 then 1.5 when n = 3 then 2.0 when n = 4 then 2.5 else 1 end)
     returning id into v_b;
     update hk_private.hk_parties set status = 'battle', battle_id = v_b, updated_at = now() where id = p.id;
     update hk_private.hk_party_members set seen_at = now() where party_id = p.id;
@@ -1113,7 +1155,22 @@ begin
         return jsonb_build_object('ok', false, 'error', 'NOT_MEMBER');
     end if;
     if b.result is not null then
-        return hk_private.mp_view(v_me, false) || jsonb_build_object('reward', coalesce(b.reward, 0), 'result', b.result);
+        return hk_private.mp_view(v_me, false) || jsonb_build_object('reward', coalesce(b.reward, 0), 'result', b.result,
+            'winner', case when b.winner_id is null then null else hk_private.mp_pid(b.winner_id) end);
+    end if;
+    -- PvP：先に知らせた方の結果を使う（p_win = true：自分の勝ち / false：自分の負け / null：引き分け）。報酬はない
+    if b.boss_id like 'pvp:%' then
+        update hk_private.hk_battles
+        set finished_at = now(), result = 'pvp', reward = 0,
+            winner_id = case when p_win is null then null when p_win then v_me
+                             else (select x from unnest(b.members) x where x <> v_me limit 1) end
+        where id = b.id
+        returning * into b;
+        update hk_private.hk_parties set status = 'open', battle_id = null, last_battle = b.id, updated_at = now()
+        where id = b.party_id and battle_id = b.id;
+        update hk_private.hk_party_members set entered = false, ready = false where party_id = b.party_id;
+        return hk_private.mp_view(v_me, false) || jsonb_build_object('reward', 0, 'result', 'pvp',
+            'winner', case when b.winner_id is null then null else hk_private.mp_pid(b.winner_id) end);
     end if;
     if coalesce(p_win, false) and v_me <> b.host_id then
         return jsonb_build_object('ok', false, 'error', 'NOT_HOST');
@@ -1177,6 +1234,7 @@ revoke all on function public.hk_mp_kick(text, text) from public, anon, authenti
 revoke all on function public.hk_mp_close(text, boolean) from public, anon, authenticated;
 revoke all on function public.hk_mp_enter(text, boolean) from public, anon, authenticated;
 revoke all on function public.hk_mp_ready(text, boolean, jsonb) from public, anon, authenticated;
+revoke all on function public.hk_mp_field(text, text) from public, anon, authenticated;
 revoke all on function public.hk_mp_start(text) from public, anon, authenticated;
 revoke all on function public.hk_mp_finish(text, uuid, boolean) from public, anon, authenticated;
 grant execute on function public.hk_mp_state(text, boolean) to anon, authenticated;
@@ -1187,6 +1245,7 @@ grant execute on function public.hk_mp_kick(text, text) to anon, authenticated;
 grant execute on function public.hk_mp_close(text, boolean) to anon, authenticated;
 grant execute on function public.hk_mp_enter(text, boolean) to anon, authenticated;
 grant execute on function public.hk_mp_ready(text, boolean, jsonb) to anon, authenticated;
+grant execute on function public.hk_mp_field(text, text) to anon, authenticated;
 grant execute on function public.hk_mp_start(text) to anon, authenticated;
 grant execute on function public.hk_mp_finish(text, uuid, boolean) to anon, authenticated;
 

@@ -119,6 +119,19 @@
                 </div>
             </div>
             
+            <!-- PvP：上のまん中に、自分と相手の HP・残り時間（pvp_battle.js） -->
+            <div id="pvp-hud">
+                <div class="pvh-side me">
+                    <span class="pvh-name" id="pvh-me-name"></span>
+                    <div class="pvh-track"><div class="pvh-fill" id="pvh-me-fill"></div><span class="pvh-hp" id="pvh-me-hp"></span></div>
+                </div>
+                <div class="pvh-mid"><b id="pvh-timer">3:00</b><small id="pvh-field"></small></div>
+                <div class="pvh-side op">
+                    <span class="pvh-name" id="pvh-op-name"></span>
+                    <div class="pvh-track"><div class="pvh-fill" id="pvh-op-fill"></div><span class="pvh-hp" id="pvh-op-hp"></span></div>
+                </div>
+            </div>
+            
             <!-- カウントダウン（3・2・1・GO!） -->
             <div id="battle-countdown"></div>
             
@@ -150,6 +163,17 @@
                     <button class="ui-btn" id="br-monster" type="button" data-nav>モンスター選択に戻る</button>
                     <button class="ui-btn" id="br-menu" type="button" data-nav>メインメニューに戻る</button>
                     <p class="battle-hint">↑↓ で選んで Enter</p>
+                </div>
+            </div>
+            
+            <!-- PvP の結果 -->
+            <div id="pvp-result" class="battle-screen">
+                <div class="battle-panel">
+                    <h2 id="pvr-title">WIN!</h2>
+                    <div id="pvr-sub"></div>
+                    <div id="pvr-stats"></div>
+                    <button class="ui-btn primary" id="pvr-back" type="button" data-nav>酒場に戻る</button>
+                    <p class="battle-hint">Enter で酒場に戻る</p>
                 </div>
             </div>
             
@@ -489,6 +513,8 @@
             <div class="screen" id="scr-mpprep">
                 <h2 class="screen-title" id="mpp-title">協力プレイ 準備</h2>
                 <p id="mpp-sub"></p>
+                <!-- PvP：戦うフィールド（リーダーが選ぶ） -->
+                <div id="mpp-fields" hidden></div>
                 <div id="mpp-slots"></div>
                 <p id="mpp-hint"></p>
                 <div class="screen-buttons mpp-buttons">
@@ -511,7 +537,7 @@
                 <span id="tv-room">星の酒場</span>
                 <span id="tv-online" class="off">○ つないでいます…</span>
             </div>
-            <p id="tv-help" class="pc-only">WASD：移動　E / Enter：調べる　Esc：酒場を出る</p>
+            <p id="tv-help" class="pc-only">WASD：移動　Shift：走る/歩く　E / Enter：調べる　T：チャット　Esc：酒場を出る</p>
             <!-- 右上：酒場を出る -->
             <button class="ui-btn tv-btn" id="tv-exit" type="button">酒場を出る</button>
             
@@ -528,6 +554,20 @@
             
             <!-- マスター・掲示板・扉の近く：調べるボタン -->
             <button class="ui-btn" id="tv-act" type="button" hidden>話す</button>
+            
+            <!-- 右下：チャット・走る（押すたびに 走る ⇔ 歩く） -->
+            <div id="tv-tools">
+                <button class="ui-btn tv-tool" id="tv-chat-btn" type="button" aria-label="チャット"><i>💬</i><b>チャット</b><small class="pc-only">T</small></button>
+                <button class="ui-btn tv-tool" id="tv-run" type="button" aria-pressed="true" aria-label="走る・歩くの切りかえ"><i>👟</i><b>走る</b><small class="pc-only">Shift</small></button>
+            </div>
+            
+            <!-- チャット（同じルームの人に見える。最大 60 文字） -->
+            <div id="tv-chatlog" hidden></div>
+            <form id="tvm-form" autocomplete="off" hidden>
+                <input id="tvm-input" type="text" maxlength="60" enterkeyhint="send" spellcheck="false" placeholder="メッセージ（60文字まで）" aria-label="チャットのメッセージ">
+                <button class="ui-btn tv-btn primary" id="tvm-send" type="submit">送る</button>
+                <button class="ui-btn tv-btn back" id="tvm-close" type="button" aria-label="閉じる">✕</button>
+            </form>
             
             <!-- マスターとの会話 -->
             <div class="tv-panel tv-modal" id="tv-dialog" hidden>
@@ -654,6 +694,7 @@
     <script src="js/boss_battle.js"></script>
     <script src="js/tavern.js"></script>
     <script src="js/mp_battle.js"></script>
+    <script src="js/pvp_battle.js"></script>
     <script src="js/title_atlas.js"></script>
     <script src="js/screens.js"></script>
     <script src="js/ui.js"></script>

@@ -590,9 +590,15 @@ const Account = {
     },
 
     // ---------- サーバー（Supabase の関数を呼ぶ） ----------
+    // Supabase の Project URL（https://〜.supabase.co）。online_config.js に「API URL」（〜/rest/v1/）を書いた時も、同じ形にそろえる
+    baseUrl() {
+        const c = window.ONLINE_CONFIG || {};
+        return String(c.url || '').trim().replace(/\/+$/, '').replace(/\/rest\/v1$/i, '').replace(/\/+$/, '');
+    },
+    
     async rpc(fn, args) {
         const c = window.ONLINE_CONFIG || {};
-        const url = String(c.url).replace(/\/+$/, '') + '/rest/v1/rpc/' + fn;
+        const url = this.baseUrl() + '/rest/v1/rpc/' + fn;
         const headers = { 'Content-Type': 'application/json', apikey: c.key };
         // 古い形の鍵（anon key は JWT）の時だけ Authorization も付ける（新しい publishable key は apikey だけ）
         if (/^eyJ/.test(c.key)) headers.Authorization = 'Bearer ' + c.key;

@@ -2618,6 +2618,98 @@ body.touch #tv-wait { transform: translateX(-50%) scale(min(var(--hud-scale, 1),
     100% { opacity: 0; transform: translate(-50%, 0); }
 }
 
+/* 右下：チャット・走る */
+#tv-tools {
+    position: absolute;
+    right: 18px;
+    bottom: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transform: scale(var(--hud-scale, 1));
+    transform-origin: bottom right;
+}
+.tv-tool {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 132px;
+    padding: 8px 12px;
+    font-family: inherit;
+    font-size: 17px;
+    color: #fff3d6;
+    background: rgba(26, 16, 34, 0.86);
+    border: 2px solid rgba(201, 162, 74, 0.85);
+    border-radius: 24px;
+    cursor: pointer;
+}
+.tv-tool i { font-style: normal; font-size: 18px; }
+.tv-tool b { font-weight: normal; flex: 1; text-align: left; letter-spacing: 1px; }
+.tv-tool small { font-size: 11px; color: #c8b98a; border: 1px solid rgba(200, 185, 138, 0.6); border-radius: 4px; padding: 0 4px; }
+.tv-tool:hover { background: rgba(60, 38, 22, 0.92); }
+.tv-tool.on { color: #1a0d02; background: linear-gradient(180deg, #ffe9a0, #d9a93e); border-color: #fff3c4; }
+.tv-tool.on small { color: #5a3408; border-color: rgba(90, 52, 8, 0.6); }
+/* 扉の中・パネルを開いている間は出さない */
+body:not([data-tvview="walk"]) #tv-tools { display: none; }
+/* スマホ：調べるボタンは、チャット・走るの左 */
+body.touch #tv-act { right: 190px; bottom: 30px; }
+body.touch .tv-tool { min-width: 120px; padding: 10px 14px; font-size: 19px; }
+
+/* チャットの一覧（左下。閉じている時は新しい物だけ少しの間） */
+#tv-chatlog {
+    position: absolute;
+    left: 18px;
+    bottom: 76px;
+    width: 460px;
+    max-height: 200px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 10px;
+    font-size: 15px;
+    line-height: 1.45;
+    background: rgba(8, 6, 20, 0.45);
+    border-radius: 6px;
+    pointer-events: none;
+}
+#tv-chatlog.open { max-height: 300px; overflow-y: auto; background: rgba(8, 6, 20, 0.8); border: 1px solid rgba(201, 162, 74, 0.6); pointer-events: auto; }
+.tvm-line { color: #fff6e0; text-shadow: 0 1px 2px #000; overflow-wrap: anywhere; }
+.tvm-line b { font-weight: normal; color: #9fd8ff; margin-right: 6px; }
+.tvm-line b::after { content: '：'; }
+.tvm-line.me b { color: #ffe08a; }
+body[data-tvview="dialog"] #tv-chatlog, body[data-tvview="board"] #tv-chatlog, body[data-tvview="leave"] #tv-chatlog { display: none; }
+#tvm-form {
+    position: absolute;
+    left: 18px;
+    bottom: 18px;
+    width: 560px;
+    display: flex;
+    gap: 6px;
+    pointer-events: auto;
+}
+#tvm-input {
+    flex: 1;
+    min-width: 0;
+    padding: 9px 12px;
+    font-family: inherit;
+    font-size: 17px;
+    color: #fff6e0;
+    background: rgba(10, 8, 26, 0.94);
+    border: 2px solid #c9a24a;
+    border-radius: 8px;
+    outline: none;
+}
+#tvm-input:focus { border-color: #ffe08a; box-shadow: 0 0 0 2px rgba(255, 224, 138, 0.35); }
+#tvm-form .tv-btn { padding: 8px 14px; }
+/* チャットを打っている間：スマホのスティックを出さない（入力欄をさわれるように）。画面の上の方に出す（キーボードで隠れないように） */
+body.touch[data-tvchat="1"] #touch-controls { display: none !important; }
+body.touch #tvm-form { left: 50%; bottom: auto; top: 96px; transform: translateX(-50%); width: 760px; }
+body.touch #tvm-input { font-size: 24px; }
+body.touch #tvm-form .tv-btn { font-size: 20px; padding: 10px 18px; }
+body.touch #tv-chatlog { left: 50%; transform: translateX(-50%); bottom: auto; top: 150px; width: 760px; font-size: 18px; }
+body.touch:not([data-tvchat="1"]) #tv-chatlog { top: auto; bottom: 150px; left: 18px; transform: none; width: 520px; }
+
 /* モンスター選択をクエスト受注に使う時は、マイベストを出さない */
 #scr-monster.mp #monster-ranking { display: none; }
 
@@ -2683,7 +2775,81 @@ body.touch #tv-wait { transform: translateX(-50%) scale(min(var(--hud-scale, 1),
     border-radius: 50%;
 }
 #mpp-hint { min-height: 22px; font-size: 16px; color: #e8e2ff; }
+/* PvP：フィールドを選ぶ */
+#mpp-fields { display: flex; align-items: center; gap: 10px; }
+#mpp-fields[hidden] { display: none; }
+.mpp-flabel { font-size: 16px; color: #ffd76a; letter-spacing: 2px; margin-right: 4px; }
+.mpp-field {
+    min-width: 150px;
+    padding: 8px 14px;
+    font-family: inherit;
+    font-size: 17px;
+    color: #e8e2ff;
+    background: rgba(16, 18, 50, 0.9);
+    border: 2px solid rgba(201, 162, 74, 0.55);
+    border-radius: 8px;
+    cursor: pointer;
+}
+.mpp-field.focused, .mpp-field:not(.locked):hover { border-color: #ffe08a; color: #fff7d0; }
+.mpp-field.on { color: #2a0a12; background: linear-gradient(180deg, #ffc6d2, #e0607a); border-color: #ffe0e8; }
+.mpp-field.locked { cursor: default; }
+.mpp-field.locked:not(.on) { opacity: 0.55; }
+#scr-mpprep.pvp .mpp-card { min-height: 340px; }
 .mpp-buttons { gap: 12px; margin-top: 4px; }
 .mpp-buttons .menu-item { width: 190px; font-size: 20px; letter-spacing: 2px; }
 .mpp-buttons .menu-item[hidden] { display: none; }
 #mpp-ready.on { color: #0f2a14; background: linear-gradient(180deg, #a8ffbf, #3fb866); border-color: #d8ffe2; }
+
+/* ==========================================================
+   PvP（pvp_battle.js）：上のまん中に2人の HP と残り時間・結果の画面
+   ========================================================== */
+#pvp-hud { display: none; }
+body[data-battle="pvp"][data-state="playing"] #pvp-hud.show { display: flex; }
+body[data-battle="pvp"][data-state="playing"] #battle-countdown { display: block; }
+#pvp-hud {
+    position: absolute;
+    top: 14px;
+    left: calc(50% + 60px);     /* 左上のふつうの HP の表示と重ならないように、少し右へ */
+    width: 560px;
+    transform: translateX(-50%) scale(var(--hud-scale, 1));
+    transform-origin: top center;
+    align-items: center;
+    gap: 14px;
+    font-family: 'DotGothic16', sans-serif;
+    color: #fff3dc;
+}
+body.touch #pvp-hud { left: calc(50% + 120px); width: 620px; }
+.pvh-side { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.pvh-side.op { align-items: flex-end; }
+.pvh-name { font-size: 17px; letter-spacing: 1px; text-shadow: 0 2px 2px #000; }
+.pvh-side.me .pvh-name { color: #ffe9a0; }
+.pvh-side.op .pvh-name { color: #ffb3c0; }
+.pvh-track {
+    position: relative;
+    width: 100%;
+    height: 18px;
+    background: rgba(10, 6, 20, 0.85);
+    border: 2px solid #c9a24a;
+    border-radius: 4px;
+    overflow: hidden;
+}
+.pvh-fill { position: absolute; top: 0; bottom: 0; left: 0; width: 100%; background: linear-gradient(180deg, #8cf5a6, #2fae5a); transition: width 0.15s; }
+.pvh-side.op .pvh-fill { left: auto; right: 0; background: linear-gradient(180deg, #ff9fb0, #d23a58); }
+.pvh-hp { position: absolute; inset: 0; font-size: 12px; line-height: 14px; text-align: center; color: #fff; text-shadow: 0 1px 2px #000; }
+.pvh-mid { display: flex; flex-direction: column; align-items: center; min-width: 96px; }
+#pvh-timer {
+    font-size: 30px;
+    font-weight: normal;
+    letter-spacing: 2px;
+    padding: 2px 14px;
+    background: rgba(10, 6, 20, 0.85);
+    border: 2px solid #c9a24a;
+    border-radius: 8px;
+}
+#pvh-timer.low { color: #ff8a8a; animation: hp-low-pulse 1s ease-in-out infinite; }
+#pvh-field { font-size: 12px; color: #d8cfae; margin-top: 2px; text-shadow: 0 1px 2px #000; }
+#pvr-sub { font-size: 22px; color: #fff4d0; margin-bottom: 8px; font-family: 'DotGothic16', sans-serif; }
+#pvp-result:not(.win) #pvr-title { color: #c3cbe0; text-shadow: 0 2px 0 #1a2030, 0 4px 8px #000; }
+#pvr-stats { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 10px; font-size: 16px; }
+#pvr-stats div { display: flex; justify-content: space-between; gap: 30px; padding: 4px 6px; border-bottom: 1px solid rgba(201, 162, 74, 0.25); }
+#pvr-stats b { color: #fff; }

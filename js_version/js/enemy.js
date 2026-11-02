@@ -1283,7 +1283,7 @@ class EnemySpawner {
     // 主人公が壁で押し出せない時は、残りの分だけ敵を押し返す
     resolveBodyCollisions(player, prevPos) {
         for (const e of this.enemies) {
-            if (!e.isAlive() || e.dying) continue;
+            if (!e.isAlive() || e.dying || e.noBody) continue;   // noBody：PvP の相手（すり抜けられる）
             if (e.ai && e.ai.airborne) continue; // 宙に浮いている間（狼の飛びかかり）は、上を飛び越える
             for (let k = 0; k < 2; k++) { // 主人公 → 敵 の順に押し出す
                 const b = e.bodyShape();
@@ -1447,7 +1447,7 @@ class EnemySpawner {
         // 主人公には当たった後の無敵時間がないので、1つの攻撃が当たるのは1回だけにする
         // （ボスの攻撃は当たり判定ごとに1回・突進は1回の突進で1回・体当たりは敵ごとに Enemy.CONTACT.cooldown 秒に1回）
         for (const enemy of this.enemies) {
-            if (!enemy.isAlive()) continue;
+            if (!enemy.isAlive() || enemy.noBody) continue;   // PvP の相手の攻撃は、相手の画面で決めて届く
             const hpBefore = player.currentHP;
             
             // ボス：AI が出した当たり判定（牙・突進・踏みつけ・噛みつき・侵蝕波動など）

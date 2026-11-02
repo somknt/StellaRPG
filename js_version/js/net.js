@@ -21,7 +21,7 @@ const Net = {
     getClient() {
         if (this.client) return this.client;
         const c = window.ONLINE_CONFIG || {};
-        this.client = window.supabase.createClient(String(c.url).replace(/\/+$/, ''), c.key, {
+        this.client = window.supabase.createClient(Account.baseUrl(), c.key, {
             auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
             realtime: { params: { eventsPerSecond: 30 } }
         });

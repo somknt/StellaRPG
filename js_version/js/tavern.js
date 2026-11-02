@@ -38,7 +38,9 @@ class TavernScene {
             act: $('tv-act'), dialog: $('tv-dialog'), dText: $('tvd-text'), dChoices: $('tvd-choices'),
             board: $('tv-board'), bList: $('tvb-list'), bClose: $('tvb-close'),
             wait: $('tv-wait'), wTitle: $('tvw-title'), wText: $('tvw-text'), wClose: $('tvw-close'), wCancel: $('tvw-cancel'),
-            confirm: $('tv-confirm'), cYes: $('tvc-yes'), cNo: $('tvc-no'), toast: $('tv-toast')
+            confirm: $('tv-confirm'), cYes: $('tvc-yes'), cNo: $('tvc-no'), toast: $('tv-toast'),
+            run: $('tv-run'), chatBtn: $('tv-chat-btn'), chatLog: $('tv-chatlog'), chatForm: $('tvm-form'), chatInput: $('tvm-input'),
+            chatSend: $('tvm-send'), chatClose: $('tvm-close')
         };
     }
     
@@ -54,6 +56,117 @@ class TavernScene {
         on(u.wClose, () => this.setClosed(true));
         on(u.partyClose, () => { const p = this.party; if (p) this.setClosed(!p.closed); });
         on(u.partyLeave, (el) => this.confirmLeaveParty(el));
+        // 走る（押すたびに 走る ⇔ 歩く。PC は Shift を押している間も走る）
+        on(u.run, () => this.setRunning(!this.running));
+        // チャット
+        on(u.chatBtn, () => this.openChat(!this.chatOpen));
+        on(u.chatClose, () => this.openChat(false));
+        if (u.chatForm) u.chatForm.addEventListener('submit', (e) => { e.preventDefault(); this.sendChat(); });
+        if (u.chatInput) u.chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { e.preventDefault(); this.openChat(false); }
+            e.stopPropagation();
+        });
+    }
+    
+    // ---------- 走る ----------
+    setRunning(v) {
+        this.running = !!v;
+        try { localStorage.setItem('hoshinoko.tavern.run', this.running ? '1' : '0'); } catch (e) { /* 保存できない端末 */ }
+        const b = this.ui.run;
+        if (b) {
+            b.classList.toggle('on', this.running);
+            b.setAttribute('aria-pressed', this.running ? 'true' : 'false');
+            b.querySelector('b').textContent = this.running ? '走る' : '歩く';
+        }
+    }
+    
+    // ---------- チャット（同じルームの人みんなに見える。Realtime の 'chat'。データベースには残さない） ----------
+    openChat(v) {
+        const u = this.ui;
+        this.chatOpen = !!v && this.inScene;
+        if (u.chatForm) u.chatForm.hidden = !this.chatOpen;
+        if (u.chatBtn) u.chatBtn.classList.toggle('on', this.chatOpen);
+        document.body.dataset.tvchat = this.chatOpen ? '1' : '';
+        if (this.chatOpen) {
+            if (u.chatInput) setTimeout(() => u.chatInput.focus(), 0);
+        } else if (u.chatInput) {
+            u.chatInput.blur();
+        }
+        this.renderChat();
+        if (this.game.input) this.game.input.resetAll();
+    }
+    
+    // 送れる文字にする：前後の空白・改行・制御文字を消して、TavernScene.CHAT_MAX 文字まで
+    static cleanChat(s) {
+        const t = String(s || '').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim();
+        return Array.from(t).slice(0, TavernScene.CHAT_MAX).join('');
+    }
+    
+    sendChat() {
+        const u = this.ui;
+        const text = TavernScene.cleanChat(u.chatInput && u.chatInput.value);
+        if (!text) { this.openChat(false); return; }
+        const now = performance.now();
+        if (now - (this._chatAt || 0) < TavernScene.CHAT_GAP_MS) { this.toast('少し待ってから送ってください'); return; }
+        if (!this.lobby || !this.lobby.joined) { this.toast('つながっていないので送れません'); return; }
+        this._chatAt = now;
+        this.lobby.send('chat', { s: this.session, n: Account.playerName, t: text });
+        this.addChat(Account.playerName, text, true);
+        this.myBubble = { text, until: now + TavernScene.BUBBLE_MS };
+        u.chatInput.value = '';
+        playSE('ui_select');
+        // スマホ：1回送ったら閉じる（キーボードで画面が隠れたままにならないように）。PC は続けて打てる
+        if (document.body.classList.contains('touch')) this.openChat(false);
+    }
+    
+    onChat(m) {
+        if (!m || m.s === this.session) return;
+        const text = TavernScene.cleanChat(m.t);
+        if (!text) return;
+        // 1人が短い間にたくさん送ってきた分は出さない（5秒に5回まで）
+        const now = performance.now();
+        const w = (this._chatIn = this._chatIn || new Map()).get(m.s) || [];
+        const recent = w.filter(t => now - t < 5000);
+        if (recent.length >= 5) return;
+        recent.push(now);
+        this._chatIn.set(m.s, recent);
+        const r = this.remotes.get(m.s);
+        const name = String((r && r.name) || m.n || '？').slice(0, 12);
+        if (r) r.bubble = { text, until: now + TavernScene.BUBBLE_MS };
+        this.addChat(name, text, false);
+        if (!this.chatOpen) playSE('ui_cursor');
+    }
+    
+    addChat(name, text, me) {
+        this.chatLines = this.chatLines || [];
+        this.chatLines.push({ name, text, me, at: performance.now() });
+        if (this.chatLines.length > TavernScene.CHAT_KEEP) this.chatLines.shift();
+        this.renderChat();
+    }
+    
+    // チャットの一覧：開いている時は全部、閉じている時は新しい物だけ少しの間
+    renderChat() {
+        const el = this.ui.chatLog;
+        if (!el) return;
+        const now = performance.now();
+        const list = (this.chatLines || []).filter(l => this.chatOpen || now - l.at < TavernScene.CHAT_SHOW_MS).slice(this.chatOpen ? -TavernScene.CHAT_KEEP : -5);
+        const key = list.map(l => l.at).join(',') + (this.chatOpen ? 'o' : '');
+        if (key === this._chatKey) return;
+        this._chatKey = key;
+        el.innerHTML = '';
+        for (const l of list) {
+            const row = document.createElement('div');
+            row.className = 'tvm-line' + (l.me ? ' me' : '');
+            const b = document.createElement('b');
+            b.textContent = l.name;
+            const s = document.createElement('span');
+            s.textContent = l.text;
+            row.append(b, s);
+            el.appendChild(row);
+        }
+        el.classList.toggle('open', this.chatOpen);
+        el.hidden = !list.length;
+        el.scrollTop = el.scrollHeight;
     }
     
     get party() { return this.state && this.state.party; }
@@ -75,11 +188,16 @@ class TavernScene {
         this.player.baseSpeed = TavernScene.WALK_SPEED;
         this.camera = new Camera(0, 0, game.canvas.width, game.canvas.height);
         this.camera.follow(this.player);
-        this.camera.setBounds(this.map.width * this.map.tileSize, TavernScene.CAMERA_BOTTOM);
+        this.camera.setBounds(TV_W, TV_H);
         this.camera.snapToTarget();
         this.remotes.clear();
         this.state = null;
         this.pollT = 0;
+        this.chatLines = [];
+        this.myBubble = null;
+        let run = true;
+        try { run = localStorage.getItem('hoshinoko.tavern.run') !== '0'; } catch (e) { /* 保存できない端末 */ }
+        this.setRunning(run);
         this.fx = [{ kind: 'spawn', x: sp.x, y: sp.y, t: 0, life: 1.4 }];
         playSE('battle_start');
         this.showScene();
@@ -104,6 +222,7 @@ class TavernScene {
     }
     
     hideScene() {
+        if (this.chatOpen) this.openChat(false);
         this.inScene = false;
         this.ui.root.classList.remove('show');
         this.nav = null;
@@ -124,6 +243,7 @@ class TavernScene {
         this.state = null;
         document.body.dataset.mode = '';
         if (this.game.coop) { this.game.coop.stop(); this.game.coop = null; }
+        if (this.game.pvp) { this.game.pvp.stop(); this.game.pvp = null; }
         this.game.screens.mp = null;
         this.game.screens.equipReturn = null;
         this.game.screens.setScreen(to);
@@ -137,6 +257,7 @@ class TavernScene {
             p: (m) => this.onRemoteState(m),
             hi: (m) => { if (m.s !== this.session) this.sendState(true); },
             nudge: (m) => { if (this.party && m.p === this.party.id) this.pollSoon(); },
+            chat: (m) => this.onChat(m),
             presence: (list) => this.onPresence(list),
             status: (s) => {
                 if (s === 'SUBSCRIBED') { this.lobby.send('hi', { s: this.session }); this.sendState(true); }
@@ -183,9 +304,9 @@ class TavernScene {
         const p = this.player;
         const mk = this.markCode();
         const st = { s: this.session, x: Math.round(p.position.x), y: Math.round(p.position.y), d: p.direction[0], m: p.isMoving ? 1 : 0,
-            t: Math.round(performance.now()), n: Account.playerName, g: Account.gender, k: mk };
+            r: p.isDashing ? 1 : 0, t: Math.round(performance.now()), n: Account.playerName, g: Account.gender, k: mk };
         const L = this.lastSent;
-        const changed = !L || L.x !== st.x || L.y !== st.y || L.d !== st.d || L.m !== st.m || JSON.stringify(L.k) !== JSON.stringify(mk);
+        const changed = !L || L.x !== st.x || L.y !== st.y || L.d !== st.d || L.m !== st.m || L.r !== st.r || JSON.stringify(L.k) !== JSON.stringify(mk);
         const now = performance.now();
         const gap = now - (this.sentAt || 0);
         if (!force && !(changed && gap >= TavernScene.SEND_MS) && gap < TavernScene.IDLE_MS) return;
@@ -221,7 +342,7 @@ class TavernScene {
         if (r.p.gender !== m.g && (m.g === 'male' || m.g === 'female')) r.p.gender = m.g;
         // 送った人の時計と、こちらの時計の差（いちばん小さい物＝遅れのいちばん少ない時）
         r.off = Math.min(r.off, now - m.t);
-        r.buf.push({ t: m.t, x: m.x, y: m.y, d: m.d, m: m.m });
+        r.buf.push({ t: m.t, x: m.x, y: m.y, d: m.d, m: m.m, r: m.r ? 1 : 0 });
         if (r.buf.length > 20) r.buf.shift();
     }
     
@@ -246,9 +367,15 @@ class TavernScene {
             p.position = new Vector2(x, y);
             p.direction = dirs[cur.d] || 'down';
             p.isMoving = !!cur.m || moved > 0.5;
+            // 走っている：ダッシュの絵（4コマ）
+            p.isDashing = p.isMoving && !!(cur.r || c.r);
+            if (p.isDashing) {
+                p.dashFrameTimer += dt;
+                if (p.dashFrameTimer >= p.dashFrameSpeed) { p.dashFrameTimer = 0; p.dashFrame = (p.dashFrame + 1) % p.actionFrameCount; }
+            } else { p.dashFrame = 0; p.dashFrameTimer = 0; }
             if (p.isMoving) {
                 p.animationTimer += dt;
-                if (p.animationTimer >= p.animationSpeed) { p.animationTimer = 0; p.animationFrame = (p.animationFrame + 1) % 3; }
+                if (p.animationTimer >= p.animationSpeed * (p.isDashing ? 0.55 : 1)) { p.animationTimer = 0; p.animationFrame = (p.animationFrame + 1) % 3; }
             } else p.animationFrame = 1;
         }
     }
@@ -278,7 +405,7 @@ class TavernScene {
     pollSoon() { this.pollT = Math.max(this.pollT, this.pollInterval() - 0.25); }
     
     pollInterval() {
-        if (this.game.coop) return 5;
+        if (this.game.coop || this.game.pvp || this._pvpStarting) return 5;
         if (this.game.screens.current === 'mp_prep') return 1;
         return 2;
     }
@@ -314,7 +441,8 @@ class TavernScene {
         if (p && p.room && p.room !== this.room && this.inScene) this.switchRoom(p.room);
         const screens = this.game.screens;
         // 全員が扉に入った：準備画面へ
-        if (p && p.status === 'prep' && !this.game.coop && screens.current !== 'mp_prep' && screens.current !== 'equip' && !screens.busy) {
+        const fighting = !!(this.game.coop || this.game.pvp || this._pvpStarting);
+        if (p && p.status === 'prep' && !fighting && screens.current !== 'mp_prep' && screens.current !== 'equip' && !screens.busy) {
             this.openPrep();
         }
         // 準備画面のまま、だれかが戻った：酒場へ
@@ -324,8 +452,9 @@ class TavernScene {
             screens.transition(() => { this.showScene(); this.toast(msg); });
         }
         // リーダーがバトル開始：みんなで戦いへ
-        if (p && p.status === 'battle' && p.battle && !this.game.coop && p.battle.members.includes(r.pid) && !screens.busy) {
-            this.startCoop(p);
+        if (p && p.status === 'battle' && p.battle && !fighting && p.battle.members.includes(r.pid) && !screens.busy) {
+            if (p.kind === 'pvp') this.startPvp(p);
+            else this.startCoop(p);
         }
         if (screens.current === 'mp_prep') screens.refreshMpPrep();
         this.refreshUI();
@@ -511,8 +640,32 @@ class TavernScene {
     async startBattle() {
         const p = this.party;
         if (!p || !p.leader_is_me) return;
-        if (p.kind === 'pvp') { playSE('ui_error'); this.toast('PvP の対戦は今後実装予定です（募集・入場・準備までできます）', 4); return; }
         await this.act('hk_mp_start');
+    }
+    
+    // PvP の準備画面：リーダーがフィールドを選ぶ（変えると2人とも準備完了をやり直す）
+    async setField(field) {
+        const p = this.party;
+        if (!p || p.kind !== 'pvp') return;
+        if (!p.leader_is_me) { playSE('ui_error'); this.toast('フィールドはリーダーが選びます'); return; }
+        if (p.field === field) return;
+        const r = await this.act('hk_mp_field', { p_field: field });
+        if (r) playSE('ui_select');
+    }
+    
+    // PvP の戦いへ（pvp_battle.js）
+    startPvp(party) {
+        const game = this.game;
+        if (game.pvp || this._pvpStarting) return;
+        const screens = game.screens;
+        game.loadout = Account.normalizeLoadout(Account.loadout);
+        game.playerName = Account.playerName;
+        this.hideScene();
+        this.leaveLobby();
+        const pvp = new PvpBattle(game, this, party, this.pid);
+        this._pvpStarting = true;
+        screens.equipReturn = null;
+        screens.transition(() => { this._pvpStarting = false; screens.hideAll(); pvp.begin(); });
     }
     
     // 準備画面の「戻る」：扉から出て、酒場へ戻る（パーティーのみんなも酒場へ）
@@ -539,6 +692,7 @@ class TavernScene {
     returnFromBattle() {
         const game = this.game;
         if (game.coop) { game.coop.stop(); game.coop = null; }
+        if (game.pvp) { game.pvp.stop(); game.pvp = null; }
         this.player.position = this.map.findFreeSpot(this.doorFor(this.party || { kind: 'coop' }).interact.clone(), this.player.getFootBox(), 160);
         this.player.direction = 'down';
         this.camera.follow(this.player);
@@ -567,8 +721,12 @@ class TavernScene {
         if (this.masterMix !== null && this.masterMix !== undefined) this.masterMix += dt;
         const busy = this.game.screens.busy;
         // 扉に入って待っている間・パネルを開いている間は歩けない
-        const frozen = this.view !== 'walk' || (this.me && this.me.entered);
+        const frozen = this.view !== 'walk' || (this.me && this.me.entered) || this.chatOpen;
         const zero = new Vector2(0, 0);
+        // 走る：ボタンで切りかえ。PC は Shift を押している間、反対にする（歩く ⇔ 走る）
+        const shift = input.isSprintPressed && input.isSprintPressed();
+        this.player.setMoveMode((this.running !== !!shift) ? 'run' : 'walk');
+        if (this.chatOpen || this._chatT === undefined || (this._chatT += dt) > 0.5) { this._chatT = 0; this.renderChat(); }
         this.player.update(dt, {
             getMovementVector: () => (frozen || busy ? zero : input.getMovementVector()),
             isDodgePressed: () => false, isKeyPressed: () => false, consumeMagicSelection: () => null
@@ -580,6 +738,8 @@ class TavernScene {
         if (busy) return;
         const esc = input.isKeyPressed('Escape') || input.isKeyPressed('Backspace');
         const ok = input.isKeyPressed('KeyE') || input.isKeyPressed('Enter') || input.isKeyPressed('Space');
+        if (this.chatOpen) return;   // 文字を打っている間（入力欄のキーはゲームに届かない）
+        if (input.isKeyPressed('KeyT') && this.view === 'walk') { this.openChat(true); return; }
         if (this.view === 'walk') {
             if (esc) { playSE('ui_cancel'); this.openView('leave'); return; }
             if (ok && this.focus) { this.interact(); return; }
@@ -799,13 +959,16 @@ class TavernScene {
         const cam = this.camera.position;
         this.map.draw(ctx, cam);
         this.drawDoors(ctx, cam);
-        this.drawMaster(ctx, cam);
         this.drawFx(ctx, cam, true);
-        // 人：足元が奥の人から
-        const people = [{ p: this.player, name: Account.playerName, mark: this.markCode(), me: true }];
-        for (const r of this.remotes.values()) people.push({ p: r.p, name: r.name, mark: r.mark });
-        people.sort((a, b) => a.p.position.y - b.p.position.y);
-        for (const x of people) x.p.draw(ctx, cam);
+        // 人と床の置き物（カウンター・テーブル・樽など）を、足元が奥の物から描く。マスターはカウンターの後ろ
+        const people = [{ p: this.player, name: Account.playerName, mark: this.markCode(), me: true, chat: this.myBubble }];
+        for (const [s, r] of this.remotes) people.push({ p: r.p, name: r.name, mark: r.mark, chat: r.bubble, session: s });
+        const items = this.map.getDepthItems();
+        const M = this.map.layers.master;
+        items.push({ sortY: M.y - 1, draw: (c, cm) => this.drawMaster(c, cm) });
+        for (const x of people) items.push({ sortY: x.p.position.y + x.p.drawSize * 0.36, draw: (c, cm) => x.p.draw(c, cm) });
+        items.sort((a, b) => a.sortY - b.sortY);
+        for (const it of items) it.draw(ctx, cam);
         for (const x of people) this.drawTag(ctx, cam, x);
         this.drawFx(ctx, cam, false);
         this.drawFocus(ctx, cam);
@@ -880,7 +1043,7 @@ class TavernScene {
                 ctx.restore();
                 // 入った人数（自分のパーティーの物だけ）。扉の前に立つとアーチの上は画面の外なので、画面の上の端より下に出す
                 const all = p.all_entered && p.count >= 2;
-                const py = Math.max(TavernScene.PLATE_MIN_Y, d.top - cam.y - 34);
+                const py = Math.max(TavernScene.PLATE_MIN_Y, d.doorTop + 34 - cam.y);
                 this.drawPlate(ctx, x, py, `${p.entered}/${p.cap}`, all ? '全員入場済み' : '', d.color);
             }
         }
@@ -925,7 +1088,40 @@ class TavernScene {
         ctx.fillStyle = x.me ? '#ffe9a0' : '#ffffff';
         ctx.fillText(x.name || '', sx, sy);
         ctx.restore();
+        const hasMark = !!this.markView(x.mark);
         this.drawMark(ctx, sx, sy - 44, x.mark);   // 名前の文字に重ならない高さ（六芒星の半径 22）
+        // チャットの吹き出し（頭の上。印がある人は、印の上）
+        const b = x.chat;
+        if (b && performance.now() < b.until) this.drawBubble(ctx, sx, sy - (hasMark ? 74 : 26), b.text, (b.until - performance.now()) / 400);
+    }
+    
+    drawBubble(ctx, x, y, text, fade) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, Math.min(1, fade));
+        ctx.font = '15px "DotGothic16", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        // 長い文は2行まで（1行 TavernScene.BUBBLE_LINE 文字）
+        const chars = Array.from(text), L = TavernScene.BUBBLE_LINE;
+        const lines = chars.length > L ? [chars.slice(0, L).join(''), chars.slice(L, L * 2).join('') + (chars.length > L * 2 ? '…' : '')] : [text];
+        const w = Math.max(...lines.map(l => ctx.measureText(l).width)) + 20, h = lines.length * 19 + 10;
+        const top = y - h - 8;
+        ctx.fillStyle = 'rgba(255, 251, 238, 0.96)';
+        ctx.strokeStyle = '#6a4a20';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x - w / 2, top, w, h, 8); else ctx.rect(x - w / 2, top, w, h);
+        ctx.fill(); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x - 7, top + h - 1); ctx.lineTo(x, top + h + 8); ctx.lineTo(x + 7, top + h - 1);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(x - 7, top + h); ctx.lineTo(x, top + h + 8); ctx.lineTo(x + 7, top + h);
+        ctx.stroke();
+        ctx.fillStyle = '#2a1a0a';
+        lines.forEach((l, i) => ctx.fillText(l, x, top + 5 + 9.5 + i * 19));
+        ctx.restore();
     }
     
     // 頭の上の印
@@ -1008,9 +1204,8 @@ class TavernScene {
         const f = this.focus;
         if (!f || this.view !== 'walk') return;
         let x, y;
-        if (f.kind === 'master') { x = f.ref.x; y = f.ref.y - 170; }
-        else if (f.kind === 'board') { x = f.ref.x; y = f.ref.y - 150; }
-        else { x = f.ref.x; y = f.ref.doorTop - 40; }
+        if (f.kind === 'master' || f.kind === 'board') { x = f.ref.x; y = f.ref.markY; }
+        else { x = f.ref.x; y = f.ref.doorTop + 6; }
         const bob = Math.sin(this.time * 5) * 4;
         const sy = Math.max(TavernScene.PLATE_MIN_Y + 40, y - cam.y) + bob;   // 扉の前では画面の上の端より下に
         ctx.save();
@@ -1087,8 +1282,10 @@ class TavernScene {
             NOT_LEADER: 'リーダーだけができます',
             BUSY: '今はできません',
             NOT_READY: '全員が準備完了になるまで待ってください',
-            NEED_TWO: '協力プレイは2人以上で出発できます',
-            PVP_SOON: 'PvP の対戦は今後実装予定です',
+            NEED_TWO: '2人以上そろうと出発できます（PvP は2人）',
+            // 前の版の SQL のサーバーだけが返す
+            PVP_SOON: 'サーバーが PvP の対戦に対応していません（online/supabase_setup.sql をもう一度 Run してください）',
+            BAD_FIELD: 'そのフィールドは選べません',
             NOT_PREP: '準備画面ではありません',
             NO_PARTY: 'パーティーに入っていません',
             BAD_BOSS: 'このボスはまだ選べません',
@@ -1098,14 +1295,19 @@ class TavernScene {
     }
 }
 
-TavernScene.WALK_SPEED = 230;      // 酒場を歩く速さ（px/秒）
-TavernScene.MASTER_SCALE = 0.5333; // マスターの絵の大きさ（全体図に合わせた）
+TavernScene.WALK_SPEED = 165;      // 酒場を歩く速さ（px/秒）。走る時は Player.sprintMultiplier 倍
+TavernScene.MASTER_SCALE = 0.36;   // マスターの絵の大きさ（顔の幅を主人公にそろえた。高さ 約 96px）
 TavernScene.ROOM_CAP = 16;         // 1つのルームの人数（パーティーの人数とは別）
 TavernScene.SEND_MS = 250;         // 動いている間、位置を送る間隔
 TavernScene.IDLE_MS = 2500;        // 止まっている間も、この間隔で送る（あとから来た人にも見えるように）
 TavernScene.INTERP_MS = 300;       // ほかの人は、この時間だけ前の位置をなめらかに出す
-TavernScene.CAMERA_BOTTOM = 1800;  // カメラが下へ行ける所（階段の下の暗い所は映さない）
 TavernScene.PLATE_MIN_Y = 54;      // 扉の上の人数の札：画面の上からこの px より下に出す
+TavernScene.CHAT_MAX = 60;         // チャットの1回の文字数
+TavernScene.CHAT_GAP_MS = 1200;    // 続けて送れる間隔
+TavernScene.CHAT_KEEP = 30;        // 覚えておく数（開いた時に見える）
+TavernScene.CHAT_SHOW_MS = 12000;  // 閉じている時、新しい物を出しておく時間
+TavernScene.BUBBLE_MS = 6000;      // 頭の上の吹き出しを出す時間
+TavernScene.BUBBLE_LINE = 15;      // 吹き出しの1行の文字数
 TavernScene.DOOR_SPOTS = [[0, 0], [-58, 26], [58, 26], [0, 58]];  // 扉の前で待つ所（パーティーに入った順のずれ）
 
 window.TavernScene = TavernScene;

@@ -101,6 +101,8 @@ class Game {
         on('pause-retry', () => this.restartBattle());
         on('pause-select', () => this.leaveBattle(this.activeBattle === this.bossBattle ? 'monster_select' : 'equip'));
         on('pause-menu', () => this.leaveBattle('main_menu'));
+        // PvP の結果：酒場に戻る（同じパーティーのまま）
+        on('pvr-back', () => { if (this.pvp && !this.screens.busy) this.leaveBattle('tavern'); });
     }
     
     // 画面を揺らす（設定で OFF にできる）
@@ -229,12 +231,27 @@ class Game {
         this.gameState = 'playing';
     }
     
+    // ---------- PvP（pvp_battle.js の PvpBattle）：選んだフィールドで、2人の主人公が戦う ----------
+    startPvpBattle(pvp) {
+        const gender = Account.gender;
+        document.body.dataset.hero = gender;
+        this.stopBattles();
+        this.pvp = pvp;
+        this.setupArena(gender, pvp.field);
+        this.enemySpawner.clear();
+        this.activeBattle = pvp;
+        pvp.attach();
+        document.body.dataset.mode = 'arena';
+        this.gameState = 'playing';
+    }
+    
     // 前のバトルの表示・状態を片付ける
     stopBattles() {
         this.justDodgeTimer = 0;
         Enemy.slowMotion = false;
         if (this.battleMode) this.battleMode.stop();
         if (this.bossBattle) this.bossBattle.stop();
+        if (this.pvp) { this.pvp.stop(); this.pvp = null; }
         this.activeBattle = null;
         this.paused = false;
         if (window.soundManager) soundManager.setDuck(false);
@@ -324,7 +341,7 @@ class Game {
     
     // 一時停止（force：true=止める / false=再開 / 省略=切り替え）
     togglePause(force) {
-        if (this.coop) return; // 協力プレイ：オンラインなので止められない
+        if (this.coop || this.pvp) return; // 協力プレイ・PvP：オンラインなので止められない
         const b = this.activeBattle;
         if (!this.isArena() || !b || b.isOver || b.isFrozen) return;
         const was = this.paused;
@@ -359,13 +376,14 @@ class Game {
     // 協力プレイ：'tavern'（星の酒場へ戻る）/ それ以外の画面へ行く時は、酒場とパーティーからも出る
     leaveBattle(target = 'main_menu') {
         this.screens.transition(() => {
+            const online = !!(this.coop || this.pvp);   // 協力プレイ・PvP の後は星の酒場へ
             this.stopBattles();
             this.enemySpawner.clear();
             this.magicSystem.clear();
             this.damageNumbers.clear();
             document.body.dataset.mode = '';
             document.body.dataset.waves = '';
-            if (this.coop && this.tavern) {
+            if (online && this.tavern) {
                 if (target === 'tavern') this.tavern.returnFromBattle();
                 else this.tavern.exitNow(target);
                 return;
@@ -614,6 +632,7 @@ class Game {
                 this.enemySpawner.enemies, cast.circleShape, cast.circleRadius, this.castAim && this.castAim.target);
             // 協力プレイ：ほかの人の画面にも、見た目だけの魔法を出す
             if (coop) coop.onLocalCast(cast, this.castAim && this.castAim.target);
+            else if (this.pvp && battle === this.pvp) this.pvp.onLocalCast(cast, this.castAim && this.castAim.target);
             // 発動の音（雷は落ちた瞬間に magic.js で鳴らす）
             if (cast.magic.shape !== 'strike') playSE(`magic_${getElementInfo(cast.magic.element).key}`);
             this.input.clearTouchAim('magic');

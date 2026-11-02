@@ -47,6 +47,65 @@ public class Tavern {
         for (int j = 0; j < h; j++) Array.Copy(tmp, j * w * 4, im.D, ((dy + j) * im.W + dx) * 4, w * 4);
     }
 
+    // 大きさを変える（なめらかに縮める。色は乗算済みアルファで計算して、ふちが黒くならないように）
+    public static Img Resize(Img im, int w, int h) {
+        var src = new System.Drawing.Bitmap(im.W, im.H, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        var r0 = new System.Drawing.Rectangle(0, 0, im.W, im.H);
+        var bd = src.LockBits(r0, System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        System.Runtime.InteropServices.Marshal.Copy(im.D, 0, bd.Scan0, im.D.Length); src.UnlockBits(bd);
+        var dst = new System.Drawing.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+        using (var g = System.Drawing.Graphics.FromImage(dst)) {
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+            g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+            using (var ia = new System.Drawing.Imaging.ImageAttributes()) {
+                ia.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
+                g.DrawImage(src, new System.Drawing.Rectangle(0, 0, w, h), 0, 0, im.W, im.H, System.Drawing.GraphicsUnit.Pixel, ia);
+            }
+        }
+        src.Dispose();
+        var o = new Img(); o.W = w; o.H = h; o.D = new byte[w * h * 4];
+        var b2 = new System.Drawing.Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = System.Drawing.Graphics.FromImage(b2)) { g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy; g.DrawImage(dst, 0, 0, w, h); }
+        dst.Dispose();
+        var bd2 = b2.LockBits(new System.Drawing.Rectangle(0, 0, w, h), System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        System.Runtime.InteropServices.Marshal.Copy(bd2.Scan0, o.D, 0, o.D.Length); b2.UnlockBits(bd2); b2.Dispose();
+        return o;
+    }
+    
+    // いちばん大きい、つながった不透明の固まりだけ残す（四角で切った時に、となりの部品のはしが入らないように）
+    public static void KeepMain(Img im, int thr) {
+        int W = im.W, H = im.H;
+        var lab = new int[W * H];
+        int best = 0, bestN = 0, cur = 0;
+        var st = new Stack<int>();
+        for (int s = 0; s < W * H; s++) {
+            if (lab[s] != 0 || im.D[s * 4 + 3] < thr) continue;
+            cur++; int n = 0; st.Push(s); lab[s] = cur;
+            while (st.Count > 0) {
+                int i = st.Pop(); n++;
+                int x = i % W, y = i / W;
+                for (int dy = -2; dy <= 2; dy++) for (int dx = -2; dx <= 2; dx++) {
+                    int nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+                    int k = ny * W + nx; if (lab[k] == 0 && im.D[k * 4 + 3] >= thr) { lab[k] = cur; st.Push(k); }
+                }
+            }
+            if (n > bestN) { bestN = n; best = cur; }
+        }
+        // 固まりのまわり（うすいふち）は残す：固まりから2画素以内
+        var keep = new bool[W * H];
+        for (int i = 0; i < W * H; i++) if (lab[i] == best) keep[i] = true;
+        var keep2 = (bool[])keep.Clone();
+        for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+            if (!keep[y * W + x]) continue;
+            for (int dy = -2; dy <= 2; dy++) for (int dx = -2; dx <= 2; dx++) {
+                int nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+                keep2[ny * W + nx] = true;
+            }
+        }
+        for (int i = 0; i < W * H; i++) if (!keep2[i]) im.D[i * 4 + 3] = 0;
+    }
+
     // 2枚目の上に1枚目を、拡大率 k で (x, y) に重ねた確認用の絵（最近傍）
     public static void Paste(Img dst, Img src, int x, int y, double k) {
         int w = (int)(src.W * k), h = (int)(src.H * k);

@@ -294,10 +294,18 @@ AssetManager.BATTLEFIELD_ART_READY = [
 ];
 // 星の酒場の素材（art_source/tavern/tools/cut.ps1 で、星灯りのマルチプレイヤー酒場・星降る酒場のタイルセット・熟練バーテンダーから切り出した物）
 // tv_master_1〜8：待機（4 = ウインク・8 = 目を閉じる）/ 9〜16：カクテルを作る
+// tp_*：マップの部品（art_source/tavern/tools/parts.ps1 で、星降る酒場のタイルセットから主人公に合う大きさで切り出した物）
 AssetManager.TAVERN_ART_READY = [
-    'tv_overview.jpg',
     ...Array.from({ length: 16 }, (_, i) => `tv_master_${i + 1}`),
-    'tv_plate', 'tv_spark_gold', 'tv_spark_blue', 'tv_spark_pink', 'tv_ring', 'tv_glow_purple', 'tv_beam_gold'
+    'tv_plate', 'tv_spark_gold', 'tv_spark_blue', 'tv_spark_pink', 'tv_ring', 'tv_glow_purple', 'tv_beam_gold',
+    'tp_floor_a', 'tp_floor_b', 'tp_floor_c', 'tp_floor_d', 'tp_floor_lit', 'tp_floor_glow', 'tp_carpet', 'tp_carpet_b', 'tp_carpet_c',
+    'tp_circle', 'tp_rug', 'tp_star', 'tp_wall_a', 'tp_wall_win', 'tp_wall_b', 'tp_wall_banner', 'tp_wall_c',
+    'tp_sign', 'tp_curtain', 'tp_shelf_a', 'tp_shelf_b', 'tp_door_coop', 'tp_door_pvp', 'tp_door_lock', 'tp_counter', 'tp_board',
+    'tp_fireplace', 'tp_sofa', 'tp_armchair', 'tp_lowtable', 'tp_table', 'tp_stool', 'tp_stool_b', 'tp_orrery',
+    'tp_barrels', 'tp_barrel_pile', 'tp_barrel', 'tp_barrel_b', 'tp_crates', 'tp_crate', 'tp_books', 'tp_bookstack',
+    'tp_plant_a', 'tp_plant_b', 'tp_plant_c', 'tp_plant_d', 'tp_plant_box', 'tp_plant_hang',
+    'tp_lamp_post', 'tp_lamp', 'tp_lantern', 'tp_torch', 'tp_crystal_blue', 'tp_crystal_b', 'tp_crystal_pink',
+    'tp_rail_c', 'tp_stairs', 'tp_flag_a', 'tp_flag_b', 'tp_flag_c'
 ];
 AssetManager.BEAST_SPRITES_READY = ['giant_forest_boar', 'black_corrupted_wolf', 'magic_golem', 'grudge_armor'];  // 例: ['grass_wolf', 'corrupted_wolf', 'forest_boar']
 // ボスのモーション画像（art_source/bosses/tools/cut.ps1 で切り出した物）。
