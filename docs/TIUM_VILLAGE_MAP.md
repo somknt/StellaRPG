@@ -91,7 +91,7 @@
 - [x] 地面レイヤー生成関数
 - [x] オブジェクトレイヤー配置
 - [x] 柵の自動生成
-- [x] マップ読み込みシステム (`Map.loadMapData()`)
+- [x] マップ読み込みシステム (`GameMap.loadMapData()`)
 - [x] オブジェクト描画システム
 - [x] 衝突判定（歩行可能判定）
 - [x] game.jsへの統合
@@ -161,7 +161,7 @@
 ```javascript
 // map_tileset.jsが読み込まれていれば自動的に利用可能
 const villageMapData = initializeTiumVillageMap();
-const map = new Map(
+const map = new GameMap(
     villageMapData.width,
     villageMapData.height,
     villageMapData.tileSize,

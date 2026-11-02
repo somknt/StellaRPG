@@ -1,6 +1,7 @@
 // マップシステム
+// ※名前は GameMap（Map にすると、ブラウザの標準の Map を上書きしてしまい、supabase-js などが動かなくなる）
 
-class Map {
+class GameMap {
     constructor(width, height, tileSize = 32, mapData = null) {
         this.width = width;
         this.height = height;

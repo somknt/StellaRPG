@@ -612,6 +612,7 @@ SoundManager.LIST = [
     // タイトルの曲：頭の 0.85 秒の無音を飛ばす（その後の、だんだん大きくなる入りは残す）。メニューの曲なので小さめ（bgm_select と同じ）
     { key: 'bgm_title',      bgm: true, label: 'タイトル・メインメニュー・設定', volume: 0.6, start: 0.85 },   // ★ 星の子タイトル画面
     { key: 'bgm_select',     bgm: true, label: 'モンスター選択・主人公選択・マイベスト', fallback: 'bgm_title', volume: 0.6, start: 0.25 },   // ★ 酒場BGM
+    { key: 'bgm_tavern',     bgm: true, label: '星の酒場（マルチプレイのロビー・クエスト受注・準備画面）', fallback: 'bgm_select', volume: 0.6 },   // ★ 酒場BGM（2026/11/02）
     { key: 'bgm_boss',       bgm: true, label: 'ボス戦（3体共通。ボスごとの曲がない時に使う）' },
     // ボス戦の曲は大きめ（前は 0.75〜0.8）。メニューの曲（bgm_select）は小さめのまま
     { key: 'bgm_boss_boar',  bgm: true, label: '巨大森イノシシ戦', fallback: 'bgm_boss', volume: 1.0 },    // ★ イノシシBGM

@@ -570,7 +570,9 @@ class ScreenManager {
         monster_select: { id: 'scr-monster',  nav: 'grid',     back: 'battle_select',  bgm: 'bgm_select' },
         ranking:        { id: 'scr-ranking',  nav: 'grid',     back: 'monster_select', bgm: 'bgm_select' },
         equip:          { id: 'scr-equip',    nav: 'grid',     back: 'monster_select', bgm: 'bgm_select' },
-        settings:       { id: 'scr-settings', nav: 'vertical', back: 'main_menu',      bgm: 'bgm_title' }
+        settings:       { id: 'scr-settings', nav: 'vertical', back: 'main_menu',      bgm: 'bgm_title' },
+        // マルチプレイ（星の酒場）の準備画面。後ろは酒場のまま（tavern.js）
+        mp_prep:        { id: 'scr-mpprep',   nav: 'grid',                             bgm: 'bgm_tavern' }
     };
     
     isMenuState(state) { return state in ScreenManager.SCREENS; }
@@ -616,11 +618,21 @@ class ScreenManager {
         if (name === 'monster_select') this.enterMonster(prev);
         if (name === 'ranking') this.enterRanking();
         if (name === 'settings') this.refreshSettings();
+        if (name === 'mp_prep') this.enterMpPrep(prev);
         // 最初の項目を選んだ状態にする（戻ってきた時は前に選んでいた所）
         UINav.quietUntil = performance.now() + ScreenManager.FADE_MS + 400;
         this.nav = def.nav ? new UINav(el, def.nav) : null;
-        // 画面の BGM（同じ曲なら途切れずに続く）
-        if (def.bgm) playBGM(def.bgm);
+        // 画面の BGM（同じ曲なら途切れずに続く）。マルチプレイのクエスト選択・装備は酒場の曲のまま
+        const tavernBgm = (name === 'monster_select' && this.mp) || (name === 'equip' && this.equipReturn);
+        if (tavernBgm) playBGM('bgm_tavern');
+        else if (def.bgm) playBGM(def.bgm);
+    }
+    
+    // 後ろに星の酒場を出す画面（クエスト選択・準備画面・準備画面から開いた装備）
+    get tavernBackdrop() {
+        const t = this.game.tavern;
+        if (!t || !t.active) return false;
+        return this.current === 'mp_prep' || (this.current === 'monster_select' && !!this.mp) || (this.current === 'equip' && !!this.equipReturn);
     }
     
     // バトルが始まったら画面を閉じる
@@ -634,6 +646,9 @@ class ScreenManager {
     // 今の画面の「戻る」の行き先（なければ null）
     backTarget() {
         if (this.current === 'profile') return this.profileFrom === 'account_info' ? 'account_info' : null;
+        // マルチプレイ：装備 → 準備画面 / クエスト選択・準備画面 → 酒場（back が tavern.js を呼ぶ）
+        if (this.current === 'equip' && this.equipReturn) return this.equipReturn;
+        if ((this.current === 'monster_select' && this.mp) || this.current === 'mp_prep') return 'tavern';
         if (this.current === 'equip' && this.freeBattle) return 'battle_select';
         const def = ScreenManager.SCREENS[this.current];
         return def && def.back ? def.back : null;
@@ -641,6 +656,12 @@ class ScreenManager {
     
     back() {
         const to = this.backTarget();
+        if (to === 'tavern') {
+            const t = this.game.tavern;
+            if (this.current === 'mp_prep') t.backFromPrep();
+            else t.cancelQuestSelect();
+            return;
+        }
         if (to) this.go(to);
     }
     
@@ -660,6 +681,8 @@ class ScreenManager {
         if (this.current === 'monster_select') this.drawMonsterArt(dt);
         if (this.current === 'profile') this.drawHeroArt(dt);
         if (this.current === 'equip') this.drawEquipArt(dt);
+        if (this.current === 'mp_prep') this.drawMpPrepArt(dt);
+        if (this.tavernBackdrop) this.game.tavern.time += dt;
         if (this.busy || !this.current) return;
         if (this.current === 'title') {
             if (input.isKeyPressed('Enter') || input.isKeyPressed('Space')) this.startFromTitle();
@@ -682,6 +705,8 @@ class ScreenManager {
     
     draw(ctx) {
         const dim = this.current === 'title' ? 0 : this.current === 'main_menu' ? 0.45 : 0.62;
+        // マルチプレイの画面は、後ろに星の酒場（少し暗く）
+        if (this.tavernBackdrop) { this.game.tavern.drawFrozen(ctx, this.current === 'mp_prep' ? 0.55 : 0.6); return; }
         this.bg.draw(ctx, this.time, dim);
     }
     
@@ -740,9 +765,18 @@ class ScreenManager {
         on('menu-title', () => this.go('title'));
         on('story-back', () => this.go('main_menu'));
         on('battle-solo', () => this.go(this.freeBattle ? 'equip' : 'monster_select'));
-        on('battle-multi', () => this.toast('マルチプレイは今後実装予定です'));
+        on('battle-multi', () => this.openMultiplayer());
         on('battle-back', () => this.go('main_menu'));
-        on('monster-back', () => this.go('battle_select'));
+        on('monster-back', () => (this.mp ? this.game.tavern.cancelQuestSelect() : this.go('battle_select')));
+        // マルチプレイの準備画面
+        on('mpp-equip', () => this.openEquipFromPrep(false));
+        on('mpp-magic', () => this.openEquipFromPrep(true));
+        on('mpp-ready', () => this.game.tavern && this.game.tavern.toggleReady());
+        on('mpp-start', (el) => {
+            if (el.classList.contains('disabled')) { this.toast(this.game.tavern && this.game.tavern.party && this.game.tavern.party.kind === 'pvp' ? '2人とも準備完了になると、対戦開始できます' : '全員が準備完了になると、バトル開始できます'); return; }
+            if (this.game.tavern) this.game.tavern.startBattle();
+        });
+        on('mpp-back', () => this.game.tavern && this.game.tavern.backFromPrep());
         on('monster-ranking', () => this.go('ranking'));
         on('ranking-back', () => this.go('monster_select'));
         on('settings-back', () => this.go('main_menu'));
@@ -758,7 +792,7 @@ class ScreenManager {
         on('ai-import', (el) => this.confirmImport(el));
         on('ai-back', () => this.go('main_menu'));
         // 装備
-        on('equip-ok', () => this.startBattle());
+        on('equip-ok', () => (this.equipReturn ? this.go(this.equipReturn) : this.startBattle()));
         on('equip-back', () => this.back());
         on('equip-clear', () => this.clearEquipMagic());
     }
@@ -1159,14 +1193,156 @@ class ScreenManager {
             return;
         }
         this.selectedBoss = b.id;
+        // マルチプレイ：このボスのクエストを受注する（星の酒場へ戻る）
+        if (this.mp && this.game.tavern) { this.game.tavern.acceptQuest(b.id); return; }
+        this.go('equip');
+    }
+    
+    // ---------- マルチプレイ ----------
+    // バトルモードの「マルチプレイ」：オンラインのアカウントでログインしていれば、星の酒場へ
+    openMultiplayer() {
+        const A = window.Account;
+        if (!A || A.mode !== 'cloud' || !A.user || A.user.mode !== 'cloud') {
+            playSE('ui_error');
+            this.toast('マルチプレイは、オンラインのアカウントでログインすると遊べます');
+            return;
+        }
+        if (!window.Net || !window.supabase || !window.TavernScene) {
+            playSE('ui_error');
+            this.toast('通信の準備ができていません。ページを開き直してください');
+            return;
+        }
+        const game = this.game;
+        if (!game.tavern) game.tavern = new TavernScene(game);
+        this.transition(() => game.tavern.enter());
+    }
+    
+    // 準備画面
+    enterMpPrep(prev) {
+        const t = this.game.tavern;
+        if (prev === 'equip' && t) t.afterEquip();
+        this.mpPrepArts = null;
+        this.refreshMpPrep(true);
+    }
+    
+    // 準備画面を、今のパーティーの様子に合わせて書き直す（tavern.js がパーティーを読み直すたび）
+    refreshMpPrep(first = false) {
+        const t = this.game.tavern, p = t && t.party;
+        const root = this.$('scr-mpprep');
+        if (!p || !root) return;
+        const b = p.kind === 'coop' ? getBossData(p.boss) : null;
+        const set = (id, s) => { const el = this.$(id); if (el && el.textContent !== s) el.textContent = s; };
+        set('mpp-title', p.kind === 'pvp' ? 'PvP 準備' : '協力プレイ 準備');
+        set('mpp-sub', b ? `VS ${b.name}　─　${b.fieldName}　（推奨 Lv.${b.playerLevel || 1}）` : '1対1の対戦（対戦のルールとステージは今後実装予定）');
+        root.classList.toggle('pvp', p.kind === 'pvp');
+        const slots = this.$('mpp-slots');
+        const n = p.kind === 'pvp' ? 2 : 4;
+        const lv = b && b.playerLevel ? b.playerLevel : 1;
+        const magic = this.equipMagicList();
+        const key = JSON.stringify(p.members.map(m => [m.pid, m.ready, m.loadout, m.leader, m.name, m.gender]));
+        if (first || key !== this._mppKey) {
+            this._mppKey = key;
+            slots.innerHTML = '';
+            this.mpPrepArts = [];
+            for (let i = 0; i < n; i++) {
+                const m = p.members[i];
+                const card = document.createElement('div');
+                card.className = 'mpp-card' + (m ? '' : ' empty') + (m && m.ready ? ' ready' : '') + (m && m.me ? ' me' : '');
+                if (!m) {
+                    card.innerHTML = '<div class="mpp-empty">空き</div>';
+                    slots.appendChild(card);
+                    continue;
+                }
+                const lo = m.loadout && Array.isArray(m.loadout.magic) ? m.loadout : (m.me ? Account.normalizeLoadout(Account.loadout) : { magic: [] });
+                const icons = [0, 1, 2, 3, 4].map(k => {
+                    const mg = magic.find(x => x.id === (lo.magic || [])[k]);
+                    return `<span class="mpp-mg">${mg ? this.magicIcon(mg) : ''}</span>`;
+                }).join('');
+                card.innerHTML = `<canvas width="150" height="150"></canvas>
+                    <div class="mpp-name"><i class="mpp-role ${m.leader ? 'leader' : ''}">★</i><b></b></div>
+                    <dl class="mpp-info"><dt>レベル</dt><dd>Lv.${lv}</dd><dt>武器</dt><dd>ナイフ</dd><dt>魔道具</dt><dd>なし</dd></dl>
+                    <div class="mpp-palette">${icons}</div>
+                    <div class="mpp-state">${m.ready ? '<i class="mpp-check">✔</i>READY' : '準備中…'}</div>`;
+                card.querySelector('.mpp-name b').textContent = (m.name || '？') + (m.me ? '（あなた）' : '');
+                slots.appendChild(card);
+                this.mpPrepArts.push({ canvas: card.querySelector('canvas'), gender: m.gender === 'female' ? 'female' : 'male', ready: m.ready, t: i * 0.7 });
+            }
+        }
+        // ボタン
+        const me = t.me;
+        const all = p.members.length >= 2 && p.members.every(m => m.ready);
+        const ready = this.$('mpp-ready');
+        if (ready) { ready.textContent = me && me.ready ? '準備解除' : '準備完了'; ready.classList.toggle('on', !!(me && me.ready)); }
+        const start = this.$('mpp-start');
+        let navChanged = false;
+        if (start) {
+            const show = !!p.leader_is_me;
+            if (start.hidden === show) navChanged = true;
+            start.hidden = !show;
+            start.toggleAttribute('data-nav', show);
+            start.textContent = p.kind === 'pvp' ? '対戦開始' : 'バトル開始';
+            start.classList.toggle('disabled', !all);
+            start.setAttribute('aria-disabled', all ? 'false' : 'true');
+        }
+        const hint = this.$('mpp-hint');
+        if (hint) {
+            hint.textContent = p.leader_is_me
+                ? (all ? (p.kind === 'pvp' ? '2人とも準備完了！（PvP の対戦は今後実装予定です）' : '全員が準備完了！「バトル開始」で出発します') : '全員の準備完了を待っています。装備を変えると準備完了は解除されます')
+                : (all ? 'リーダーが出発するのを待っています' : '装備を整えて「準備完了」を押してください（装備を変えると解除されます）');
+        }
+        if (navChanged && this.current === 'mp_prep') {
+            const keep = this.nav && this.nav.current;
+            this.nav = new UINav(this.$('scr-mpprep'), 'grid');
+            const i = keep ? this.nav.items.indexOf(keep) : -1;
+            if (i >= 0) this.nav.setIndex(i);
+        }
+    }
+    
+    drawMpPrepArt(dt) {
+        for (const a of this.mpPrepArts || []) {
+            a.t += dt;
+            const g = a.canvas.getContext('2d');
+            const W = a.canvas.width, H = a.canvas.height;
+            g.clearRect(0, 0, W, H);
+            const img = window.assetManager && window.assetManager.get(`player_${a.gender}_down_${1 + (Math.floor(a.t / 0.5) % 3)}`);
+            g.fillStyle = 'rgba(0, 0, 0, 0.35)';
+            g.beginPath(); g.ellipse(W / 2, H - 14, 30, 8, 0, 0, Math.PI * 2); g.fill();
+            if (a.ready) {
+                const k = 0.5 + 0.5 * Math.sin(a.t * 3);
+                const gr = g.createRadialGradient(W / 2, H - 14, 0, W / 2, H - 14, 60);
+                gr.addColorStop(0, `rgba(90, 255, 140, ${0.25 + 0.15 * k})`);
+                gr.addColorStop(1, 'rgba(90, 255, 140, 0)');
+                g.fillStyle = gr;
+                g.fillRect(0, H - 74, W, 74);
+            }
+            if (img) {
+                g.imageSmoothingEnabled = false;
+                g.drawImage(img, W / 2 - 60, H - 130, 120, 120);
+            }
+        }
+    }
+    
+    // 準備画面から装備画面へ（magic：魔法パレットを選んだ状態で開く）。決めたら準備画面に戻る
+    openEquipFromPrep(magic) {
+        const t = this.game.tavern, p = t && t.party;
+        if (!p) return;
+        this.equipReturn = 'mp_prep';
+        this.selectedBoss = p.kind === 'coop' ? p.boss : null;
+        this.equipFocusMagic = !!magic;
         this.go('equip');
     }
     
     // from：前の画面。マイベストから戻った時は、左上のマイベストのボタンを選んだ状態に（それ以外は前に選んだボスのカード）
     enterMonster(from = null) {
+        // マルチプレイ（星の酒場のマスターから）：協力プレイのクエストを受注する画面として使う
+        const scr = this.$('scr-monster');
+        if (scr) scr.classList.toggle('mp', !!this.mp);
+        const title = scr && scr.querySelector('.screen-title');
+        if (title) title.textContent = this.mp ? '協力プレイ：クエスト受注' : '対戦モンスター選択';
         const cards = [...this.root.querySelectorAll('#monster-cards .boss-card')];
         const rankBtn = this.$('monster-ranking');
-        const onRank = from === 'ranking' && !!rankBtn;
+        if (rankBtn) rankBtn.toggleAttribute('data-nav-skip', !!this.mp); // クエスト受注の時はマイベストを出さない
+        const onRank = from === 'ranking' && !!rankBtn && !this.mp;
         if (rankBtn) rankBtn.classList.toggle('focused', onRank);
         cards.forEach(c => c.classList.toggle('focused', !onRank && c.dataset.id === (this.selectedBoss || BOSS_DATA[0].id)));
         // 記録（バトルの後に変わる）：持っているコイン・CLEAR の印・ベストタイム
@@ -1536,8 +1712,12 @@ class ScreenManager {
         this.equipHeroGender = A && A.hasProfile() ? A.gender : (this.selectedHero || 'male');
         this.renderEquip();
         this.showEquipDetail(this.equip.magic.find(Boolean) || null);
-        // 最初は「出撃する」を選んだ状態（魔法がまだなら、最初の魔法の札）
-        const first = this.equip.magic.some(Boolean) ? this.$('equip-ok') : this.equipCards[0];
+        // マルチプレイの準備画面から開いた時：「出撃する」の代わりに「準備画面に戻る」
+        const okBtn = this.$('equip-ok');
+        if (okBtn) okBtn.textContent = this.equipReturn ? '準備画面に戻る' : '出撃する';
+        // 最初は「出撃する」を選んだ状態（魔法がまだなら、最初の魔法の札。準備画面の「魔法変更」から開いた時も魔法の札）
+        const first = this.equip.magic.some(Boolean) && !this.equipFocusMagic ? this.$('equip-ok') : this.equipCards[0];
+        this.equipFocusMagic = false;
         for (const el of this.root.querySelectorAll('#scr-equip [data-nav]')) el.classList.toggle('focused', el === first);
         this.startEquipTutorial();
     }

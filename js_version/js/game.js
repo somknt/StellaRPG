@@ -28,6 +28,9 @@ class Game {
         this.bossBattle = null; // ボス戦の進行（startBossBattle で作る）
         this.activeBattle = null; // 今動いている方（battleMode か bossBattle）
         this.currentBossId = null;
+        // マルチプレイ：星の酒場（tavern.js）と、協力プレイのボス戦（mp_battle.js。戦っている間だけ）
+        this.tavern = null;
+        this.coop = null;
         
         // 画面の揺れ
         this.shakeTime = 0;
@@ -133,7 +136,7 @@ class Game {
         
         // マップ生成（ティウム村 or デフォルト）
         if (villageMapData) {
-            this.map = new Map(
+            this.map = new GameMap(
                 villageMapData.width, 
                 villageMapData.height, 
                 villageMapData.tileSize,
@@ -147,7 +150,7 @@ class Game {
             this.player = new Player(spawnX, spawnY, gender);
         } else {
             // デフォルトマップ
-            this.map = new Map(100, 100, 32);
+            this.map = new GameMap(100, 100, 32);
             this.player = new Player(640, 360, gender);
             console.log('デフォルトマップを読み込みました');
         }
@@ -199,7 +202,8 @@ class Game {
     
     // ---------- バトルモード：ボス戦 ----------
     // モンスター選択・主人公選択で選んだボスと主人公で、ボスのフィールドで戦う
-    startBossBattle(bossId, gender) {
+    // coop：協力プレイの時（mp_battle.js の CoopBattle）。ボスの HP・ねらう人・通信は CoopBattle が受け持つ
+    startBossBattle(bossId, gender, coop = null) {
         const def = getBossData(bossId);
         if (!def || def.status !== 'playable') {
             console.warn('このボスはまだ戦えません:', bossId);
@@ -220,7 +224,7 @@ class Game {
         if (def.guaranteeMagic) this.ensureMagic(this.player, def.guaranteeMagic);
         if (!this.bossBattle) this.bossBattle = new BossBattle(this);
         this.activeBattle = this.bossBattle;
-        this.bossBattle.start(this.map, def);
+        this.bossBattle.start(this.map, def, coop);
         document.body.dataset.mode = 'arena';
         this.gameState = 'playing';
     }
@@ -320,6 +324,7 @@ class Game {
     
     // 一時停止（force：true=止める / false=再開 / 省略=切り替え）
     togglePause(force) {
+        if (this.coop) return; // 協力プレイ：オンラインなので止められない
         const b = this.activeBattle;
         if (!this.isArena() || !b || b.isOver || b.isFrozen) return;
         const was = this.paused;
@@ -351,6 +356,7 @@ class Game {
     }
     
     // バトルをやめて、メニューの画面へ戻る（'monster_select' / 'main_menu' / 'equip'）
+    // 協力プレイ：'tavern'（星の酒場へ戻る）/ それ以外の画面へ行く時は、酒場とパーティーからも出る
     leaveBattle(target = 'main_menu') {
         this.screens.transition(() => {
             this.stopBattles();
@@ -359,6 +365,11 @@ class Game {
             this.damageNumbers.clear();
             document.body.dataset.mode = '';
             document.body.dataset.waves = '';
+            if (this.coop && this.tavern) {
+                if (target === 'tavern') this.tavern.returnFromBattle();
+                else this.tavern.exitNow(target);
+                return;
+            }
             this.screens.setScreen(target);
         });
     }
@@ -466,6 +477,13 @@ class Game {
             document.body.dataset.state = this.gameState;
         }
         
+        // 星の酒場：パーティーの様子を読み直す・自分の様子を送る（クエスト選択・準備画面・協力プレイの間も）
+        if (this.tavern) this.tavern.backgroundUpdate(deltaTime);
+        if (this.gameState === 'tavern' && this.tavern) {
+            this.tavern.update(deltaTime, this.input);
+            return;
+        }
+        
         // タイトル・メニュー・選択画面
         if (this.screens.isMenuState(this.gameState)) {
             this.screens.update(deltaTime, this.input);
@@ -534,7 +552,9 @@ class Game {
         
         // ボスが最後の形態に変わる演出中（カメラがボスを映している間。boss_battle.js の isCinematic）：主人公は操作できない
         // 入力は「何も押していない」ことにする。咆哮で飛ばされる動き・魔法の弾・ボスはそのまま動き、敵の攻撃には当たらない
-        const cine = !!(arena && battle && battle.isCinematic);
+        // 協力プレイで戦闘不能：操作できない（ほかの人の戦いを見守る）
+        const coop = this.coop && battle === this.bossBattle ? this.coop : null;
+        const cine = !!(arena && battle && battle.isCinematic) || !!(coop && (coop.localDead || this.player.isDead()));
         if (cine) {
             this.attackBuffer = 0;
             this.player.dodgeBuffer = 0;
@@ -592,6 +612,8 @@ class Game {
         } else if (cast) {
             this.magicSystem.castMagic(cast.magic, cast.position, cast.direction, cast.circlePos,
                 this.enemySpawner.enemies, cast.circleShape, cast.circleRadius, this.castAim && this.castAim.target);
+            // 協力プレイ：ほかの人の画面にも、見た目だけの魔法を出す
+            if (coop) coop.onLocalCast(cast, this.castAim && this.castAim.target);
             // 発動の音（雷は落ちた瞬間に magic.js で鳴らす）
             if (cast.magic.shape !== 'strike') playSE(`magic_${getElementInfo(cast.magic.element).key}`);
             this.input.clearTouchAim('magic');
@@ -697,8 +719,10 @@ class Game {
         if (arena && battle) battle.update(deltaTime);
         
         // ゲームオーバー（闘技場は敗北の画面を出す）
+        // 協力プレイは、自分が戦闘不能になるだけ（全員が戦闘不能になったら、ホストが負けにする）
         if (this.player.isDead()) {
-            if (arena && battle) battle.onDefeat();
+            if (coop) coop.onLocalDead();
+            else if (arena && battle) battle.onDefeat();
             else this.gameOver();
         }
     }
@@ -708,6 +732,11 @@ class Game {
         this.ctx.fillStyle = '#000000';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
         
+        // 星の酒場
+        if (this.gameState === 'tavern' && this.tavern) {
+            this.tavern.draw(this.ctx);
+            return;
+        }
         
         // タイトル・メニュー・選択画面
         if (this.screens.isMenuState(this.gameState)) {
@@ -759,7 +788,13 @@ class Game {
             for (const e of this.enemySpawner.enemies) {
                 items.push({ sortY: e.position.y + e.size * 0.55, draw: (ctx, c) => e.draw(ctx, c) });
             }
-            items.push({ sortY: this.player.position.y + this.player.drawSize * 0.4, draw: (ctx, c) => this.player.draw(ctx, c) });
+            // 協力プレイ：ほかの人の主人公。自分が戦闘不能の時は、うすく出す
+            const coop = this.coop && this.activeBattle === this.bossBattle ? this.coop : null;
+            if (coop) items.push(...coop.getDepthDrawables());
+            items.push({ sortY: this.player.position.y + this.player.drawSize * 0.4, draw: (ctx, c) => {
+                if (!(coop && this.player.isDead())) { this.player.draw(ctx, c); return; }
+                ctx.save(); ctx.globalAlpha = 0.45; this.player.draw(ctx, c); ctx.restore();
+            } });
             items.sort((a, b) => a.sortY - b.sortY);
             for (const it of items) it.draw(this.ctx, cam);
             
@@ -770,6 +805,7 @@ class Game {
             this.drawLockTarget(this.ctx, cam, true);           // ターゲット（ロックオン）の体を囲むかぎ
             this.map.drawAbove(this.ctx, cam);                  // 入口のアーチ（キャラより手前）
             this.damageNumbers.draw(this.ctx, cam);             // ダメージの数字（いちばん手前）
+            if (coop) coop.drawAbove(this.ctx, cam);            // ほかの人の名前と HP
             if (window.showCollision) this.map.drawCollisionDebug(this.ctx, cam);
             return;
         }

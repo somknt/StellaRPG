@@ -76,7 +76,7 @@ class DamageNumbers {
     }
     
     // 数字の絵（1ドット＝1px。描く時に拡大する）。数字と色ごとに1回だけ作って使い回す
-    // ※ゲームに Map クラス（マップ）があるので、標準の Map ではなく普通のオブジェクトにしまう
+    // （普通のオブジェクトにしまう。前はマップのクラスが Map という名前で、標準の Map が使えなかったため）
     static render(text, palette) {
         const D = DamageNumbers;
         const key = palette.key + ':' + text;

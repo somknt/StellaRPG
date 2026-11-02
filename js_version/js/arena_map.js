@@ -224,8 +224,8 @@ function createArenaMapData() {
     };
 }
 
-// ---------- 闘技場マップ（Map と同じ使い方ができる） ----------
-class ArenaMap extends Map {
+// ---------- 闘技場マップ（GameMap と同じ使い方ができる） ----------
+class ArenaMap extends GameMap {
     constructor(data) {
         super(data.width, data.height, data.tileSize, null);
         this.mapData = data;

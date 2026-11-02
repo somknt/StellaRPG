@@ -576,6 +576,579 @@ begin
     return jsonb_build_object('ok', true);
 end $$;
 
+-- ==========================================================
+-- マルチプレイ（星の酒場）：パーティー・扉・準備・協力プレイの戦い・報酬
+-- ==========================================================
+-- 酒場の中の動き（位置・向き・頭の上の印）と、戦いの中の動きは、Supabase の Realtime（broadcast・presence）で
+-- 端末どうしが送り合う（データベースには書かない）。ここには「みんなが同じ結果にならないといけない物」だけを置く
+--   hk_parties       ：パーティー（クエストを受けた人がリーダー。協力プレイは 4人まで・PvP は 2人まで）
+--   hk_party_members ：パーティーの人（扉に入ったか・準備完了か・装備）。1人が入れるパーティーは1つだけ
+--   hk_battles       ：始めた戦い（参加者・ボスの HP の倍率・始めた時刻・結果）。報酬はここから1回だけ配る
+--   hk_boss_rewards  ：ボスのバトルコインと、勝ちにできる最短の秒数（それより早い勝ちは報酬なし）
+-- 人数の上限・二重の受注・同時に参加した時の定員オーバー・リーダーだけの操作は、ここで行の鍵をかけて確かめる
+create table if not exists hk_private.hk_parties (
+    id         uuid primary key default gen_random_uuid(),
+    kind       text not null check (kind in ('coop', 'pvp')),
+    boss_id    text,
+    leader_id  uuid not null references hk_private.hk_accounts(id) on delete cascade,
+    room       text not null default '1',
+    closed     boolean not null default false,
+    status     text not null default 'open' check (status in ('open', 'prep', 'battle')),
+    battle_id  uuid,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+-- 最後に終わった戦い（戦いの後、パーティーの人が結果と報酬を見られるように）
+alter table hk_private.hk_parties add column if not exists last_battle uuid;
+create table if not exists hk_private.hk_party_members (
+    party_id   uuid not null references hk_private.hk_parties(id) on delete cascade,
+    account_id uuid not null references hk_private.hk_accounts(id) on delete cascade,
+    joined_at  timestamptz not null default clock_timestamp(),
+    entered    boolean not null default false,
+    ready      boolean not null default false,
+    loadout    jsonb not null default '{}'::jsonb,
+    seen_at    timestamptz not null default now(),
+    primary key (party_id, account_id)
+);
+create unique index if not exists hk_party_members_account on hk_private.hk_party_members(account_id);
+create index if not exists hk_party_members_seen on hk_private.hk_party_members(seen_at);
+create table if not exists hk_private.hk_battles (
+    id          uuid primary key default gen_random_uuid(),
+    party_id    uuid,
+    boss_id     text not null,
+    host_id     uuid not null,
+    members     uuid[] not null,
+    hp_mult     numeric not null,
+    started_at  timestamptz not null default now(),
+    finished_at timestamptz,
+    result      text,
+    reward      integer
+);
+create table if not exists hk_private.hk_boss_rewards (
+    boss_id     text primary key,
+    coins       integer not null,
+    min_seconds integer not null
+);
+insert into hk_private.hk_boss_rewards(boss_id, coins, min_seconds) values
+    ('giant_forest_boar', 10, 20), ('black_corrupted_wolf', 20, 20), ('magic_golem', 30, 25), ('grudge_armor', 40, 25)
+on conflict (boss_id) do nothing;
+insert into hk_private.hk_rate_rules(bucket, max_hits, win, note) values
+    ('mp_account', 400, interval '1 minute', 'マルチプレイの呼び出し（1つのアカウント）')
+on conflict (bucket) do nothing;
+alter table hk_private.hk_parties enable row level security;
+alter table hk_private.hk_party_members enable row level security;
+alter table hk_private.hk_battles enable row level security;
+alter table hk_private.hk_boss_rewards enable row level security;
+revoke all on hk_private.hk_parties, hk_private.hk_party_members, hk_private.hk_battles, hk_private.hk_boss_rewards from public, anon, authenticated;
+
+-- ほかの人に見せる、アカウントの名前の代わり（ユーザー名はログインに使うので見せない）
+create or replace function hk_private.mp_pid(p_id uuid)
+returns text language sql immutable set search_path = '' as $$
+    select left(encode(extensions.digest('hoshinoko:' || p_id::text, 'sha256'), 'hex'), 12);
+$$;
+
+create or replace function hk_private.mp_cap(p_kind text)
+returns integer language sql immutable set search_path = '' as $$
+    select case when p_kind = 'pvp' then 2 else 4 end;
+$$;
+
+-- 全員が扉に入った（かつ、募集を締め切った・満員）なら準備画面へ。2人より少ない時は進まない
+create or replace function hk_private.mp_try_prep(p_party uuid)
+returns void language plpgsql set search_path = '' as $$
+declare
+    p hk_private.hk_parties;
+    n integer;
+    e integer;
+begin
+    select * into p from hk_private.hk_parties where id = p_party for update;
+    if not found or p.status <> 'open' then
+        return;
+    end if;
+    select count(*), count(*) filter (where m.entered) into n, e from hk_private.hk_party_members m where m.party_id = p_party;
+    if n >= 2 and e = n and (p.closed or n >= hk_private.mp_cap(p.kind)) then
+        update hk_private.hk_parties set status = 'prep', updated_at = now() where id = p_party;
+        update hk_private.hk_party_members set ready = false where party_id = p_party;
+    end if;
+end $$;
+
+-- 人が抜けた後：だれもいなければ解散。リーダーが抜けたら、いちばん先に入った人が新しいリーダー
+-- 準備画面で抜けた時は、全員の準備完了を解除（人数が変わると、ボスの強さも変わるので）。2人より少なくなったら酒場へ戻る
+create or replace function hk_private.mp_fix(p_party uuid)
+returns void language plpgsql set search_path = '' as $$
+declare
+    p hk_private.hk_parties;
+    n integer;
+begin
+    select * into p from hk_private.hk_parties where id = p_party for update;
+    if not found then
+        return;
+    end if;
+    select count(*) into n from hk_private.hk_party_members where party_id = p_party;
+    if n = 0 then
+        delete from hk_private.hk_parties where id = p_party;
+        return;
+    end if;
+    if not exists (select 1 from hk_private.hk_party_members where party_id = p_party and account_id = p.leader_id) then
+        update hk_private.hk_parties
+        set leader_id = (select m.account_id from hk_private.hk_party_members m where m.party_id = p_party order by m.joined_at limit 1)
+        where id = p_party;
+    end if;
+    if p.status = 'prep' then
+        update hk_private.hk_party_members set ready = false where party_id = p_party;
+        if n < 2 then
+            update hk_private.hk_parties set status = 'open' where id = p_party;
+            update hk_private.hk_party_members set entered = false where party_id = p_party;
+        end if;
+    end if;
+    update hk_private.hk_parties set updated_at = now() where id = p_party;
+    perform hk_private.mp_try_prep(p_party);
+end $$;
+
+-- 通信の切れた人をパーティーから外す（酒場・準備画面：30秒 / 戦いの中：120秒）。とても長く終わらない戦いは酒場へ戻す
+-- 同時に何人もが片付けないように、1人だけが行う（advisory lock を取れなかった人は飛ばす）
+create or replace function hk_private.mp_cleanup()
+returns void language plpgsql set search_path = '' as $$
+declare
+    v uuid;
+begin
+    if not pg_try_advisory_xact_lock(hashtext('hk_mp_cleanup')) then
+        return;
+    end if;
+    for v in update hk_private.hk_battles set finished_at = now(), result = 'abort'
+             where finished_at is null and started_at < now() - interval '40 minutes' returning party_id loop
+        update hk_private.hk_parties set status = 'open', battle_id = null, updated_at = now() where id = v and status = 'battle';
+        update hk_private.hk_party_members set entered = false, ready = false where party_id = v;
+    end loop;
+    -- パーティーの行に先に鍵をかけてから人を消す（参加・扉の関数と同じ順番。お互いに待ち続けないように）
+    for v in select distinct m.party_id from hk_private.hk_party_members m join hk_private.hk_parties p on p.id = m.party_id
+             where m.seen_at < now() - case when p.status = 'battle' then interval '120 seconds' else interval '30 seconds' end loop
+        perform 1 from hk_private.hk_parties where id = v for update;
+        delete from hk_private.hk_party_members m using hk_private.hk_parties p
+        where m.party_id = v and p.id = v
+          and m.seen_at < now() - case when p.status = 'battle' then interval '120 seconds' else interval '30 seconds' end;
+        perform hk_private.mp_fix(v);
+    end loop;
+end $$;
+
+-- 自分から見たマルチプレイの様子（自分のパーティー・掲示板の募集）
+create or replace function hk_private.mp_view(p_me uuid, p_board boolean)
+returns jsonb language plpgsql set search_path = '' as $$
+declare
+    p hk_private.hk_parties;
+    b hk_private.hk_battles;
+    v_party jsonb := null;
+    v_board jsonb := null;
+    v_members jsonb;
+    v_battle jsonb := null;
+    v_last jsonb := null;
+    n integer;
+    e integer;
+begin
+    select pt.* into p from hk_private.hk_party_members m join hk_private.hk_parties pt on pt.id = m.party_id where m.account_id = p_me;
+    if found then
+        select count(*), count(*) filter (where m.entered),
+               jsonb_agg(jsonb_build_object(
+                   'pid', hk_private.mp_pid(a.id),
+                   'name', coalesce(a.data->'profile'->>'name', ''),
+                   'gender', case when a.data->'profile'->>'gender' = 'female' then 'female' else 'male' end,
+                   'entered', m.entered, 'ready', m.ready, 'loadout', m.loadout,
+                   'leader', a.id = p.leader_id, 'me', a.id = p_me) order by m.joined_at)
+          into n, e, v_members
+          from hk_private.hk_party_members m join hk_private.hk_accounts a on a.id = m.account_id
+         where m.party_id = p.id;
+        if p.battle_id is not null then
+            select * into b from hk_private.hk_battles where id = p.battle_id;
+            if found then
+                v_battle := jsonb_build_object('id', b.id, 'boss', b.boss_id, 'hp_mult', b.hp_mult,
+                    'host', hk_private.mp_pid(b.host_id), 'host_is_me', b.host_id = p_me,
+                    'members', (select jsonb_agg(hk_private.mp_pid(x)) from unnest(b.members) x),
+                    'elapsed', extract(epoch from now() - b.started_at), 'result', b.result);
+            end if;
+        end if;
+        if p.last_battle is not null then
+            select * into b from hk_private.hk_battles where id = p.last_battle;
+            if found then
+                v_last := jsonb_build_object('id', b.id, 'boss', b.boss_id, 'result', b.result, 'reward', coalesce(b.reward, 0),
+                    'secs', extract(epoch from coalesce(b.finished_at, now()) - b.started_at));
+            end if;
+        end if;
+        v_party := jsonb_build_object('id', p.id, 'kind', p.kind, 'boss', p.boss_id, 'room', p.room, 'closed', p.closed,
+            'status', p.status, 'leader_is_me', p.leader_id = p_me, 'leader', hk_private.mp_pid(p.leader_id),
+            'cap', hk_private.mp_cap(p.kind), 'count', n, 'entered', e, 'all_entered', e = n,
+            'members', v_members, 'battle', v_battle, 'last', v_last);
+    end if;
+    if p_board then
+        select coalesce(jsonb_agg(x.j order by x.created_at desc), '[]'::jsonb) into v_board from (
+            select pt.created_at, jsonb_build_object('id', pt.id, 'kind', pt.kind, 'boss', pt.boss_id, 'room', pt.room,
+                'leader_name', coalesce(a.data->'profile'->>'name', ''), 'leader', hk_private.mp_pid(pt.leader_id),
+                'count', (select count(*) from hk_private.hk_party_members m where m.party_id = pt.id),
+                'cap', hk_private.mp_cap(pt.kind), 'status', pt.status, 'closed', pt.closed) as j
+            from hk_private.hk_parties pt join hk_private.hk_accounts a on a.id = pt.leader_id
+            order by pt.created_at desc limit 30) x;
+    end if;
+    return jsonb_build_object('ok', true, 'pid', hk_private.mp_pid(p_me), 'party', v_party, 'board', v_board);
+end $$;
+
+-- ---------- ゲームから呼ぶマルチプレイの関数（どれも答えは mp_view の形。だめな時は { ok: false, error }） ----------
+-- 様子を読む（酒場にいる間、2秒くらいごとに呼ぶ。呼んだ人は「まだつながっている」ことになる）
+create or replace function public.hk_mp_state(p_token text, p_board boolean default false)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+    v_me uuid := hk_private.session_account(p_token);
+begin
+    if v_me is null then
+        return jsonb_build_object('ok', false, 'error', 'SESSION');
+    end if;
+    if hk_private.over_limit('mp_account', v_me::text) then
+        return jsonb_build_object('ok', false, 'error', 'RATE_LIMIT');
+    end if;
+    perform hk_private.mp_cleanup();
+    update hk_private.hk_party_members set seen_at = now() where account_id = v_me;
+    return hk_private.mp_view(v_me, coalesce(p_board, false));
+end $$;
+
+-- クエストを受ける（マスターに話しかけて、協力プレイのボスを選んだ・PvP を選んだ）。受けた人がリーダー
+create or replace function public.hk_mp_create(p_token text, p_kind text, p_boss text default null, p_room text default '1')
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+    v_me uuid := hk_private.session_account(p_token);
+    v_id uuid;
+    v_room text := coalesce(p_room, '1');
+begin
+    if v_me is null then
+        return jsonb_build_object('ok', false, 'error', 'SESSION');
+    end if;
+    if hk_private.over_limit('mp_account', v_me::text) then
+        return jsonb_build_object('ok', false, 'error', 'RATE_LIMIT');
+    end if;
+    if p_kind is null or p_kind not in ('coop', 'pvp') then
+        return jsonb_build_object('ok', false, 'error', 'BAD_REQUEST');
+    end if;
+    if p_kind = 'coop' and not exists (select 1 from hk_private.hk_boss_rewards r where r.boss_id = p_boss) then
+        return jsonb_build_object('ok', false, 'error', 'BAD_BOSS');
+    end if;
+    if v_room !~ '^[A-Za-z0-9_-]{1,24}$' then
+        v_room := '1';
+    end if;
+    perform hk_private.mp_cleanup();
+    if exists (select 1 from hk_private.hk_party_members where account_id = v_me) then
+        return jsonb_build_object('ok', false, 'error', 'IN_PARTY');
+    end if;
+    begin
+        insert into hk_private.hk_parties(kind, boss_id, leader_id, room)
+        values (p_kind, case when p_kind = 'coop' then p_boss end, v_me, v_room) returning id into v_id;
+        insert into hk_private.hk_party_members(party_id, account_id) values (v_id, v_me);
+    exception when unique_violation then
+        return jsonb_build_object('ok', false, 'error', 'IN_PARTY');
+    end;
+    return hk_private.mp_view(v_me, true);
+end $$;
+
+-- 掲示板の募集に参加する（パーティーの行に鍵をかけてから人数を数える。同時に参加しても定員を超えない）
+create or replace function public.hk_mp_join(p_token text, p_party uuid)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+    v_me uuid := hk_private.session_account(p_token);
+    v_cur uuid;
+    p hk_private.hk_parties;
+    n integer;
+begin
+    if v_me is null then
+        return jsonb_build_object('ok', false, 'error', 'SESSION');
+    end if;
+    if hk_private.over_limit('mp_account', v_me::text) then
+        return jsonb_build_object('ok', false, 'error', 'RATE_LIMIT');
+    end if;
+    select party_id into v_cur from hk_private.hk_party_members where account_id = v_me;
+    if v_cur = p_party then
+        return hk_private.mp_view(v_me, true);
+    elsif v_cur is not null then
+        return jsonb_build_object('ok', false, 'error', 'IN_PARTY');
+    end if;
+    select * into p from hk_private.hk_parties where id = p_party for update;
+    if not found then
+        return jsonb_build_object('ok', false, 'error', 'GONE');
+    end if;
+    if p.status <> 'open' or p.closed then
+        return jsonb_build_object('ok', false, 'error', 'CLOSED');
+    end if;
+    select count(*) into n from hk_private.hk_party_members where party_id = p_party;
+    if n >= hk_private.mp_cap(p.kind) then
+        return jsonb_build_object('ok', false, 'error', 'FULL');
+    end if;
+    begin
+        insert into hk_private.hk_party_members(party_id, account_id) values (p_party, v_me);
+    exception when unique_violation then
+        return jsonb_build_object('ok', false, 'error', 'IN_PARTY');
+    end;
+    update hk_private.hk_parties set updated_at = now() where id = p_party;
+    perform hk_private.mp_try_prep(p_party);
+    return hk_private.mp_view(v_me, true);
+end $$;
+
+-- パーティーを抜ける（リーダーが抜けたら、いちばん先に入った人がリーダー。だれもいなくなったら解散）
+create or replace function public.hk_mp_leave(p_token text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+    v_me uuid := hk_private.session_account(p_token);
+    v uuid;
+begin
+    if v_me is null then
+        return jsonb_build_object('ok', false, 'error', 'SESSION');
+    end if;
+    if hk_private.over_limit('mp_account', v_me::text) then
+        return jsonb_build_object('ok', false, 'error', 'RATE_LIMIT');
+    end if;
+    select party_id into v from hk_private.hk_party_members where account_id = v_me;
+    if v is not null then
+        perform 1 from hk_private.hk_parties where id = v for update;
+        delete from hk_private.hk_party_members where account_id = v_me;
+        perform hk_private.mp_fix(v);
+    end if;
+    return hk_private.mp_view(v_me, true);
+end $$;
+
+-- リーダーだけ：メンバーを外す（酒場にいる間だけ）
+create or replace function public.hk_mp_kick(p_token text, p_pid text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+    v_me uuid := hk_private.session_account(p_token);
+    p hk_private.hk_parties;
+    v uuid;
+begin
+    if v_me is null then
+        return jsonb_build_object('ok', false, 'error', 'SESSION');
+    end if;
+    if hk_private.over_limit('mp_account', v_me::text) then
+        return jsonb_build_object('ok', false, 'error', 'RATE_LIMIT');
+    end if;
+    select * into p from hk_private.hk_parties
+    where id = (select party_id from hk_private.hk_party_members where account_id = v_me) for update;
+    if not found then
+        return jsonb_build_object('ok', false, 'error', 'NO_PARTY');
+    end if;
+    if p.leader_id <> v_me then
+        return jsonb_build_object('ok', false, 'error', 'NOT_LEADER');
+    end if;
+    if p.status <> 'open' then
+        return jsonb_build_object('ok', false, 'error', 'BUSY');
+    end if;
+    delete from hk_private.hk_party_members m
+    where m.party_id = p.id and m.account_id <> v_me and hk_private.mp_pid(m.account_id) = p_pid
+    returning m.account_id into v;
+    if v is not null then
+        perform hk_private.mp_fix(p.id);
+    end if;
+    return hk_private.mp_view(v_me, true);
+end $$;
+
+-- リーダーだけ：募集を締め切る（p_closed = true）・再び募集する（false）
+create or replace function public.hk_mp_close(p_token text, p_closed boolean)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+    v_me uuid := hk_private.session_account(p_token);
+    p hk_private.hk_parties;
+begin
+    if v_me is null then
+        return jsonb_build_object('ok', false, 'error', 'SESSION');
+    end if;
+    if hk_private.over_limit('mp_account', v_me::text) then
+        return jsonb_build_object('ok', false, 'error', 'RATE_LIMIT');
+    end if;
+    select * into p from hk_private.hk_parties
+    where id = (select party_id from hk_private.hk_party_members where account_id = v_me) for update;
+    if not found then
+        return jsonb_build_object('ok', false, 'error', 'NO_PARTY');
+    end if;
+    if p.leader_id <> v_me then
+        return jsonb_build_object('ok', false, 'error', 'NOT_LEADER');
+    end if;
+    if p.status <> 'open' then
+        return jsonb_build_object('ok', false, 'error', 'BUSY');
+    end if;
+    update hk_private.hk_parties set closed = coalesce(p_closed, true), updated_at = now() where id = p.id;
+    perform hk_private.mp_try_prep(p.id);
+    return hk_private.mp_view(v_me, true);
+end $$;
+
+-- 扉に入る（p_entered = true）・待つのをやめる（false）。準備画面で「戻る」を押した時も false
+create or replace function public.hk_mp_enter(p_token text, p_entered boolean)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+    v_me uuid := hk_private.session_account(p_token);
+    p hk_private.hk_parties;
+begin
+    if v_me is null then
+        return jsonb_build_object('ok', false, 'error', 'SESSION');
+    end if;
+    if hk_private.over_limit('mp_account', v_me::text) then
+        return jsonb_build_object('ok', false, 'error', 'RATE_LIMIT');
+    end if;
+    select * into p from hk_private.hk_parties
+    where id = (select party_id from hk_private.hk_party_members where account_id = v_me) for update;
+    if not found then
+        return jsonb_build_object('ok', false, 'error', 'NO_PARTY');
+    end if;
+    if p.status = 'battle' then
+        return jsonb_build_object('ok', false, 'error', 'BUSY');
+    end if;
+    if p.status = 'prep' then
+        if not coalesce(p_entered, false) then
+            -- 準備画面から1人が戻った：みんな酒場の扉の前に戻る（戻った人は扉の外）
+            update hk_private.hk_parties set status = 'open', updated_at = now() where id = p.id;
+            update hk_private.hk_party_members set ready = false, entered = entered and account_id <> v_me where party_id = p.id;
+        end if;
+    else
+        update hk_private.hk_party_members set entered = coalesce(p_entered, false), ready = false where account_id = v_me;
+        update hk_private.hk_parties set updated_at = now() where id = p.id;
+        perform hk_private.mp_try_prep(p.id);
+    end if;
+    return hk_private.mp_view(v_me, true);
+end $$;
+
+-- 準備画面：準備完了（p_ready）と、今の装備（p_loadout。ほかの人の画面に出す）
+create or replace function public.hk_mp_ready(p_token text, p_ready boolean, p_loadout jsonb default null)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+    v_me uuid := hk_private.session_account(p_token);
+    p hk_private.hk_parties;
+begin
+    if v_me is null then
+        return jsonb_build_object('ok', false, 'error', 'SESSION');
+    end if;
+    if hk_private.over_limit('mp_account', v_me::text) then
+        return jsonb_build_object('ok', false, 'error', 'RATE_LIMIT');
+    end if;
+    select * into p from hk_private.hk_parties
+    where id = (select party_id from hk_private.hk_party_members where account_id = v_me) for update;
+    if not found then
+        return jsonb_build_object('ok', false, 'error', 'NO_PARTY');
+    end if;
+    if p.status <> 'prep' then
+        return jsonb_build_object('ok', false, 'error', 'NOT_PREP');
+    end if;
+    update hk_private.hk_party_members
+    set ready = coalesce(p_ready, false),
+        loadout = case when p_loadout is not null and jsonb_typeof(p_loadout) = 'object' and octet_length(p_loadout::text) <= 2000
+                       then p_loadout else loadout end
+    where account_id = v_me;
+    update hk_private.hk_parties set updated_at = now() where id = p.id;
+    return hk_private.mp_view(v_me, true);
+end $$;
+
+-- リーダーだけ：バトル開始（全員が準備完了の時だけ）。参加者とボスの HP の倍率（2人 1.5・3人 2.0・4人 2.5）をここで決める
+-- 戦いを動かす人（ホスト）はリーダー。PvP の戦いはまだないので PVP_SOON を返す
+create or replace function public.hk_mp_start(p_token text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+    v_me uuid := hk_private.session_account(p_token);
+    p hk_private.hk_parties;
+    n integer;
+    r integer;
+    v_b uuid;
+begin
+    if v_me is null then
+        return jsonb_build_object('ok', false, 'error', 'SESSION');
+    end if;
+    if hk_private.over_limit('mp_account', v_me::text) then
+        return jsonb_build_object('ok', false, 'error', 'RATE_LIMIT');
+    end if;
+    select * into p from hk_private.hk_parties
+    where id = (select party_id from hk_private.hk_party_members where account_id = v_me) for update;
+    if not found then
+        return jsonb_build_object('ok', false, 'error', 'NO_PARTY');
+    end if;
+    if p.leader_id <> v_me then
+        return jsonb_build_object('ok', false, 'error', 'NOT_LEADER');
+    end if;
+    if p.status <> 'prep' then
+        return jsonb_build_object('ok', false, 'error', 'NOT_PREP');
+    end if;
+    select count(*), count(*) filter (where ready) into n, r from hk_private.hk_party_members where party_id = p.id;
+    if r < n then
+        return jsonb_build_object('ok', false, 'error', 'NOT_READY');
+    end if;
+    if n < 2 then
+        return jsonb_build_object('ok', false, 'error', 'NEED_TWO');
+    end if;
+    if p.kind = 'pvp' then
+        return jsonb_build_object('ok', false, 'error', 'PVP_SOON');
+    end if;
+    insert into hk_private.hk_battles(party_id, boss_id, host_id, members, hp_mult)
+    values (p.id, p.boss_id, v_me,
+            (select array_agg(m.account_id order by m.joined_at) from hk_private.hk_party_members m where m.party_id = p.id),
+            case n when 2 then 1.5 when 3 then 2.0 when 4 then 2.5 else 1 end)
+    returning id into v_b;
+    update hk_private.hk_parties set status = 'battle', battle_id = v_b, updated_at = now() where id = p.id;
+    update hk_private.hk_party_members set seen_at = now() where party_id = p.id;
+    return hk_private.mp_view(v_me, true);
+end $$;
+
+-- 戦いが終わった：ホスト（バトル開始を押したリーダー）だけが「勝ち」を知らせられる。ほかの人は「負け・中断」だけ
+-- 勝ちなら、戦いに参加した全員のセーブデータに、バトルコイン（ボスの基本＋クリアタイムのランクのボーナス）とクリアの回数を足す
+-- 1つの戦いの報酬は1回だけ（結果を書いた後は何もしない）。始めてから min_seconds 秒より早い勝ちは報酬なし
+create or replace function public.hk_mp_finish(p_token text, p_battle uuid, p_win boolean)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+    v_me uuid := hk_private.session_account(p_token);
+    b hk_private.hk_battles;
+    v_secs numeric;
+    v_fight numeric;
+    v_base integer;
+    v_min integer;
+    v_reward integer := 0;
+    v_result text;
+begin
+    if v_me is null then
+        return jsonb_build_object('ok', false, 'error', 'SESSION');
+    end if;
+    if hk_private.over_limit('mp_account', v_me::text) then
+        return jsonb_build_object('ok', false, 'error', 'RATE_LIMIT');
+    end if;
+    select * into b from hk_private.hk_battles where id = p_battle for update;
+    if not found then
+        return jsonb_build_object('ok', false, 'error', 'GONE');
+    end if;
+    if not (v_me = any(b.members)) then
+        return jsonb_build_object('ok', false, 'error', 'NOT_MEMBER');
+    end if;
+    if b.result is not null then
+        return hk_private.mp_view(v_me, false) || jsonb_build_object('reward', coalesce(b.reward, 0), 'result', b.result);
+    end if;
+    if coalesce(p_win, false) and v_me <> b.host_id then
+        return jsonb_build_object('ok', false, 'error', 'NOT_HOST');
+    end if;
+    v_secs := extract(epoch from now() - b.started_at);
+    v_fight := greatest(0, v_secs - 4);   -- 開始の演出（約4秒）を引いたクリアタイム
+    v_result := case when coalesce(p_win, false) then 'win' else 'lose' end;
+    if coalesce(p_win, false) then
+        select r.coins, r.min_seconds into v_base, v_min from hk_private.hk_boss_rewards r where r.boss_id = b.boss_id;
+        if v_base is not null and v_secs >= v_min then
+            v_reward := v_base + case when v_fight <= 30 then 5 when v_fight <= 60 then 4 when v_fight <= 90 then 3
+                                      when v_fight <= 120 then 2 when v_fight <= 180 then 1 else 0 end;
+            with x as (
+                select a.id, coalesce(a.data->'battle', '{}'::jsonb) as bt from hk_private.hk_accounts a where a.id = any(b.members)
+            )
+            update hk_private.hk_accounts a
+            set data = jsonb_set(coalesce(a.data, '{}'::jsonb), '{battle}',
+                    x.bt || jsonb_build_object(
+                        'coins', coalesce((x.bt->>'coins')::numeric, 0) + v_reward,
+                        'clears', coalesce(x.bt->'clears', '{}'::jsonb)
+                                  || jsonb_build_object(b.boss_id, coalesce((x.bt->'clears'->>b.boss_id)::numeric, 0) + 1))),
+                version = a.version + 1,
+                updated_at = now()
+            from x where a.id = x.id;
+        else
+            v_result := 'win_fast';
+        end if;
+    end if;
+    update hk_private.hk_battles set finished_at = now(), result = v_result, reward = v_reward where id = b.id;
+    update hk_private.hk_parties set status = 'open', battle_id = null, last_battle = b.id, updated_at = now()
+    where id = b.party_id and battle_id = b.id;
+    update hk_private.hk_party_members set entered = false, ready = false where party_id = b.party_id;
+    return hk_private.mp_view(v_me, false) || jsonb_build_object('reward', v_reward, 'result', v_result);
+end $$;
+
 -- ---------- 最初の版の、public にあった中の関数を消す（今は hk_private の物を使う） ----------
 drop function if exists public.hk_token_hash(text);
 drop function if exists public.hk_new_session(uuid);
@@ -595,6 +1168,27 @@ grant execute on function public.hk_login(text, text) to anon, authenticated;
 grant execute on function public.hk_load(text) to anon, authenticated;
 grant execute on function public.hk_save(text, jsonb, bigint) to anon, authenticated;
 grant execute on function public.hk_logout(text) to anon, authenticated;
+-- マルチプレイ（星の酒場）の関数
+revoke all on function public.hk_mp_state(text, boolean) from public, anon, authenticated;
+revoke all on function public.hk_mp_create(text, text, text, text) from public, anon, authenticated;
+revoke all on function public.hk_mp_join(text, uuid) from public, anon, authenticated;
+revoke all on function public.hk_mp_leave(text) from public, anon, authenticated;
+revoke all on function public.hk_mp_kick(text, text) from public, anon, authenticated;
+revoke all on function public.hk_mp_close(text, boolean) from public, anon, authenticated;
+revoke all on function public.hk_mp_enter(text, boolean) from public, anon, authenticated;
+revoke all on function public.hk_mp_ready(text, boolean, jsonb) from public, anon, authenticated;
+revoke all on function public.hk_mp_start(text) from public, anon, authenticated;
+revoke all on function public.hk_mp_finish(text, uuid, boolean) from public, anon, authenticated;
+grant execute on function public.hk_mp_state(text, boolean) to anon, authenticated;
+grant execute on function public.hk_mp_create(text, text, text, text) to anon, authenticated;
+grant execute on function public.hk_mp_join(text, uuid) to anon, authenticated;
+grant execute on function public.hk_mp_leave(text) to anon, authenticated;
+grant execute on function public.hk_mp_kick(text, text) to anon, authenticated;
+grant execute on function public.hk_mp_close(text, boolean) to anon, authenticated;
+grant execute on function public.hk_mp_enter(text, boolean) to anon, authenticated;
+grant execute on function public.hk_mp_ready(text, boolean, jsonb) to anon, authenticated;
+grant execute on function public.hk_mp_start(text) to anon, authenticated;
+grant execute on function public.hk_mp_finish(text, uuid, boolean) to anon, authenticated;
 
 commit;
 

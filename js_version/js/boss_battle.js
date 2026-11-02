@@ -38,7 +38,8 @@ class BossBattle {
             const el = document.getElementById(id);
             if (el) el.addEventListener('click', (e) => { e.preventDefault(); fn(); });
         };
-        on('br-retry', () => this.game.restartBattle());
+        // 協力プレイ：「酒場に戻る」（同じパーティーのまま、星の酒場へ）
+        on('br-retry', () => (this.coop ? this.game.leaveBattle('tavern') : this.game.restartBattle()));
         on('br-monster', () => this.game.leaveBattle('monster_select'));
         on('br-menu', () => this.game.leaveBattle('main_menu'));
     }
@@ -50,10 +51,13 @@ class BossBattle {
     get isCinematic() { return !!this.cine && this.state === 'fight'; }
     
     // ---------- 開始 ----------
-    start(map, def) {
+    // coop：協力プレイ（mp_battle.js の CoopBattle）。null ならソロ
+    start(map, def, coop = null) {
         const game = this.game;
         this.map = map;
         this.def = def;
+        this.coop = coop;
+        this.coopLost = false;
         this.state = 'intro';
         this.t = 0;              // 開始演出の経過時間
         this.time = 0;           // 戦った時間
@@ -90,6 +94,8 @@ class BossBattle {
         this.boss.ai = this.ai;
         this.boss.target = game.player;
         this.boss.direction = 'down';
+        // 協力プレイ：ほかの人の主人公・ボスの HP の倍率・ホストかミラーかの準備
+        if (coop) coop.attach(this);
         game.camera.snapToTarget();
         this.countStep = 0;
         // HP バーの目印を、そのボスのフェーズが変わる所（HP50%・25%）に置く
@@ -107,8 +113,9 @@ class BossBattle {
         document.body.dataset.waves = 'off';     // ウェーブの表示は出さない
         document.body.dataset.battle = 'boss';
         document.body.dataset.boss = def.id;
+        document.body.dataset.coop = coop ? '1' : '';  // 協力プレイ：一時停止のボタンを出さない（style.css）
         if (this.ui.hud) this.ui.hud.classList.remove('show');
-        if (this.ui.name) this.ui.name.textContent = def.name;
+        if (this.ui.name) this.ui.name.textContent = coop ? `${def.name}（協力 ${coop.n}人）` : def.name;
         this.updateHUD(0, true);
         // BGM：開始演出の間は流さない（ボスの鳴き声だけ）。BATTLE START の文字が出てから流す（BossBattle.MUSIC.afterStart）
         this.musicTimer = 0;
@@ -157,6 +164,7 @@ class BossBattle {
     
     // 開始演出を飛ばす（Enter・クリック・タップ）
     skipIntro() {
+        if (this.coop) return; // 協力プレイ：みんなで同じ開始の演出を見る
         if (this.state !== 'intro' || this.t >= 4.0) return;
         this.t = 4.0;
         this.step = 3;
@@ -173,11 +181,14 @@ class BossBattle {
     update(dt) {
         if (this.state === 'idle') return;
         const game = this.game;
+        // 協力プレイの通信（送る・受け取る・ねらう人を選ぶ）
+        if (this.coop) this.coop.update(dt);
         this.map.update(dt);
         if (this.flash > 0) this.flash = Math.max(0, this.flash - dt);
         
-        // ボスAIからの知らせ（フェーズ移行・画面の揺れ）
+        // ボスAIからの知らせ（フェーズ移行・画面の揺れ）。協力プレイのホストは、ほかの人にも送る（当たった時の揺れは自分だけ）
         for (const ev of this.ai.events) {
+            if (this.coop && this.coop.host && ev.type !== 'hit') this.coop.record({ k: 'ev', e: CoopBattle.plain(ev) });
             if (ev.type === 'phase') this.onPhaseChange(ev.index);
             else if (ev.type === 'roar') this.onRoar(ev.key);
             else if (ev.type === 'shake') game.addShake(ev.power, ev.time || 0.25);
@@ -199,7 +210,9 @@ class BossBattle {
                 const p = game.player;
                 if (!this.rewarded) {
                     this.rewarded = true;
-                    this.record = window.BattleRecords ? BattleRecords.recordClear(this.def, this.time, p && p.gender) : null;
+                    // 協力プレイ：報酬はサーバーが参加した全員に1回だけ配る（ここでは足さない）
+                    if (this.coop) this.record = this.coop.onVictory(this.time);
+                    else this.record = window.BattleRecords ? BattleRecords.recordClear(this.def, this.time, p && p.gender) : null;
                 }
                 const RT = this.def.result || {};
                 this.showBanner(RT.win || 'GAME CLEAR', RT.winSub || '勝利！', 'victory');
@@ -478,6 +491,26 @@ class BossBattle {
             rows.push(['到達フェーズ', `${this.maxPhase} / ${this.def.phases.length}`]);
             rows.push(['ボスの残りHP', `${Math.round(this.boss.currentHP / this.boss.maxHP * 100)}%`]);
         }
+        // 協力プレイ：参加した人数と、サーバーが確定した報酬（確定するまでは「確定中」）
+        if (this.coop) {
+            rows.splice(1, 1, ['参加人数', `${this.coop.n}人（ボスの HP ${this.coop.mult}倍）`]);
+            const keep = rows.slice(0, 3);
+            if (win && rec) {
+                keep.push(['残りHP', `${p ? Math.ceil(p.currentHP) : 0} / ${p ? p.maxHP : 0}`]);
+                keep.push(['獲得バトルコイン', `<span id="br-coop-gain">${this.coopGainText(rec)}</span>`]);
+                keep.push(['所持バトルコイン', `<span id="br-coop-coins">${rec.coins === null ? '確定中…' : `<i class="coin-icon"></i>${rec.coins}枚`}</span>`]);
+            } else if (!win) {
+                keep.push(['到達フェーズ', `${this.maxPhase} / ${this.def.phases.length}`]);
+                keep.push(['ボスの残りHP', `${Math.round(this.boss.currentHP / this.boss.maxHP * 100)}%`]);
+            }
+            rows.length = 0;
+            rows.push(...keep);
+            if (this.coopLost) { u.resultTitle.textContent = '通信が切れました'; u.resultSub.textContent = 'ホストとつながらなくなりました'; }
+            u.retry.textContent = '酒場に戻る';
+            const mon = document.getElementById('br-monster');
+            if (mon) mon.hidden = true;
+            if (u.rank) u.rank.hidden = !(win && rec);
+        }
         u.resultStats.innerHTML = rows.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
         if (rec) playSE('coin_get');
         u.result.classList.add('show');
@@ -485,6 +518,20 @@ class BossBattle {
         const panel = u.result.querySelector('.battle-panel');
         this.fitPanel(panel);
         this.nav = new UINav(panel, 'vertical');
+    }
+    
+    coopGainText(rec) {
+        if (!rec.confirmed) return `<i class="coin-icon"></i>+${rec.gained}枚 <small>（サーバーで確定中…）</small>`;
+        if (rec.serverResult === 'win_fast') return '0枚 <small>（早すぎる勝ちは報酬なし）</small>';
+        return `<i class="coin-icon"></i>+${rec.gained}枚 <small>（基本${rec.base}＋ランク${rec.bonus}・全員に）</small>`;
+    }
+    
+    // 協力プレイ：サーバーが報酬を確定した（mp_battle.js が呼ぶ）
+    updateCoopReward(rec) {
+        const g = document.getElementById('br-coop-gain');
+        if (g) g.innerHTML = this.coopGainText(rec);
+        const c = document.getElementById('br-coop-coins');
+        if (c && rec.coins !== null) c.innerHTML = `<i class="coin-icon"></i>${rec.coins}枚`;
     }
     
     // 画面が小さい時（スマホは --hud-scale で拡大している）も、パネルが全部見えるように縮める
@@ -525,6 +572,10 @@ class BossBattle {
         if (this.ui.hud) this.ui.hud.classList.remove('show');
         document.body.dataset.battle = '';
         document.body.dataset.boss = '';
+        document.body.dataset.coop = '';
+        this.coop = null;
+        const mon = document.getElementById('br-monster');
+        if (mon) mon.hidden = false;
     }
 }
 

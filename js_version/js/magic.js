@@ -957,7 +957,9 @@ class MagicSystem {
         proj.endHandled = true;
         this.spawnImpact(proj);
         if (proj.magic.burn && isFlammableAt(this.map, proj.position)) {
-            this.firePatches.push(new FirePatch(proj.magic, proj.position));
+            const fp = new FirePatch(proj.magic, proj.position);
+            if (proj.remote) fp.remote = true; // 協力プレイ：ほかの人の魔法の残り火も見た目だけ
+            this.firePatches.push(fp);
         }
     }
     
@@ -1026,8 +1028,9 @@ class MagicSystem {
     checkCollisions(enemies) {
         const hits = [];
         
+        // remote：協力プレイで、ほかの人が撃った見た目だけの魔法（ダメージは撃った人の端末が計算する）
         for (const proj of this.projectiles) {
-            if (!proj.active) continue;
+            if (!proj.active || proj.remote) continue;
             for (const enemy of enemies) {
                 if (!enemy.isAlive()) continue;
                 if (proj.checkCollision(enemy)) {
@@ -1047,7 +1050,7 @@ class MagicSystem {
         
         // 残り火：燃えている間、一定間隔で上にいる敵に小さなダメージ
         for (const f of this.firePatches) {
-            if (!f.pendingTick) continue;
+            if (!f.pendingTick || f.remote) continue;
             f.pendingTick = false;
             for (const enemy of enemies) {
                 if (!enemy.isAlive()) continue;
@@ -1060,6 +1063,7 @@ class MagicSystem {
         
         // 竜巻：まわりの敵を中心へ吸い寄せ、一定間隔で巻き込んだ敵にダメージ
         for (const t of this.tornados) {
+            if (t.remote) continue;
             for (const enemy of enemies) {
                 if (!enemy.isAlive()) continue;
                 const to = t.position.sub(enemy.position);
@@ -1080,7 +1084,7 @@ class MagicSystem {
         
         // 雷：落ちた瞬間に範囲内の敵全員
         for (const s of this.strikes) {
-            if (!s.pendingHit) continue;
+            if (!s.pendingHit || s.remote) continue;
             s.pendingHit = false;
             for (const enemy of enemies) {
                 if (!enemy.isAlive()) continue;

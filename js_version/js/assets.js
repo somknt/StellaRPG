@@ -95,6 +95,12 @@ class AssetManager {
             const key = dot > 0 ? name.slice(0, dot) : name;
             list[key] = `assets/tiles/battlefield/${dot > 0 ? name : name + '.png'}`;
         }
+        // 星の酒場の素材（assets/tiles/tavern/<名前>.png。tavern_map.js・tavern.js が使う）
+        for (const name of AssetManager.TAVERN_ART_READY) {
+            const dot = name.lastIndexOf('.');
+            const key = dot > 0 ? name.slice(0, dot) : name;
+            list[key] = `assets/tiles/tavern/${dot > 0 ? name : name + '.png'}`;
+        }
         
         // 狼・猪の画像（assets/enemies/<名前>/<向き>_<1〜3>.png）。置いた物だけ BEAST_SPRITES_READY に足す
         for (const key of AssetManager.BEAST_SPRITES_READY) {
@@ -285,6 +291,13 @@ AssetManager.BATTLEFIELD_ART_READY = [
     'bf_mist_1', 'bf_mist_2', 'bf_mist_3', 'bf_mist_4', 'bf_mist_5', 'bf_magic_circle',
     'bf_tree_a', 'bf_tree_b', 'bf_tree_c', 'bf_tree_d', 'bf_spear_a', 'bf_spear_b', 'bf_stakes',
     'bf_wheel', 'bf_planks', 'bf_rubble_wall', 'bf_rubble', 'bf_pillar_broken', 'bf_catapult'
+];
+// 星の酒場の素材（art_source/tavern/tools/cut.ps1 で、星灯りのマルチプレイヤー酒場・星降る酒場のタイルセット・熟練バーテンダーから切り出した物）
+// tv_master_1〜8：待機（4 = ウインク・8 = 目を閉じる）/ 9〜16：カクテルを作る
+AssetManager.TAVERN_ART_READY = [
+    'tv_overview.jpg',
+    ...Array.from({ length: 16 }, (_, i) => `tv_master_${i + 1}`),
+    'tv_plate', 'tv_spark_gold', 'tv_spark_blue', 'tv_spark_pink', 'tv_ring', 'tv_glow_purple', 'tv_beam_gold'
 ];
 AssetManager.BEAST_SPRITES_READY = ['giant_forest_boar', 'black_corrupted_wolf', 'magic_golem', 'grudge_armor'];  // 例: ['grass_wolf', 'corrupted_wolf', 'forest_boar']
 // ボスのモーション画像（art_source/bosses/tools/cut.ps1 で切り出した物）。

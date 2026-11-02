@@ -140,7 +140,10 @@ class Enemy {
             return;
         }
         
-        this.target = player;
+        // 協力プレイのホスト：ボスがねらう人は CoopBattle が決める（keepTarget）
+        if (!this.keepTarget) this.target = player;
+        // 協力プレイのミラー：ボスAIは動かさず、ホストから届いた様子で動かす（mp_battle.js の mirrorStep）
+        if (this.mirror) { this.mirror(deltaTime); return; }
         
         if (this.attackTimer > 0) this.attackTimer -= deltaTime;
         
@@ -1035,7 +1038,7 @@ class Enemy {
     
     // 画像を1色で塗りつぶしたもの（被弾の白い点滅・ジャスト回避の水色）。画像と色ごとに1回だけ作って使い回す
     static getWhiteSilhouette(img, color = '#ffffff') {
-        // ※ゲームに Map クラス（マップ）があるので、標準の Map ではなく WeakMap を使う
+        // 画像ごとに覚える（WeakMap：画像を使わなくなったら一緒に消える）
         if (!Enemy._whiteCache) Enemy._whiteCache = new WeakMap();
         let byColor = Enemy._whiteCache.get(img);
         if (!byColor) { byColor = {}; Enemy._whiteCache.set(img, byColor); }
@@ -1183,6 +1186,7 @@ class EnemySpawner {
             }
             // ボスの弾（黒蝕狼の侵蝕弾など）
             if (enemy.ai && enemy.ai.pendingProjectiles.length) {
+                if (this.onBossShots) this.onBossShots(enemy.ai.pendingProjectiles); // 協力プレイのホスト：ほかの人にも送る
                 this.projectiles.push(...enemy.ai.pendingProjectiles);
                 enemy.ai.pendingProjectiles = [];
             }

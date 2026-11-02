@@ -2275,3 +2275,415 @@ body.touch .coin-box { transform: scale(1.2); transform-origin: top right; }
 body[data-boss="grudge_armor"] #bh2-fill { background: linear-gradient(180deg, #b48cff, #5a2a9a 60%, #2a0f4a); }
 body[data-boss="grudge_armor"] #boss-hud[data-phase="3"] #bh2-fill { background: linear-gradient(180deg, #d08cff, #6a1a8a 55%, #2a0636); }
 body[data-boss="grudge_armor"] #bh2-name { color: #e2ccff; }
+
+/* 協力プレイ：オンラインなので一時停止できない（ボタンも出さない） */
+body[data-coop="1"] #pause-btn { display: none !important; }
+#boss-result .ui-btn[hidden] { display: none; }
+
+/* ==========================================================
+   星の酒場（マルチプレイのロビー。tavern.js）
+   パネルの枠は、酒場の絵から切り出した札（assets/tiles/tavern/tv_plate.png）を border-image で伸ばして使う
+   ========================================================== */
+#tavern-ui {
+    display: none;
+    position: absolute;
+    inset: 0;
+    z-index: 25;
+    pointer-events: none;
+    font-family: 'DotGothic16', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+    color: #f2eeff;
+}
+body[data-state="tavern"] #tavern-ui.show { display: block; }
+#tavern-ui [hidden] { display: none !important; }
+#tavern-ui button, #tavern-ui .tv-panel { pointer-events: auto; }
+
+/* スマホ：歩いている時だけ左のスティックを出す（攻撃などのボタンは出さない） */
+body.touch[data-state="tavern"][data-tvview="walk"] #touch-controls { display: block; }
+body.touch[data-state="tavern"] #action-buttons { display: none; }
+
+.tv-panel {
+    position: absolute;
+    border: 18px solid transparent;
+    border-image: url('../assets/tiles/tavern/tv_plate.png') 26 fill / 18px stretch;
+    color: #fff3dc;
+    filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.6));
+}
+.tv-head {
+    font-size: 26px;
+    font-weight: normal;
+    letter-spacing: 6px;
+    text-align: center;
+    color: #ffd76a;
+    text-shadow: 0 2px 0 #5a3408, 0 0 12px rgba(255, 190, 80, 0.5);
+}
+
+/* 酒場のボタン（木の色・金の縁） */
+.tv-btn {
+    font-family: inherit;
+    font-size: 17px;
+    letter-spacing: 1px;
+    padding: 8px 16px;
+    color: #fff3d6;
+    background: linear-gradient(180deg, rgba(74, 46, 22, 0.96), rgba(38, 22, 12, 0.96));
+    border: 2px solid #c9a24a;
+    border-radius: 8px;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.tv-btn:hover, .tv-btn.focused {
+    color: #fff7d0;
+    background: linear-gradient(180deg, #7c5428, #4a2c12);
+    box-shadow: 0 0 0 2px rgba(255, 215, 110, 0.65), 0 3px 8px rgba(0, 0, 0, 0.5);
+}
+.tv-btn.primary { color: #2a1606; background: linear-gradient(180deg, #ffd977, #c8902e); border-color: #ffe9a8; }
+.tv-btn.primary:hover, .tv-btn.primary.focused { color: #1a0d02; background: linear-gradient(180deg, #ffe9a0, #e0a640); }
+.tv-btn.back { color: #ddd8f4; }
+
+/* 左上：ルームとつながっている人数 */
+#tv-top {
+    position: absolute;
+    left: 18px;
+    top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 16px;
+    background: rgba(10, 8, 30, 0.74);
+    border: 2px solid rgba(201, 162, 74, 0.85);
+    border-radius: 6px;
+    transform: scale(var(--hud-scale, 1));
+    transform-origin: top left;
+}
+#tv-room { font-size: 20px; letter-spacing: 2px; color: #ffd76a; text-shadow: 0 2px 0 #5a3408; }
+#tv-online { font-size: 14px; color: #9dffbe; }
+#tv-online.off { color: #c8c0e0; }
+#tv-help {
+    position: absolute;
+    left: 20px;
+    top: 84px;
+    font-size: 14px;
+    color: rgba(240, 232, 255, 0.8);
+    text-shadow: 0 1px 2px #000, 0 0 4px #000;
+    white-space: nowrap;
+}
+
+/* 右上：酒場を出る（スマホの全画面ボタンと重ならないよう少し内側） */
+#tv-exit {
+    position: absolute;
+    right: 76px;
+    top: 14px;
+    transform: scale(var(--hud-scale, 1));
+    transform-origin: top right;
+}
+
+/* 右：自分のパーティー */
+#tv-party {
+    right: 14px;
+    top: 70px;
+    width: 300px;
+    padding: 0 4px 2px;
+    transform: scale(var(--hud-scale, 1));
+    transform-origin: top right;
+}
+#tvp-title { font-size: 19px; letter-spacing: 1px; color: #ffd76a; }
+#tvp-sub { font-size: 14px; color: #c8c0e8; margin: 2px 0 6px; }
+#tvp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+#tvp-list li {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 6px;
+    font-size: 16px;
+    background: hsla(var(--hue, 40), 60%, 40%, 0.2);
+    border-left: 3px solid hsla(var(--hue, 40), 90%, 65%, 0.95);
+    border-radius: 3px;
+}
+#tvp-list li b { flex: 1; min-width: 0; font-weight: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tvp-list li.me b { color: #ffe9a0; }
+/* リーダー：金色の星 / 参加者：青白い星 */
+#tvp-list .star {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    background: #bfe8ff;
+    clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+}
+#tvp-list li.leader .star { background: #ffd23f; }
+#tvp-list .tag { flex: none; font-style: normal; font-size: 12px; padding: 1px 6px; border-radius: 8px; }
+#tvp-list .tag.in { color: #d6ecff; background: rgba(170, 210, 255, 0.22); border: 1px solid rgba(170, 210, 255, 0.6); }
+#tvp-list .tag.ok { color: #b8ffcb; background: #1e7a34; }
+.tvp-kick {
+    flex: none;
+    font-family: inherit;
+    font-size: 12px;
+    padding: 2px 8px;
+    color: #ffc2b4;
+    background: rgba(80, 20, 20, 0.6);
+    border: 1px solid rgba(255, 130, 110, 0.7);
+    border-radius: 6px;
+    cursor: pointer;
+}
+.tvp-kick:hover { background: rgba(130, 30, 30, 0.8); }
+.tvp-buttons { display: flex; gap: 6px; margin-top: 8px; }
+.tvp-buttons .tv-btn { flex: 1; font-size: 14px; padding: 6px 6px; }
+#tvp-leave.confirm { color: #ffc2b4; border-color: rgba(255, 130, 110, 0.9); }
+
+/* マスター・掲示板・扉の近く：調べるボタン（PC は E キーの印つき） */
+#tv-act {
+    position: absolute;
+    left: 50%;
+    bottom: 34px;
+    transform: translateX(-50%) scale(var(--hud-scale, 1));
+    transform-origin: bottom center;
+    min-width: 200px;
+    padding: 12px 28px;
+    font-family: inherit;
+    font-size: 22px;
+    letter-spacing: 3px;
+    color: #2a1606;
+    background: linear-gradient(180deg, #ffe9a0, #d9a93e);
+    border: 3px solid #fff3c4;
+    border-radius: 30px;
+    cursor: pointer;
+    animation: tv-act-glow 1.4s ease-in-out infinite;
+}
+body:not(.touch) #tv-act::before {
+    content: 'E';
+    display: inline-block;
+    margin-right: 10px;
+    padding: 0 7px;
+    font-size: 16px;
+    letter-spacing: 0;
+    vertical-align: 2px;
+    border: 2px solid #5a3408;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.55);
+}
+body.touch #tv-act {
+    left: auto;
+    right: 60px;
+    bottom: 60px;
+    min-width: 0;
+    padding: 18px 30px;
+    font-size: 26px;
+    transform: scale(var(--hud-scale, 1));
+    transform-origin: bottom right;
+}
+@keyframes tv-act-glow {
+    0%, 100% { box-shadow: 0 0 0 2px #5a3408, 0 0 10px rgba(255, 210, 110, 0.5); }
+    50% { box-shadow: 0 0 0 2px #5a3408, 0 0 24px rgba(255, 220, 130, 0.95); }
+}
+
+/* マスターとの会話（下のメッセージの窓・右に選ぶ物） */
+#tv-dialog {
+    left: 50%;
+    bottom: 16px;
+    width: 1040px;
+    min-height: 160px;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 18px;
+    padding: 2px 10px;
+}
+.tvd-body { flex: 1; min-width: 0; }
+.tvd-name {
+    display: inline-block;
+    margin-bottom: 8px;
+    padding: 2px 14px;
+    font-size: 18px;
+    letter-spacing: 3px;
+    color: #ffd76a;
+    border-bottom: 2px solid rgba(201, 162, 74, 0.75);
+}
+#tvd-text { font-size: 24px; line-height: 1.65; letter-spacing: 1px; white-space: pre-line; color: #fff6e0; }
+#tvd-choices { display: flex; flex-direction: column; justify-content: center; gap: 8px; width: 220px; flex: none; }
+.tvd-choice {
+    position: relative;
+    font-family: inherit;
+    font-size: 20px;
+    letter-spacing: 2px;
+    padding: 9px 12px;
+    color: #fff3d6;
+    background: rgba(255, 255, 255, 0.06);
+    border: 2px solid rgba(201, 162, 74, 0.6);
+    border-radius: 8px;
+    cursor: pointer;
+}
+.tvd-choice.focused, .tvd-choice:hover { color: #fff7d0; background: rgba(201, 162, 74, 0.28); box-shadow: 0 0 0 2px rgba(255, 215, 110, 0.6); }
+.tvd-choice.focused::before { content: '▶'; position: absolute; left: 9px; top: 50%; transform: translateY(-50%); font-size: 13px; color: #ffd76a; }
+.tvd-choice.back { color: #c8c0e0; }
+body.touch #tvd-text { font-size: 28px; }
+body.touch .tvd-choice { font-size: 24px; padding: 12px; }
+
+/* クエスト掲示板（後ろを暗くする） */
+#tv-board {
+    left: 50%;
+    top: 50%;
+    width: 880px;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 4px 12px 8px;
+    box-shadow: 0 0 0 2000px rgba(4, 4, 16, 0.45);
+}
+#tvb-list { display: flex; flex-direction: column; gap: 8px; max-height: 430px; overflow-y: auto; padding-right: 4px; }
+.tvb-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 14px;
+    background: linear-gradient(180deg, rgba(255, 236, 190, 0.1), rgba(255, 236, 190, 0.04));
+    border: 1px solid rgba(201, 162, 74, 0.5);
+    border-radius: 6px;
+}
+.tvb-row.mine { border-color: #ffd76a; box-shadow: inset 0 0 0 1px rgba(255, 215, 110, 0.5); }
+.tvb-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.tvb-name { font-size: 21px; font-weight: normal; color: #fff3d6; }
+.tvb-info { font-size: 14px; color: #c8c0e8; }
+.tvb-side { display: flex; align-items: center; gap: 12px; flex: none; }
+.tvb-count { font-size: 22px; color: #fff; font-variant-numeric: tabular-nums; }
+.tvb-st { font-size: 14px; padding: 2px 10px; border-radius: 10px; color: #d0c8f0; background: rgba(160, 150, 200, 0.25); }
+.tvb-st.open { color: #9dffbe; background: rgba(80, 200, 120, 0.22); border: 1px solid rgba(120, 255, 160, 0.6); }
+.tvb-join {
+    min-width: 112px;
+    font-family: inherit;
+    font-size: 17px;
+    padding: 8px 16px;
+    color: #2a1606;
+    background: linear-gradient(180deg, #ffd977, #c8902e);
+    border: 2px solid #ffe9a8;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.tvb-join.focused, .tvb-join:hover { background: linear-gradient(180deg, #ffe9a0, #e0a640); box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.6); }
+.tvb-join.disabled { color: #b8b0d0; background: rgba(255, 255, 255, 0.08); border-color: rgba(160, 150, 200, 0.5); cursor: not-allowed; }
+.tvb-join.disabled.focused { box-shadow: 0 0 0 2px rgba(200, 190, 240, 0.6); }
+.tvb-empty { padding: 30px 0; text-align: center; font-size: 17px; color: #c8c0e8; }
+#tvb-close { align-self: center; min-width: 180px; }
+/* スマホ：画面ごと小さくなるので、掲示板・扉の中・確認のパネルを大きくして読みやすく・押しやすく */
+body.touch #tv-board { transform: translate(-50%, -50%) scale(min(var(--hud-scale, 1), 1.38)); }
+body.touch #tv-confirm { transform: translate(-50%, -50%) scale(var(--hud-scale, 1)); }
+body.touch #tv-wait { transform: translateX(-50%) scale(min(var(--hud-scale, 1), 1.5)); transform-origin: bottom center; }
+
+/* 扉の中で待っている（扉が見えるように下に出す） */
+#tv-wait {
+    left: 50%;
+    bottom: 18px;
+    width: 640px;
+    transform: translateX(-50%);
+    padding: 2px 12px 6px;
+    text-align: center;
+}
+#tv-wait .tv-head { font-size: 21px; letter-spacing: 3px; }
+#tvw-text { margin: 6px 0 10px; font-size: 17px; line-height: 1.6; white-space: pre-line; }
+.tvw-buttons { display: flex; justify-content: center; gap: 14px; }
+.tvw-buttons .tv-btn { min-width: 170px; }
+
+/* 酒場を出る確認 */
+#tv-confirm {
+    left: 50%;
+    top: 50%;
+    width: 520px;
+    transform: translate(-50%, -50%);
+    padding: 6px 14px 10px;
+    text-align: center;
+    box-shadow: 0 0 0 2000px rgba(4, 4, 16, 0.45);
+}
+.tvc-note { margin: 8px 0 14px; font-size: 15px; color: #c8c0e8; }
+
+/* 知らせ（上の真ん中。--sec の間出す） */
+#tv-toast {
+    position: absolute;
+    left: 50%;
+    top: 92px;
+    max-width: 820px;
+    transform: translateX(-50%);
+    padding: 10px 24px;
+    font-size: 18px;
+    line-height: 1.5;
+    text-align: center;
+    color: #fff4d0;
+    background: rgba(10, 12, 34, 0.93);
+    border: 2px solid #c9a24a;
+    border-radius: 6px;
+    opacity: 0;
+    pointer-events: none;
+}
+#tv-toast.show { animation: tv-toast var(--sec, 2.6s) ease forwards; }
+@keyframes tv-toast {
+    0% { opacity: 0; transform: translate(-50%, -8px); }
+    8%, 86% { opacity: 1; transform: translate(-50%, 0); }
+    100% { opacity: 0; transform: translate(-50%, 0); }
+}
+
+/* モンスター選択をクエスト受注に使う時は、マイベストを出さない */
+#scr-monster.mp #monster-ranking { display: none; }
+
+/* ---- マルチプレイの準備画面（screens.js の refreshMpPrep） ---- */
+#scr-mpprep { gap: 8px; }
+#mpp-title { margin-bottom: 0; }
+#mpp-sub { font-size: 18px; letter-spacing: 2px; color: #ffb08a; }
+#scr-mpprep.pvp #mpp-sub { color: #ffb6c8; }
+#mpp-slots { display: flex; gap: 16px; margin: 6px 0 2px; }
+.mpp-card {
+    position: relative;
+    width: 250px;
+    min-height: 372px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 14px 12px;
+    background: linear-gradient(180deg, rgba(20, 22, 60, 0.94), rgba(8, 10, 30, 0.94));
+    border: 3px solid rgba(201, 162, 74, 0.75);
+    border-radius: 6px;
+    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.6);
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.mpp-card.me { border-color: #ffd76a; }
+.mpp-card.ready { border-color: #6be08a; box-shadow: 0 8px 26px rgba(0, 0, 0, 0.6), 0 0 18px rgba(90, 255, 140, 0.45); }
+.mpp-card.empty { justify-content: center; background: rgba(8, 10, 30, 0.55); border-style: dashed; border-color: rgba(201, 162, 74, 0.35); box-shadow: none; }
+.mpp-empty { font-size: 22px; letter-spacing: 4px; color: rgba(220, 214, 250, 0.45); }
+.mpp-card canvas { width: 150px; height: 150px; }
+.mpp-name { display: flex; align-items: center; gap: 6px; max-width: 100%; font-size: 19px; }
+.mpp-name b { font-weight: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mpp-role { font-style: normal; color: #bfe8ff; text-shadow: 0 0 6px rgba(140, 210, 255, 0.9); }
+.mpp-role.leader { color: #ffd23f; text-shadow: 0 0 6px rgba(255, 200, 60, 0.9); }
+.mpp-info { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; width: 100%; font-size: 15px; }
+.mpp-info dt { color: #ffd76a; }
+.mpp-info dd { margin: 0; color: #f2eeff; text-align: right; }
+.mpp-palette { display: flex; gap: 5px; }
+.mpp-mg {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(201, 162, 74, 0.45);
+    border-radius: 50%;
+}
+.mpp-mg > * { max-width: 30px; max-height: 30px; }
+.mpp-mg img { width: 30px; height: 30px; }
+.mpp-state { margin-top: auto; font-size: 18px; letter-spacing: 2px; color: #c8c0e0; }
+.mpp-card.ready .mpp-state { color: #9dffbe; text-shadow: 0 0 8px rgba(90, 255, 140, 0.7); }
+.mpp-check {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    margin-right: 6px;
+    line-height: 24px;
+    font-style: normal;
+    font-size: 15px;
+    text-align: center;
+    color: #b8ffcb;
+    background: #1e7a34;
+    border-radius: 50%;
+}
+#mpp-hint { min-height: 22px; font-size: 16px; color: #e8e2ff; }
+.mpp-buttons { gap: 12px; margin-top: 4px; }
+.mpp-buttons .menu-item { width: 190px; font-size: 20px; letter-spacing: 2px; }
+.mpp-buttons .menu-item[hidden] { display: none; }
+#mpp-ready.on { color: #0f2a14; background: linear-gradient(180deg, #a8ffbf, #3fb866); border-color: #d8ffe2; }

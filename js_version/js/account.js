@@ -274,11 +274,13 @@ const Account = {
 
     // サーバーの最新のデータを読み直す（ほかの端末で遊んだ分を、この端末にも出す）
     //   送っていないできごとがある時・送っている最中は読み直さない（送る時に読み直すので）
-    async refresh() {
+    //   force：すぐ読み直す（協力プレイの報酬をサーバーが足した後など。送っていない物があれば、送る時に読み直す）
+    async refresh(force = false) {
         if (!this.ready || !this.user || this.user.mode !== 'cloud' || !this.token) return;
+        if (force && this.pending.length) { await this.flush().catch(() => {}); return; }
         if (this._flushing || this.pending.length) return;
         const now = Date.now();
-        if (now - this._lastRefresh < this.REFRESH_GAP_MS) return;
+        if (!force && now - this._lastRefresh < this.REFRESH_GAP_MS) return;
         this._lastRefresh = now;
         const token = this.token, gen = this._saveGen;
         let r;

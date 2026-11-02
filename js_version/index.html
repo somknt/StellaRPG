@@ -299,8 +299,9 @@
                     <div class="menu-deco">✦ ─────── ✧ ─────── ✦</div>
                     <h2 class="menu-title">バトルモード</h2>
                     <button class="menu-item ui-btn" id="battle-solo" type="button" data-nav>ソロプレイ</button>
-                    <button class="menu-item ui-btn disabled" id="battle-multi" type="button" data-nav data-nav-skip aria-disabled="true">
-                        マルチプレイ<small>今後実装予定</small>
+                    <!-- マルチプレイ：星の酒場（オンラインのアカウントの時だけ。screens.js の openMultiplayer） -->
+                    <button class="menu-item ui-btn" id="battle-multi" type="button" data-nav>
+                        マルチプレイ<small>星の酒場で仲間と協力プレイ・PvP</small>
                     </button>
                     <button class="menu-item ui-btn back" id="battle-back" type="button" data-nav>メニューに戻る</button>
                 </div>
@@ -484,7 +485,87 @@
                 </div>
             </div>
             
+            <!-- マルチプレイの準備画面（全員が扉に入った後。後ろは星の酒場。screens.js の refreshMpPrep） -->
+            <div class="screen" id="scr-mpprep">
+                <h2 class="screen-title" id="mpp-title">協力プレイ 準備</h2>
+                <p id="mpp-sub"></p>
+                <div id="mpp-slots"></div>
+                <p id="mpp-hint"></p>
+                <div class="screen-buttons mpp-buttons">
+                    <button class="menu-item ui-btn" id="mpp-equip" type="button" data-nav>装備変更</button>
+                    <button class="menu-item ui-btn" id="mpp-magic" type="button" data-nav>魔法変更</button>
+                    <button class="menu-item ui-btn primary" id="mpp-ready" type="button" data-nav>準備完了</button>
+                    <!-- リーダーだけ（全員が準備完了の時に押せる） -->
+                    <button class="menu-item ui-btn primary" id="mpp-start" type="button" hidden>バトル開始</button>
+                    <button class="menu-item ui-btn back" id="mpp-back" type="button" data-nav>戻る</button>
+                </div>
+            </div>
+            
             <div id="screen-toast"></div>
+        </div>
+        
+        <!-- 星の酒場（マルチプレイのロビー）の画面の上の表示。tavern.js -->
+        <div id="tavern-ui">
+            <!-- 左上：ルームとつながっている人数 -->
+            <div id="tv-top">
+                <span id="tv-room">星の酒場</span>
+                <span id="tv-online" class="off">○ つないでいます…</span>
+            </div>
+            <p id="tv-help" class="pc-only">WASD：移動　E / Enter：調べる　Esc：酒場を出る</p>
+            <!-- 右上：酒場を出る -->
+            <button class="ui-btn tv-btn" id="tv-exit" type="button">酒場を出る</button>
+            
+            <!-- 右：自分のパーティー（入っている時だけ） -->
+            <div class="tv-panel" id="tv-party" hidden>
+                <div id="tvp-title"></div>
+                <div id="tvp-sub"></div>
+                <ul id="tvp-list"></ul>
+                <div class="tvp-buttons">
+                    <button class="ui-btn tv-btn" id="tvp-close" type="button" hidden>募集を締め切る</button>
+                    <button class="ui-btn tv-btn" id="tvp-leave" type="button">パーティーを抜ける</button>
+                </div>
+            </div>
+            
+            <!-- マスター・掲示板・扉の近く：調べるボタン -->
+            <button class="ui-btn" id="tv-act" type="button" hidden>話す</button>
+            
+            <!-- マスターとの会話 -->
+            <div class="tv-panel tv-modal" id="tv-dialog" hidden>
+                <div class="tvd-body">
+                    <div class="tvd-name">マスター</div>
+                    <p id="tvd-text"></p>
+                </div>
+                <div id="tvd-choices"></div>
+            </div>
+            
+            <!-- クエスト掲示板 -->
+            <div class="tv-panel tv-modal" id="tv-board" hidden>
+                <h3 class="tv-head">クエスト掲示板</h3>
+                <div id="tvb-list"></div>
+                <button class="ui-btn tv-btn back" id="tvb-close" type="button" data-nav>閉じる</button>
+            </div>
+            
+            <!-- 扉に入って待っている -->
+            <div class="tv-panel tv-modal" id="tv-wait" hidden>
+                <h3 class="tv-head" id="tvw-title">扉の中で待っています</h3>
+                <p id="tvw-text"></p>
+                <div class="tvw-buttons">
+                    <button class="ui-btn tv-btn primary" id="tvw-close" type="button" hidden>募集を締め切る</button>
+                    <button class="ui-btn tv-btn back" id="tvw-cancel" type="button" data-nav>扉から出る</button>
+                </div>
+            </div>
+            
+            <!-- 酒場を出る確認 -->
+            <div class="tv-panel tv-modal" id="tv-confirm" hidden>
+                <h3 class="tv-head">星の酒場を出ますか？</h3>
+                <p class="tvc-note">パーティーに入っている時は、パーティーからも抜けます</p>
+                <div class="tvw-buttons">
+                    <button class="ui-btn tv-btn primary" id="tvc-yes" type="button" data-nav>出る</button>
+                    <button class="ui-btn tv-btn back" id="tvc-no" type="button" data-nav>やめる</button>
+                </div>
+            </div>
+            
+            <div id="tv-toast"></div>
         </div>
         
         <!-- 画面切り替えのフェード -->
@@ -557,9 +638,13 @@
     <script src="js/arena_map.js"></script>
     <script src="js/ruins_map.js"></script>
     <script src="js/battlefield_map.js"></script>
+    <script src="js/tavern_map.js"></script>
     <script src="js/battle_mode.js"></script>
     <script src="js/online_config.js"></script>
     <script src="js/account.js"></script>
+    <!-- マルチプレイの通信（supabase-js 2.118.0 を同じサーバーから読む・Realtime の WebSocket） -->
+    <script src="js/vendor/supabase.js"></script>
+    <script src="js/net.js"></script>
     <script src="js/settings.js"></script>
     <script src="js/boss_data.js"></script>
     <script src="js/boss_ai.js"></script>
@@ -567,6 +652,8 @@
     <script src="js/armor_ai.js"></script>
     <script src="js/battle_records.js"></script>
     <script src="js/boss_battle.js"></script>
+    <script src="js/tavern.js"></script>
+    <script src="js/mp_battle.js"></script>
     <script src="js/title_atlas.js"></script>
     <script src="js/screens.js"></script>
     <script src="js/ui.js"></script>
