@@ -293,10 +293,14 @@ AssetManager.BATTLEFIELD_ART_READY = [
     'bf_wheel', 'bf_planks', 'bf_rubble_wall', 'bf_rubble', 'bf_pillar_broken', 'bf_catapult'
 ];
 // 星の酒場の素材（art_source/tavern/tools/cut.ps1 で、星灯りのマルチプレイヤー酒場・星降る酒場のタイルセット・熟練バーテンダーから切り出した物）
-// tv_master_1〜8：待機（4 = ウインク・8 = 目を閉じる）/ 9〜16：カクテルを作る
+// tv_bar_*：マスター（髭のバーテンダー。art_source/tavern/tools/bartender.ps1 で 2 枚のスプライトシートから切り出した物）
+//   idle/blink/smile = 待機、polish = グラスみがき、towel = タオル、mix = カクテル、side/back/walk = 棚を見に行く
 // tp_*：マップの部品（art_source/tavern/tools/parts.ps1 で、星降る酒場のタイルセットから主人公に合う大きさで切り出した物）
 AssetManager.TAVERN_ART_READY = [
-    ...Array.from({ length: 16 }, (_, i) => `tv_master_${i + 1}`),
+    'tv_bar_idle_1', 'tv_bar_idle_2', 'tv_bar_idle_3', 'tv_bar_blink', 'tv_bar_smile',
+    'tv_bar_polish_1', 'tv_bar_polish_2', 'tv_bar_polish_3', 'tv_bar_polish_4', 'tv_bar_towel_1', 'tv_bar_towel_2',
+    'tv_bar_mix_1', 'tv_bar_mix_2', 'tv_bar_mix_3', 'tv_bar_mix_4', 'tv_bar_mix_5', 'tv_bar_mix_6', 'tv_bar_mix_7',
+    'tv_bar_side', 'tv_bar_back_1', 'tv_bar_back_2', 'tv_bar_walk_1', 'tv_bar_walk_2', 'tv_bar_walk_3', 'tv_bar_walk_4', 'tv_bar_walk_5',
     'tv_plate', 'tv_spark_gold', 'tv_spark_blue', 'tv_spark_pink', 'tv_ring', 'tv_glow_purple', 'tv_beam_gold',
     'tp_floor_a', 'tp_floor_b', 'tp_floor_c', 'tp_floor_d', 'tp_floor_lit', 'tp_floor_glow', 'tp_carpet', 'tp_carpet_b', 'tp_carpet_c',
     'tp_circle', 'tp_rug', 'tp_star', 'tp_wall_a', 'tp_wall_win', 'tp_wall_b', 'tp_wall_banner', 'tp_wall_c',

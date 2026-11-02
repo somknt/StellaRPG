@@ -34,7 +34,7 @@ class TavernScene {
         return {
             root: $('tavern-ui'), room: $('tv-room'), online: $('tv-online'), exit: $('tv-exit'),
             party: $('tv-party'), partyTitle: $('tvp-title'), partySub: $('tvp-sub'), partyList: $('tvp-list'),
-            partyClose: $('tvp-close'), partyLeave: $('tvp-leave'),
+            partyClose: $('tvp-close'), partyLeave: $('tvp-leave'), partyFold: $('tvp-fold'),
             act: $('tv-act'), dialog: $('tv-dialog'), dText: $('tvd-text'), dChoices: $('tvd-choices'),
             board: $('tv-board'), bList: $('tvb-list'), bClose: $('tvb-close'),
             wait: $('tv-wait'), wTitle: $('tvw-title'), wText: $('tvw-text'), wClose: $('tvw-close'), wCancel: $('tvw-cancel'),
@@ -56,6 +56,10 @@ class TavernScene {
         on(u.wClose, () => this.setClosed(true));
         on(u.partyClose, () => { const p = this.party; if (p) this.setClosed(!p.closed); });
         on(u.partyLeave, (el) => this.confirmLeaveParty(el));
+        // パーティーの表示をたたむ / ひらく（たたんだかは覚えておく）
+        on(u.partyFold, () => this.setPartyFold(!this.partyFolded));
+        try { this.partyFolded = localStorage.getItem('hoshinoko.tavern.partyFold') === '1'; } catch (e) { this.partyFolded = false; }
+        this.setPartyFold(this.partyFolded, true);
         // 走る（押すたびに 走る ⇔ 歩く。PC は Shift を押している間も走る）
         on(u.run, () => this.setRunning(!this.running));
         // チャット
@@ -260,6 +264,7 @@ class TavernScene {
             p: (m) => this.onRemoteState(m),
             hi: (m) => { if (m.s !== this.session) this.sendState(true); },
             nudge: (m) => { if (this.party && m.p === this.party.id) this.pollSoon(); },
+            pc: (m) => this.onPvpCfgMsg(m),
             chat: (m) => this.onChat(m),
             presence: (list) => this.onPresence(list),
             status: (s) => {
@@ -406,8 +411,10 @@ class TavernScene {
         const mk = this.markCode();
         const st = { s: this.session, x: Math.round(p.position.x), y: Math.round(p.position.y), d: p.direction[0], m: p.isMoving ? 1 : 0,
             r: p.isDashing ? 1 : 0, t: Math.round(performance.now()), n: Account.playerName, g: Account.gender, k: mk };
+        const pc = this.pvpCfgCode();
+        if (pc) st.pc = pc;
         const L = this.lastSent;
-        const changed = !L || L.x !== st.x || L.y !== st.y || L.d !== st.d || L.m !== st.m || L.r !== st.r || JSON.stringify(L.k) !== JSON.stringify(mk);
+        const changed = !L || L.x !== st.x || L.y !== st.y || L.d !== st.d || L.m !== st.m || L.r !== st.r || JSON.stringify(L.k) !== JSON.stringify(mk) || JSON.stringify(L.pc) !== JSON.stringify(pc);
         const now = performance.now();
         const gap = now - (this.sentAt || 0);
         if (!force && !(changed && gap >= TavernScene.SEND_MS) && gap < TavernScene.IDLE_MS) return;
@@ -438,6 +445,7 @@ class TavernScene {
         }
         r.name = String(m.n || '').slice(0, 12);
         r.mark = m.k || null;
+        if (m.pc) this.onPvpCfg(m.pc, r.mark);
         r.lastSeen = now;
         r.leftAt = 0;
         if (r.p.gender !== m.g && (m.g === 'male' || m.g === 'female')) r.p.gender = m.g;
@@ -507,7 +515,7 @@ class TavernScene {
     
     pollInterval() {
         if (this.game.coop || this.game.pvp || this._pvpStarting) return 5;
-        if (this.game.screens.current === 'mp_prep') return 1;
+        if (this.game.screens.current === 'mp_prep' || this.game.screens.current === 'pvp_rule') return 1;
         return 2;
     }
     
@@ -543,11 +551,12 @@ class TavernScene {
         const screens = this.game.screens;
         // 全員が扉に入った：準備画面へ
         const fighting = !!(this.game.coop || this.game.pvp || this._pvpStarting);
-        if (p && p.status === 'prep' && !fighting && screens.current !== 'mp_prep' && screens.current !== 'equip' && !screens.busy) {
+        this.syncPvpCfg(p);
+        if (p && p.status === 'prep' && !fighting && screens.current !== 'mp_prep' && screens.current !== 'pvp_rule' && screens.current !== 'equip' && !screens.busy) {
             this.openPrep();
         }
         // 準備画面のまま、だれかが戻った：酒場へ
-        if ((!p || p.status === 'open') && (screens.current === 'mp_prep' || (screens.current === 'equip' && screens.equipReturn === 'mp_prep')) && !screens.busy) {
+        if ((!p || p.status === 'open') && (screens.current === 'mp_prep' || screens.current === 'pvp_rule' || (screens.current === 'equip' && screens.equipReturn === 'mp_prep')) && !screens.busy) {
             const msg = p ? 'パーティーの人が準備画面から戻りました' : 'パーティーがなくなりました';
             screens.equipReturn = null;
             screens.transition(() => { this.showScene(); this.toast(msg); });
@@ -558,6 +567,7 @@ class TavernScene {
             else this.startCoop(p);
         }
         if (screens.current === 'mp_prep') screens.refreshMpPrep();
+        if (screens.current === 'pvp_rule') screens.refreshPvpRule();
         this.refreshUI();
         this.sendState(true);
     }
@@ -713,7 +723,10 @@ class TavernScene {
     openPrep() {
         const screens = this.game.screens;
         screens.equipReturn = null;
-        screens.transition(() => { this.hideScene(); screens.setScreen('mp_prep'); });
+        // PvP：先に対戦の設定（制限時間・何点先取）。リーダーが決めたら準備画面へ
+        const p = this.party;
+        const to = p && p.kind === 'pvp' && !(this.pvpCfg && this.pvpCfg.p === p.id && this.pvpCfg.ok) ? 'pvp_rule' : 'mp_prep';
+        screens.transition(() => { this.hideScene(); screens.setScreen(to); });
         playSE('battle_start');
     }
     
@@ -754,6 +767,102 @@ class TavernScene {
         if (r) playSE('ui_select');
     }
     
+    // ---------- PvP の対戦の設定（制限時間・何点先取） ----------
+    // リーダーが決めて、酒場のチャンネルで送る（サーバーには書かない。対戦が始まったら、ホスト＝リーダーの設定にそろえる。pvp_battle.js）
+    //   pvpCfg：{ p: パーティーの id, tm: 分, pt: 何点先取, ok: 決定した（準備画面へ進む）, v: 決めた回数 }
+    syncPvpCfg(p) {
+        if (!p || p.kind !== 'pvp') return;
+        const c = this.pvpCfg;
+        if (!c || c.p !== p.id) {
+            const saved = TavernScene.loadPvpRule();
+            this.pvpCfg = { p: p.id, tm: saved.tm, pt: saved.pt, ok: false, v: 0, got: !!p.leader_is_me };
+        } else if (p.status === 'open' && c.ok) {
+            // だれかが扉から出た：次に入った時は、もう一度 設定から
+            c.ok = false;
+        }
+    }
+    static loadPvpRule() {
+        try { return PvpBattle.normRule(JSON.parse(localStorage.getItem('hk_pvp_rule') || 'null')); } catch (e) { return PvpBattle.normRule(null); }
+    }
+    // 送る形 [分, 点, 決定, 回数]（リーダーで、PvP の準備中の時だけ）
+    pvpCfgCode() {
+        const p = this.party, c = this.pvpCfg;
+        if (!p || p.kind !== 'pvp' || !p.leader_is_me || p.status !== 'prep' || !c || c.p !== p.id) return null;
+        return [c.tm, c.pt, c.ok ? 1 : 0, c.v];
+    }
+    sendPvpCfg() {
+        const code = this.pvpCfgCode();
+        if (code && this.lobby) this.lobby.send('pc', { s: this.session, p: this.party.id, c: code });
+        this.sendState(true);
+    }
+    onPvpCfgMsg(m) {
+        if (!m || m.s === this.session) return;
+        const r = this.remotes.get(m.s);
+        if (r && Array.isArray(m.c)) this.onPvpCfg(m.c, r.mark, m.p);
+    }
+    // リーダーから届いた設定（パーティーのリーダーの物だけ使う）
+    onPvpCfg(code, mark, pid) {
+        const p = this.party;
+        if (!p || p.kind !== 'pvp' || p.leader_is_me || !Array.isArray(code) || !mark || mark.p !== p.id || mark.r !== 'L') return;
+        if (pid && pid !== p.id) return;
+        this.syncPvpCfg(p);
+        const c = this.pvpCfg;
+        const r = PvpBattle.normRule({ tm: code[0], pt: code[1] });
+        const ok = !!code[2];
+        const changed = c.tm !== r.tm || c.pt !== r.pt || c.ok !== ok || !c.got;
+        c.tm = r.tm; c.pt = r.pt; c.ok = ok; c.v = Number(code[3]) || 0; c.got = true;
+        if (!changed) return;
+        const screens = this.game.screens;
+        if (screens.current === 'pvp_rule') screens.refreshPvpRule();
+        if (screens.current === 'mp_prep') screens.refreshMpPrep();
+        if (screens.busy || p.status !== 'prep') return;
+        if (ok && screens.current === 'pvp_rule') { playSE('ui_select'); screens.transition(() => screens.setScreen('mp_prep')); }
+        else if (!ok && (screens.current === 'mp_prep' || (screens.current === 'equip' && screens.equipReturn === 'mp_prep'))) {
+            screens.equipReturn = null;
+            screens.transition(() => screens.setScreen('pvp_rule'));
+            this.toast('リーダーが対戦の設定を変えています');
+        }
+    }
+    // リーダー：設定を選ぶ（key：'tm' / 'pt'）
+    setPvpRule(key, val) {
+        const p = this.party, c = this.pvpCfg;
+        if (!p || !c || c.p !== p.id) return;
+        if (!p.leader_is_me) { playSE('ui_error'); this.toast('対戦の設定はリーダーが決めます'); return; }
+        const r = PvpBattle.normRule({ tm: key === 'tm' ? val : c.tm, pt: key === 'pt' ? val : c.pt });
+        if (r.tm === c.tm && r.pt === c.pt) return;
+        c.tm = r.tm; c.pt = r.pt; c.v++;
+        try { localStorage.setItem('hk_pvp_rule', JSON.stringify(r)); } catch (e) { /* 保存できなくても続ける */ }
+        playSE('ui_select');
+        this.sendPvpCfg();
+        this.game.screens.refreshPvpRule();
+    }
+    // リーダー：決定 → 2人とも準備画面へ
+    confirmPvpRule() {
+        const p = this.party, c = this.pvpCfg, screens = this.game.screens;
+        if (!p || !c || c.p !== p.id) return;
+        if (!p.leader_is_me) { playSE('ui_error'); this.toast('対戦の設定はリーダーが決めます'); return; }
+        c.ok = true; c.v++;
+        this.sendPvpCfg();
+        screens.transition(() => screens.setScreen('mp_prep'));
+    }
+    // リーダー：準備画面から、設定をやり直す（2人とも設定の画面へ。準備完了は解除）
+    reopenPvpRule() {
+        const p = this.party, c = this.pvpCfg, screens = this.game.screens;
+        if (!p || !c || c.p !== p.id || !p.leader_is_me) return;
+        c.ok = false; c.v++;
+        this.sendPvpCfg();
+        screens.equipReturn = null;
+        screens.transition(() => screens.setScreen('pvp_rule'));
+    }
+    // 設定の画面に入った：準備完了なら解除（設定が変わるかもしれないので）
+    onEnterPvpRule() {
+        const m = this.me;
+        if (m && m.ready) {
+            const lo = Account.normalizeLoadout(Account.loadout);
+            this.act('hk_mp_ready', { p_ready: false, p_loadout: TavernScene.loadoutForServer(lo) });
+        }
+        if (this.party && this.party.leader_is_me) this.sendPvpCfg();
+    }
     // PvP の戦いへ（pvp_battle.js）
     startPvp(party) {
         const game = this.game;
@@ -814,7 +923,8 @@ class TavernScene {
         if (!this.active) return;
         this.pollT += dt;
         if (this.pollT >= this.pollInterval()) { this.pollT = 0; this.poll(); }
-        if (this.inScene || this.game.screens.current === 'mp_prep') this.sendState();
+        const cur = this.game.screens.current;
+        if (this.inScene || cur === 'mp_prep' || cur === 'pvp_rule') this.sendState();
     }
     
     update(dt, input) {
@@ -823,6 +933,8 @@ class TavernScene {
         for (const f of this.fx) f.t += dt;
         this.fx = this.fx.filter(f => f.t < f.life);
         if (this.masterMix !== null && this.masterMix !== undefined) this.masterMix += dt;
+        this.updateMaster(dt);
+        this.updatePartyFade();
         const busy = this.game.screens.busy;
         // 扉に入って待っている間・パネルを開いている間は歩けない
         const frozen = this.view !== 'walk' || (this.me && this.me.entered) || this.chatOpen;
@@ -957,7 +1069,39 @@ class TavernScene {
         }
     }
     
-    renderParty() {
+    // ---------- パーティーの表示（右） ----------
+    setPartyFold(v, quiet = false) {
+        this.partyFolded = !!v;
+        if (!quiet) { try { localStorage.setItem('hoshinoko.tavern.partyFold', this.partyFolded ? '1' : '0'); } catch (e) { /* 保存できない端末 */ } }
+        const u = this.ui;
+        if (u.party) u.party.classList.toggle('folded', this.partyFolded);
+        if (u.partyFold) {
+            u.partyFold.textContent = this.partyFolded ? '▼' : '▲';
+            u.partyFold.setAttribute('aria-expanded', this.partyFolded ? 'false' : 'true');
+            u.partyFold.setAttribute('aria-label', this.partyFolded ? 'パーティーの表示をひらく' : 'パーティーの表示をたたむ');
+        }
+    }
+    // 主人公・近くの扉がパーティーの表示と重なったら、表示をうすくする（後ろが見えるように）
+    updatePartyFade() {
+        const box = this.ui.party;
+        if (!box || box.hidden || !this.player || !this.inScene) { if (box) box.classList.remove('thru'); return; }
+        const canvas = this.game.canvas;
+        const cr = canvas.getBoundingClientRect(), br = box.getBoundingClientRect();
+        if (!cr.width || !br.width) return;
+        const kx = cr.width / canvas.width, ky = cr.height / canvas.height;
+        const cam = this.camera.position;
+        // 世界の四角 → 画面の四角（CSS の px）
+        const toScreen = (x0, y0, x1, y1) => ({ l: cr.left + (x0 - cam.x) * kx, t: cr.top + (y0 - cam.y) * ky, r: cr.left + (x1 - cam.x) * kx, b: cr.top + (y1 - cam.y) * ky });
+        const hit = (a) => a.l < br.right && a.r > br.left && a.t < br.bottom && a.b > br.top;
+        const p = this.player, s = p.drawSize || 80;
+        let thru = hit(toScreen(p.position.x - s * 0.45, p.position.y - s * 0.6, p.position.x + s * 0.45, p.position.y + s * 0.5));
+        // 近くの扉（扉と名前の札）が表示の下にかくれている時も
+        if (!thru) for (const d of this.map.layers.doors) {
+            if (Math.hypot(p.position.x - d.x, p.position.y - d.y) > 300) continue;
+            if (hit(toScreen(d.x - d.w / 2 - 20, d.doorTop, d.x + d.w / 2 + 20, d.top + 26))) { thru = true; break; }
+        }
+        if (box.classList.contains('thru') !== thru) box.classList.toggle('thru', thru);
+    }    renderParty() {
         const u = this.ui, p = this.party;
         if (!u.party) return;
         u.party.hidden = !p;
@@ -1096,29 +1240,76 @@ class TavernScene {
         ctx.restore();
     }
     
+    // マスター（髭のバーテンダー）の動き。待機 → グラスみがき・タオル・棚を見に行く を順にくり返す。
+    // 話しかけると前に戻ってカクテルを作る（masterMix）。近くに人がいる時は、歩きに行かずに前でほほえむ
+    updateMaster(dt) {
+        const B = this.bar || (this.bar = { x: 0, act: 'idle', t: 0, dur: 4, n: 0, flip: false });
+        B.t += dt;
+        if (this.masterMix !== null && this.masterMix !== undefined) { B.x = 0; B.flip = false; B.act = 'idle'; B.t = 0; B.dur = 3; return; }
+        const near = this.focus && this.focus.kind === 'master';
+        const W = TavernScene.BAR_WALK;
+        if (B.act === 'go' || B.act === 'back') {
+            const dir = B.act === 'go' ? 1 : -1;
+            B.x += dir * W.speed * dt;
+            if (B.act === 'go' && B.x >= W.dist) { B.x = W.dist; B.act = 'shelf'; B.t = 0; B.dur = 2.6; }
+            else if (B.act === 'back' && B.x <= 0) { B.x = 0; B.act = 'idle'; B.flip = false; B.t = 0; B.dur = 3 + Math.random() * 3; }
+            return;
+        }
+        if (B.t < B.dur) return;
+        // 次のしぐさ
+        B.t = 0;
+        if (B.act === 'shelf') { B.act = 'back'; B.flip = true; return; }
+        if (B.act !== 'idle') { B.act = 'idle'; B.dur = 3 + Math.random() * 4; return; }
+        const order = ['polish', 'towel', 'polish', 'go', 'smile'];
+        let next = order[B.n++ % order.length];
+        if (next === 'go' && near) next = 'smile';
+        B.act = next;
+        B.dur = next === 'polish' ? 3.4 : next === 'towel' ? 2.4 : next === 'smile' ? 1.6 : 0;
+        if (next === 'go') B.flip = false;
+    }
+    // マスターの今のコマ（名前・左右反転）
+    masterFrame() {
+        const B = this.bar || { x: 0, act: 'idle', t: 0, flip: false };
+        const t = this.time;
+        if (this.masterMix !== null && this.masterMix !== undefined) {
+            // カクテル：グラスを持つ → シェーカーをふる → そそぐ → さし出す（最後はそのまま）
+            const seq = TavernScene.BAR_MIX;
+            let m = this.masterMix;
+            for (const [f, d] of seq) { if (m < d) return { f }; m -= d; }
+            return { f: 'mix_7' };
+        }
+        const loop = (list, step, tt) => list[Math.floor(tt / step) % list.length];
+        switch (B.act) {
+            case 'polish': return { f: loop(['polish_1', 'polish_2', 'polish_3', 'polish_4', 'polish_3', 'polish_2'], 0.28, B.t) };
+            case 'towel': return { f: loop(['towel_1', 'towel_2', 'towel_2', 'towel_1'], 0.6, B.t) };
+            case 'smile': return { f: 'smile' };
+            case 'go': case 'back': return { f: B.t < 0.18 ? 'walk_1' : loop(['walk_2', 'walk_3', 'walk_4', 'walk_5'], 0.15, B.t), flip: B.flip };
+            case 'shelf': return { f: B.t < 0.25 || B.t > B.dur - 0.25 ? 'side' : loop(['back_1', 'back_2'], 0.7, B.t) };
+        }
+        // 待機：1→2→3→2 をゆっくり。ときどき目を閉じる。近くに人がいる時はほほえむ
+        const near = this.focus && this.focus.kind === 'master';
+        if ((t % 4.3) < 0.14) return { f: 'blink' };
+        if (near) return { f: 'smile' };
+        return { f: loop(['idle_1', 'idle_2', 'idle_3', 'idle_2'], 0.55, t) };
+    }
     drawMaster(ctx, cam) {
         const M = this.map.layers.master;
         const A = window.assetManager;
-        // 待機：1→2→3→2 をゆっくり。ときどき目を閉じる（8）・ウインク（4）。話している間はカクテルを作る（9〜16）
-        let f;
-        if (this.masterMix !== null && this.masterMix !== undefined && this.masterMix < 16 * 0.2) {
-            f = 9 + Math.min(7, Math.floor(this.masterMix / 0.2));
-        } else {
-            const t = this.time;
-            const blink = (t % 4.3) < 0.14, wink = (t % 23) > 22.6;
-            f = wink ? 4 : blink ? 8 : [1, 2, 3, 2][Math.floor(t / 0.55) % 4];
-        }
-        const img = A && A.get(`tv_master_${f}`);
+        const { f, flip } = this.masterFrame();
+        const img = A && A.get(`tv_bar_${f}`);
         if (!img) return;
-        const s = TavernScene.MASTER_SCALE;
+        // 2 枚のシートで絵の大きさがちがうので、シートごとに高さ 約 96px にそろえる
+        const S = TavernScene.BAR_SCALE;
+        const s = /^walk/.test(f) ? S.walk : /^(side|back)/.test(f) ? S.b : S.a;
         const w = img.width * s, h = img.height * s;
+        const x = Math.round(M.x + (this.bar ? this.bar.x : 0) - cam.x), y = Math.round(M.y - cam.y);
         ctx.save();
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(img, Math.round(M.x - w / 2 - cam.x), Math.round(M.y - h - cam.y), w, h);
+        if (flip) { ctx.translate(x, 0); ctx.scale(-1, 1); ctx.drawImage(img, -w / 2, y - h, w, h); }
+        else ctx.drawImage(img, x - w / 2, y - h, w, h);
         ctx.restore();
     }
-    
     // 扉：自分のパーティーの扉だけ開いて光る。上に「入った人数/最大人数」
     drawDoors(ctx, cam) {
         const t = this.time, p = this.party;
@@ -1431,7 +1622,12 @@ class TavernScene {
 }
 
 TavernScene.WALK_SPEED = 165;      // 酒場を歩く速さ（px/秒）。走る時は Player.sprintMultiplier 倍
-TavernScene.MASTER_SCALE = 0.36;   // マスターの絵の大きさ（顔の幅を主人公にそろえた。高さ 約 96px）
+// マスター（髭のバーテンダー）の絵の大きさ。a = 正面のしぐさのシート・b = 歩く/ふり向くシート。どれも高さ 約 96px
+TavernScene.BAR_SCALE = { a: 0.447, b: 0.522, walk: 0.556 };
+// 棚を見に行く：右へ dist だけ歩く（カウンターの後ろの中）
+TavernScene.BAR_WALK = { dist: 58, speed: 42 };
+// カクテルを作るしぐさ [コマ, 秒]
+TavernScene.BAR_MIX = [['mix_1', 0.35], ['mix_2', 0.35], ['mix_3', 0.22], ['mix_4', 0.22], ['mix_3', 0.22], ['mix_4', 0.22], ['mix_3', 0.22], ['mix_5', 0.5], ['mix_6', 0.6], ['mix_7', 9]];
 TavernScene.ROOM_CAP = 16;         // 1つのルームの人数（パーティーの人数とは別）
 TavernScene.SEND_MS = 250;         // 動いている間、位置を送る間隔
 TavernScene.IDLE_MS = 2500;        // 止まっている間も、この間隔で送る（あとから来た人にも見えるように）

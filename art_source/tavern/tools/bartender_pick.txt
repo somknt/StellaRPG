@@ -1,0 +1,29 @@
+﻿# 酒場のマスター（髭のバーテンダー）で使うコマ。名前 = シート(a/b)行-列（番号は bartender_contact.png）
+# a：髭のバーテンダー・ドット絵スプライトシート（正面のしぐさ）
+idle_1 = a0-0
+idle_2 = a0-1
+idle_3 = a0-2
+blink = a3-6
+smile = a3-7
+polish_1 = a3-0
+polish_2 = a3-1
+polish_3 = a3-2
+polish_4 = a3-3
+towel_1 = a3-4
+towel_2 = a3-5
+mix_1 = a2-0
+mix_2 = a2-1
+mix_3 = a2-2
+mix_4 = a2-3
+mix_5 = a2-5
+mix_6 = a2-6
+mix_7 = a2-7
+# b：バーテンダーの多彩なアクションスプライトシート（歩く・ふり向く。右向き。左は左右反転して使う）
+side = b0-2
+back_1 = b0-4
+back_2 = b0-5
+walk_1 = b1-3
+walk_2 = b1-4
+walk_3 = b1-5
+walk_4 = b1-6
+walk_5 = b1-7

@@ -572,7 +572,9 @@ class ScreenManager {
         equip:          { id: 'scr-equip',    nav: 'grid',     back: 'monster_select', bgm: 'bgm_select' },
         settings:       { id: 'scr-settings', nav: 'vertical', back: 'main_menu',      bgm: 'bgm_title' },
         // マルチプレイ（星の酒場）の準備画面。後ろは酒場のまま（tavern.js）
-        mp_prep:        { id: 'scr-mpprep',   nav: 'grid',                             bgm: 'bgm_tavern' }
+        mp_prep:        { id: 'scr-mpprep',   nav: 'grid',                             bgm: 'bgm_tavern' },
+        // PvP の対戦の設定（制限時間・何点先取）。2人が PvP の扉に入った後、準備画面の前。後ろは酒場のまま
+        pvp_rule:       { id: 'scr-pvprule',  nav: 'grid',                             bgm: 'bgm_tavern' }
     };
     
     isMenuState(state) { return state in ScreenManager.SCREENS; }
@@ -619,6 +621,7 @@ class ScreenManager {
         if (name === 'ranking') this.enterRanking();
         if (name === 'settings') this.refreshSettings();
         if (name === 'mp_prep') this.enterMpPrep(prev);
+        if (name === 'pvp_rule') this.enterPvpRule();
         // 最初の項目を選んだ状態にする（戻ってきた時は前に選んでいた所）
         UINav.quietUntil = performance.now() + ScreenManager.FADE_MS + 400;
         this.nav = def.nav ? new UINav(el, def.nav) : null;
@@ -632,7 +635,7 @@ class ScreenManager {
     get tavernBackdrop() {
         const t = this.game.tavern;
         if (!t || !t.active) return false;
-        return this.current === 'mp_prep' || (this.current === 'monster_select' && !!this.mp) || (this.current === 'equip' && !!this.equipReturn);
+        return this.current === 'mp_prep' || this.current === 'pvp_rule' || (this.current === 'monster_select' && !!this.mp) || (this.current === 'equip' && !!this.equipReturn);
     }
     
     // バトルが始まったら画面を閉じる
@@ -648,7 +651,7 @@ class ScreenManager {
         if (this.current === 'profile') return this.profileFrom === 'account_info' ? 'account_info' : null;
         // マルチプレイ：装備 → 準備画面 / クエスト選択・準備画面 → 酒場（back が tavern.js を呼ぶ）
         if (this.current === 'equip' && this.equipReturn) return this.equipReturn;
-        if ((this.current === 'monster_select' && this.mp) || this.current === 'mp_prep') return 'tavern';
+        if ((this.current === 'monster_select' && this.mp) || this.current === 'mp_prep' || this.current === 'pvp_rule') return 'tavern';
         if (this.current === 'equip' && this.freeBattle) return 'battle_select';
         const def = ScreenManager.SCREENS[this.current];
         return def && def.back ? def.back : null;
@@ -658,7 +661,7 @@ class ScreenManager {
         const to = this.backTarget();
         if (to === 'tavern') {
             const t = this.game.tavern;
-            if (this.current === 'mp_prep') t.backFromPrep();
+            if (this.current === 'mp_prep' || this.current === 'pvp_rule') t.backFromPrep();
             else t.cancelQuestSelect();
             return;
         }
@@ -706,7 +709,7 @@ class ScreenManager {
     draw(ctx) {
         const dim = this.current === 'title' ? 0 : this.current === 'main_menu' ? 0.45 : 0.62;
         // マルチプレイの画面は、後ろに星の酒場（少し暗く）
-        if (this.tavernBackdrop) { this.game.tavern.drawFrozen(ctx, this.current === 'mp_prep' ? 0.55 : 0.6); return; }
+        if (this.tavernBackdrop) { this.game.tavern.drawFrozen(ctx, this.current === 'mp_prep' || this.current === 'pvp_rule' ? 0.55 : 0.6); return; }
         this.bg.draw(ctx, this.time, dim);
     }
     
@@ -777,6 +780,10 @@ class ScreenManager {
             if (this.game.tavern) this.game.tavern.startBattle();
         });
         on('mpp-back', () => this.game.tavern && this.game.tavern.backFromPrep());
+        on('mpp-rule', () => this.game.tavern && this.game.tavern.reopenPvpRule());
+        // PvP の対戦の設定
+        on('pvs-ok', () => this.game.tavern && this.game.tavern.confirmPvpRule());
+        on('pvs-back', () => this.game.tavern && this.game.tavern.backFromPrep());
         on('monster-ranking', () => this.go('ranking'));
         on('ranking-back', () => this.go('monster_select'));
         on('settings-back', () => this.go('main_menu'));
@@ -1236,8 +1243,9 @@ class ScreenManager {
         const PB = window.PvpBattle;
         const fields = PB ? PB.FIELDS : { arena: { name: '星の闘技場' } };
         const field = fields[p.field] ? p.field : 'arena';
+        const rule = PB && p.kind === 'pvp' ? PB.ruleFor(t, p) : null;
         set('mpp-sub', b ? `VS ${b.name}　─　${b.fieldName}　（推奨 Lv.${b.playerLevel || 1}）`
-            : `1対1の対戦　─　${fields[field].name}　（2人とも Lv.${PB ? PB.LEVEL : 10}・制限時間 ${PB ? PB.TIME_LIMIT / 60 : 3}分）`);
+            : `1対1の対戦　─　${fields[field].name}　（2人とも Lv.${PB ? PB.LEVEL : 10}・${rule ? PB.ruleText(rule) : '3分'}）`);
         root.classList.toggle('pvp', p.kind === 'pvp');
         this.refreshMpFields(p, fields, field);
         const slots = this.$('mpp-slots');
@@ -1288,6 +1296,14 @@ class ScreenManager {
             start.textContent = p.kind === 'pvp' ? '対戦開始' : 'バトル開始';
             start.classList.toggle('disabled', !all);
             start.setAttribute('aria-disabled', all ? 'false' : 'true');
+        }
+        // PvP のリーダー：対戦の設定をやり直すボタン
+        const ruleBtn = this.$('mpp-rule');
+        if (ruleBtn) {
+            const show = p.kind === 'pvp' && !!p.leader_is_me;
+            if (ruleBtn.hidden === show) navChanged = true;
+            ruleBtn.hidden = !show;
+            ruleBtn.toggleAttribute('data-nav', show);
         }
         const hint = this.$('mpp-hint');
         if (hint) {
@@ -1346,7 +1362,61 @@ class ScreenManager {
         }
     }
     
-    drawMpPrepArt(dt) {
+    // PvP の対戦の設定：制限時間・何点先取（リーダーだけ押せる。もう1人は、選ばれた物が光るだけ）
+    enterPvpRule() {
+        const t = this.game.tavern;
+        this._pvsKey = '';
+        this.refreshPvpRule(true);
+        if (t) t.onEnterPvpRule();
+    }
+    refreshPvpRule(first = false) {
+        const t = this.game.tavern, p = t && t.party;
+        const root = this.$('scr-pvprule');
+        const PB = window.PvpBattle;
+        if (!p || !root || !PB || p.kind !== 'pvp') return;
+        t.syncPvpCfg(p);
+        const c = t.pvpCfg;
+        const lead = !!p.leader_is_me;
+        const other = p.members.find(m => !m.me);
+        const set = (id, s) => { const el = this.$(id); if (el && el.textContent !== s) el.textContent = s; };
+        set('pvs-sub', `VS ${other ? other.name || '？' : '（相手を待っています）'}`);
+        set('pvs-hint', lead ? '制限時間と何点先取を選んで「決定」を押してください（次は フィールド・装備 を選ぶ準備画面です）'
+            : (c.got ? 'リーダーが対戦の設定を決めています…' : 'リーダーの設定を待っています…'));
+        const key = `${c.tm}|${c.pt}|${lead ? 1 : 0}|${c.got ? 1 : 0}`;
+        if (!first && this._pvsKey === key) return;
+        this._pvsKey = key;
+        const keep = this.nav && this.nav.current ? this.nav.current.dataset.pvs : null;
+        const build = (boxId, k, list, label) => {
+            const box = this.$(boxId);
+            if (!box) return;
+            box.innerHTML = '';
+            for (const v of list) {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'ui-btn mpp-field pvs-opt' + (c[k] === v ? ' on' : '') + (lead ? '' : ' locked');
+                b.dataset.pvs = `${k}${v}`;
+                if (lead) b.dataset.nav = '';
+                b.textContent = label(v);
+                b.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if (this.busy) return;
+                    pressEffect(b);
+                    if (this.game.tavern) this.game.tavern.setPvpRule(k, v);
+                });
+                box.appendChild(b);
+            }
+        };
+        build('pvs-time', 'tm', PB.RULE_TIMES, (v) => `${v}分`);
+        build('pvs-points', 'pt', PB.RULE_POINTS, (v) => `${v}点先取`);
+        const ok = this.$('pvs-ok');
+        if (ok) { ok.hidden = !lead; ok.toggleAttribute('data-nav', lead); }
+        if (this.current === 'pvp_rule') {
+            this.nav = new UINav(root, 'grid');
+            const el = keep ? root.querySelector(`[data-pvs="${keep}"]`) : null;
+            const i = el ? this.nav.items.indexOf(el) : -1;
+            if (i >= 0) this.nav.setIndex(i);
+        }
+    }    drawMpPrepArt(dt) {
         for (const a of this.mpPrepArts || []) {
             a.t += dt;
             const g = a.canvas.getContext('2d');

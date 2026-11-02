@@ -67,7 +67,8 @@ const WatchInfo = {
         } else {
             if (members.length !== 2 || !PvpBattle.FIELDS[m.f]) return null;
             out.field = m.f;
-            out.title = `PvP：${members[0].name} vs ${members[1].name}（${PvpBattle.FIELDS[m.f].name}）`;
+            out.rule = PvpBattle.normRule(Array.isArray(m.cf) ? { tm: m.cf[0], pt: m.cf[1] } : null);
+            out.title = `PvP：${members[0].name} vs ${members[1].name}（${PvpBattle.FIELDS[m.f].name}・${PvpBattle.ruleText(out.rule)}）`;
         }
         return out;
     }
@@ -139,6 +140,10 @@ class PvpWatch {
         this.lastSeen = new Map();
         this.watchIdx = 0;
         this.state = 'intro';         // 'intro'（カウントダウン） / 'fight' / 'over'
+        this.rule = info.rule || PvpBattle.normRule(null);   // 対戦の設定（ホストの 'v' の cf でも直す）
+        this.sc = new Map();          // pid → [その人の点, 相手の点]（届いた物）
+        this.tl = null;               // 残り時間（2人から届いた物の小さい方）
+        this.ko = new Map();          // pid → 倒れたラウンド（K.O. を1回だけ出す）
         this.time = Math.max(0, info.at - PvpBattle.COUNTDOWN);
         this.goAt = performance.now() + Math.max(0, PvpBattle.COUNTDOWN - info.at) * 1000;
         this.resultTimer = 0;
@@ -238,7 +243,7 @@ class PvpWatch {
             if (lost.length === 2) this.finish(null, '2人とも通信が切れました', true);
             else if (lost.length === 1) this.finish(this.members.find(m => m !== lost[0]).pid, `${lost[0].name}の通信が切れました`);
             // 時間切れなのに結果が届かない
-            else if (this.time > PvpBattle.TIME_LIMIT + 10) this.finish(null, '結果が届きませんでした', true);
+            else if (this.time > this.rule.tm * 60 + 30 + 6 * this.rule.pt) this.finish(null, '結果が届きませんでした', true);
         } else if (this.resultTimer > 0) {
             this.resultTimer -= dt;
             if (this.resultTimer <= 0) this.showResult();
@@ -259,14 +264,25 @@ class PvpWatch {
             if (d > 0 && d <= PvpBattle.MAX_HIT) { this.game.damageNumbers.add(d, o); o.hitFlashTimer = 0.12; }
         }
         if (Array.isArray(m.c) && m.c.length) PvpBattle.prototype.showRemoteCasts.call(this, m.c.slice(0, 4));
+        // 点・残り時間・設定（ホストの物）
+        if (Array.isArray(m.sc)) this.sc.set(m.s, [Number(m.sc[0]) || 0, Number(m.sc[1]) || 0]);
+        if (typeof m.tl === 'number') this.tl = this.tl === null ? m.tl : Math.min(this.tl + 1, Math.max(m.tl, this.tl - 1));
+        if (Array.isArray(m.cf) && m.s === this.info.h) this.rule = PvpBattle.normRule({ tm: m.cf[0], pt: m.cf[1] });
         if (this.isOver) return;
         const other = this.members.find(x => x.pid !== m.s);
-        if (m.dead) this.finish(other.pid, `${this.nameOf(m.s)}が倒れた`);
-        else if (m.e && m.e.r === 'd') this.finish(null, '時間切れ');
-        else if (m.e && this.puppets.has(m.e.r)) this.finish(m.e.r, '時間切れ');
-        else if (m.st === 'v') this.finish(m.s, '');
+        // 結果（時間切れ・点が決まった）
+        if (m.e && m.e.r === 'd') { this.finish(null, m.e.k === 't' ? '時間切れ' : ''); return; }
+        if (m.e && this.puppets.has(m.e.r)) { this.finish(m.e.r, m.e.k === 't' ? '時間切れ' : this.scoreText(m.e.r)); return; }
+        if (m.st === 'v') { this.finish(m.s, this.scoreText(m.s)); return; }
+        // 1点（そのラウンドで倒れた）：K.O. を出す
+        if (m.dead && this.ko.get(m.s) !== m.rd) {
+            this.ko.set(m.s, m.rd);
+            this.showBanner('K.O.!', `${other.name}が1点`, 'boss');
+            playSE('boss_down');
+        }
     }
-    
+    // 勝った人から見た点（例 3 - 1）
+    scoreText(pid) { const a = this.sc.get(pid); return a ? `${a[0]} - ${a[1]}` : ''; }
     nameOf(pid) { const m = this.members.find(x => x.pid === pid); return m ? m.name : '？'; }
     
     finish(winner, why, lostAll = false) {
@@ -286,18 +302,21 @@ class PvpWatch {
     }
     
     // ---------- 表示 ----------
+    // 観戦の時は、2人の HP（上が1人目・下が2人目）と、2人の点
     showHud() {
         const u = this.ui;
         document.body.dataset.battle = 'pvp';
         document.body.dataset.coop = '1';
         document.body.dataset.waves = 'off';
+        if (u.hud) u.hud.dataset.mode = 'watch';
         if (u.meName) u.meName.textContent = this.members[0].name;
         if (u.opName) u.opName.textContent = this.members[1].name;
-        if (u.field) u.field.textContent = `${PvpBattle.FIELDS[this.field].name}（観戦中）`;
+        if (u.plMe) u.plMe.textContent = this.members[0].name;
+        if (u.plOp) u.plOp.textContent = this.members[1].name;
         if (u.hud) u.hud.classList.add('show');
+        this._ptsKey = '';
         this.updateHud();
     }
-    
     updateHud() {
         const u = this.ui;
         const a = this.puppets.get(this.members[0].pid), b = this.puppets.get(this.members[1].pid);
@@ -309,22 +328,27 @@ class PvpWatch {
         };
         set(u.meFill, u.meHp, a.currentHP, a.maxHP);
         set(u.opFill, u.opHp, b.currentHP, b.maxHP);
-        if (u.timer) {
-            const left = Math.max(0, Math.ceil(PvpBattle.TIME_LIMIT - this.time));
-            const s = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
-            if (u.timer.textContent !== s) u.timer.textContent = s;
-            u.timer.classList.toggle('low', left <= 20 && this.state === 'fight');
-        }
-    }
-    
-    showResult() {
+        if (u.opTrail) u.opTrail.style.width = '0%';
+        // 点：その人が送ってきた自分の点（届いていなければ、相手が送ってきた「相手の点」）
+        const pts = (i) => {
+            const me = this.sc.get(this.members[i].pid), ot = this.sc.get(this.members[1 - i].pid);
+            return Math.max(me ? me[0] : 0, ot ? ot[1] : 0);
+        };
+        PvpBattle.setPoints(u, pts(0), pts(1), this.rule.pt, this);
+        PvpBattle.setTimer(u, this.tl !== null ? this.tl : this.rule.tm * 60 - this.time, this.state === 'fight');
+        const rd = Math.max(a.rd || 1, b.rd || 1);
+        const r = `ROUND ${rd}`;
+        if (u.round && u.round.textContent !== r) u.round.textContent = r;
+        const f = `${PvpBattle.FIELDS[this.field].name}（観戦中）　${PvpBattle.ruleText(this.rule)}`;
+        if (u.field && u.field.textContent !== f) u.field.textContent = f;
+    }    showResult() {
         const u = this.ui;
         if (!u.result) return;
         u.rTitle.textContent = '観戦終了';
         u.rSub.textContent = this.lostAll ? this.why : this.winner ? `${this.nameOf(this.winner)}の勝利${this.why ? `（${this.why}）` : ''}` : `引き分け${this.why ? `（${this.why}）` : ''}`;
         u.result.classList.remove('win');
         const t = Math.floor(this.time);
-        const rows = [['フィールド', PvpBattle.FIELDS[this.field].name], ['戦った時間', `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`]];
+        const rows = [['フィールド', PvpBattle.FIELDS[this.field].name], ['ルール', PvpBattle.ruleText(this.rule)], ['戦った時間', `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`]];
         for (const m of this.members) {
             const o = this.puppets.get(m.pid);
             rows.push([`${m.name}の残りHP`, o ? `${Math.max(0, Math.ceil(o.currentHP))} / ${o.maxHP}` : '─']);
