@@ -89,6 +89,7 @@ class Enemy {
         this.knockbackScale = enemyData.knockbackScale ?? 1; // 飛ばされる距離の倍率（重いボスは小さく）
         this.ai = null;                // ボスAI（boss_ai.js）。ある時はこちらが動きを決める
         this.comboHits = 0;            // 主人公の攻撃が続けて当たった回数
+        this.staggerHits = 0;          // 何回続けて当たるとノックバックするか（0 の時は Enemy.STAGGER.hits）
         this.lastComboAt = -1e9;       // 最後に当たった時刻（performance.now()）
         this.staggerTimer = 0;         // 動けない残り時間
         this.knockDir = new Vector2(0, 0);
@@ -617,7 +618,8 @@ class Enemy {
             const now = performance.now();
             this.comboHits = now - this.lastComboAt <= Enemy.STAGGER.window * 1000 ? this.comboHits + 1 : 1;
             this.lastComboAt = now;
-            if (this.comboHits >= Enemy.STAGGER.hits) {
+            // staggerHits：この敵だけの回数（協力プレイは人数で多くする。mp_battle.js の CoopBattle.STAGGER_HITS）
+            if (this.comboHits >= (this.staggerHits || Enemy.STAGGER.hits)) {
                 this.comboHits = 0;
                 this.applyKnockback(direction, Math.max(Enemy.STAGGER.dist, knock || 0), true);
                 staggered = true;

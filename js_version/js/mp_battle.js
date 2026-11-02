@@ -30,6 +30,8 @@ class CoopBattle {
         this.hz = CoopBattle.TICK_HZ[this.n] || 5;
         this.mult = Number(this.battle.hp_mult) || 1;
         this.rangeMul = CoopBattle.RANGE_MUL[this.n] || 1;
+        this.speedMul = CoopBattle.SPEED_MUL[this.n] || 1;
+        this.speedNow = this.speedMul;   // 今の速さ（ノックバック中は 1。ホストが決めて送る）
         this.remotes = new Map();
         this.out = [];          // ホスト：次に送る、ボスが出した物
         this.queue = [];        // ミラー：届いた、ボスが出した物（時間が来たら出す）
@@ -125,6 +127,8 @@ class CoopBattle {
         const e = this.boss;
         e.maxHP = Math.round(e.maxHP * this.mult);
         e.currentHP = e.maxHP;
+        // ノックバックするまでの回数（人数ごと）
+        e.staggerHits = CoopBattle.STAGGER_HITS[this.n] || 0;
         if (this.host) this.attachHost();
         else this.attachMirror();
         // 暗闇の明かり（怨嗟の鎧）：自分の主人公のまわりだけ（ねらわれている人のまわりではなく）
@@ -194,18 +198,35 @@ class CoopBattle {
             const f = map[fn].bind(map);
             map[fn] = (v) => { f(v); this.record({ k: 'st', fn, v }); };
         }
-        // ボスの弾（黒蝕狼の侵蝕弾・ゴーレムの星力弾）
+        // ボスの弾（黒蝕狼の侵蝕弾・ゴーレムの星力弾）：人数の分だけ速く（飛ぶ距離は同じ）
         game.enemySpawner.onBossShots = (list) => {
+            for (const p of list) {
+                if (this.speedMul !== 1 && p.velocity && !p._fast) {
+                    p._fast = true;
+                    p.velocity = p.velocity.mult(this.speedMul);
+                    if (typeof p.life === 'number') p.life /= this.speedMul;
+                }
+            }
             for (const p of list) this.record({ k: 'pr', x: p.position.x, y: p.position.y, vx: p.velocity.x, vy: p.velocity.y, d: p.damage, r: p.radius, l: p.life, kind: p.kind || '' });
         };
-        // ボスの更新の間に鳴った音を覚える
+        // ボスの更新の間に鳴った音を覚える。人数の分だけ、ボスの時間を速く進める（ノックバック中はふつう）
         const upd = e.update.bind(e);
-        e.update = (dt, pl) => { this.capturing = true; try { upd(dt, pl); } finally { this.capturing = false; } };
+        e.update = (dt, pl) => {
+            const knocked = e.staggerTimer > 0 || e.knockTime < e.knockDuration;
+            this.speedNow = knocked ? 1 : this.speedMul;
+            this.capturing = true;
+            try { upd(dt * this.speedNow, pl); } finally { this.capturing = false; }
+        };
     }
     
     attachMirror() {
         const e = this.boss, ai = this.ai;
         e.mirror = (dt) => this.mirrorStep(dt);
+        // ノックバック中も動かす物（怨嗟の鎧の風刃・分身）も、ホストと同じ速さで
+        if (ai.preUpdate) {
+            const pre = ai.preUpdate.bind(ai);
+            ai.preUpdate = (dt) => pre(dt * this.speedNow);
+        }
         ai.startFight = () => { ai.active = true; ai.introTarget = null; };
         if (ai.materialize) { ai.materialize = () => {}; ai.dematerialize = () => {}; }
         // 自分の画面のボスAIの音（危険床がはじけた音など）は鳴らさない。ホストから届いた音を鳴らす
@@ -283,7 +304,7 @@ class CoopBattle {
         const s = {
             x: r(e.position.x), y: r(e.position.y), d: e.direction[0], hp: Math.ceil(e.currentHP), mhp: e.maxHP, ph: ai.phase.index,
             mo: ai.motion, mt: r(ai.motionTime, 100), li: r(ai.lift), sx: r(ai.scaleX, 1000), sy: r(ai.scaleY, 1000), ji: r(ai.jitter),
-            fx: r(ai.facing.x, 1000), fy: r(ai.facing.y, 1000), an: ai.actionName,
+            fx: r(ai.facing.x, 1000), fy: r(ai.facing.y, 1000), an: ai.actionName, k: r(this.speedNow, 100),
             fl: (ai.invulnerable ? 1 : 0) | (ai.superArmor ? 2 : 0) | (ai.airborne ? 4 : 0) | (e.isAlive() ? 8 : 0) | (ai.active ? 16 : 0) | (e.hitFlashTimer > 0 ? 32 : 0)
         };
         if (typeof MagicGolemAI === 'function' && ai instanceof MagicGolemAI) { s.gp = CoopBattle.plain(ai.pose); s.gf = ai.frame; }
@@ -481,7 +502,9 @@ class CoopBattle {
     // ---------- ミラー：ボスを、ホストから届いた様子で動かす（Enemy.update が毎フレーム呼ぶ） ----------
     mirrorStep(dt) {
         const e = this.boss, ai = this.ai;
-        if (!this.snaps.length) { ai.time += dt; ai.updateFx(dt); return; }
+        // ホストと同じ速さで、予告・当たり判定・演出を進める
+        const sdt = dt * this.speedNow;
+        if (!this.snaps.length) { ai.time += sdt; ai.updateFx(sdt); return; }
         const rt = this.clock - this.hostOff - (1 / this.hz + CoopBattle.EXTRA_DELAY);
         // 時間が来た「ボスが出した物」を出す
         this.queue.sort((a, b) => a.t - b.t);
@@ -502,10 +525,10 @@ class CoopBattle {
         e.position = new Vector2(x, y);
         e.velocity = dt > 0 ? new Vector2((x - old.x) / dt, (y - old.y) / dt) : new Vector2(0, 0);
         this.applySnap(a, Math.max(0, rt - s1.t));
-        ai.time += dt;
-        ai.updateFx(dt);
+        ai.time += dt * this.speedNow;
+        ai.updateFx(dt * this.speedNow);
         // 咆哮の間、近くの主人公を押し返す（自分の主人公だけ）
-        if (ai.actionName === 'transition' && e.isAlive() && ai.roarPush) ai.roarPush(dt);
+        if (ai.actionName === 'transition' && e.isAlive() && ai.roarPush) ai.roarPush(dt * this.speedNow);
     }
     
     applySnap(s, late) {
@@ -518,8 +541,9 @@ class CoopBattle {
             ai.phase.index = s.ph;
             ai.applyPhaseBuff(s.ph);
         }
+        if (typeof s.k === 'number' && s.k > 0) this.speedNow = s.k;
         ai.motion = s.mo;
-        ai.motionTime = s.mt + late;
+        ai.motionTime = s.mt + late * this.speedNow;
         ai.lift = s.li; ai.scaleX = s.sx; ai.scaleY = s.sy; ai.jitter = s.ji;
         ai.facing = new Vector2(s.fx, s.fy);
         ai.actionName = s.an || '';
@@ -774,8 +798,14 @@ class CoopBattle {
 // 送る回数（1秒に何回。人数ごと）
 CoopBattle.TICK_HZ = { 2: 8, 3: 6, 4: 5 };
 // ボスの範囲攻撃の広さの倍率（人数ごと）と、広くする攻撃（boss_data.js の attacks の名前と、広くする値）
-// 回避できない攻撃にならないように、広くするのは決まった攻撃の、輪・円の大きさだけ（予告の時間は変えない）
-CoopBattle.RANGE_MUL = { 2: 1.15, 3: 1.25, 4: 1.35 };
+// 回避できない攻撃にならないように、広くするのは決まった攻撃の、輪・円の大きさだけ
+CoopBattle.RANGE_MUL = { 2: 1.25, 3: 1.4, 4: 1.55 };
+// ボスの速さの倍率（人数ごと）：動き・攻撃の出る早さ・予告・弾の速さがみんな速くなる。
+// ノックバックで飛ばされている間は、ふつうの速さ（動けない時間は短くならない）
+CoopBattle.SPEED_MUL = { 2: 1.1, 3: 1.18, 4: 1.25 };
+// 何回続けて当たると、ボスがノックバックするか（人数ごと。ひとりの時は Enemy.STAGGER.hits の 5回）
+// みんなの攻撃を合わせて数える
+CoopBattle.STAGGER_HITS = { 2: 10, 3: 15, 4: 20 };
 CoopBattle.RANGE_ATTACKS = {
     giant_forest_boar: [['stomp', ['radius']], ['bigStomp', ['radius']]],                       // 踏みつけの衝撃波
     black_corrupted_wolf: [['corruptionWave', ['maxRadius']]],                                  // 侵蝕波動

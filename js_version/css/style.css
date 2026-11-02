@@ -2377,24 +2377,28 @@ body.touch[data-state="tavern"] #action-buttons { display: none; }
     transform-origin: top right;
 }
 
-/* 右：自分のパーティー */
+/* 左の真ん中：自分のパーティー（扉・マスター・掲示板にかからないように、小さく） */
 #tv-party {
-    right: 14px;
-    top: 70px;
-    width: 300px;
-    padding: 0 4px 2px;
-    transform: scale(var(--hud-scale, 1));
-    transform-origin: top right;
+    left: 10px;
+    top: 46%;
+    width: 216px;
+    border-width: 12px;
+    border-image-width: 12px;
+    padding: 0 2px 1px;
+    transform: translateY(-50%) scale(var(--hud-scale, 1));
+    transform-origin: left center;
 }
-#tvp-title { font-size: 19px; letter-spacing: 1px; color: #ffd76a; }
-#tvp-sub { font-size: 14px; color: #c8c0e8; margin: 2px 0 6px; }
-#tvp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+/* スマホ：左下のスティックにかからないように、少し上で、大きくしすぎない */
+body.touch #tv-party { top: 38%; transform: translateY(-50%) scale(calc(min(var(--hud-scale, 1), 1.3) * 1.3)); }
+#tvp-title { font-size: 15px; letter-spacing: 1px; color: #ffd76a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#tvp-sub { font-size: 12px; color: #c8c0e8; margin: 1px 0 4px; }
+#tvp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
 #tvp-list li {
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding: 4px 6px;
-    font-size: 16px;
+    gap: 5px;
+    padding: 2px 5px;
+    font-size: 13px;
     background: hsla(var(--hue, 40), 60%, 40%, 0.2);
     border-left: 3px solid hsla(var(--hue, 40), 90%, 65%, 0.95);
     border-radius: 3px;
@@ -2404,20 +2408,20 @@ body.touch[data-state="tavern"] #action-buttons { display: none; }
 /* リーダー：金色の星 / 参加者：青白い星 */
 #tvp-list .star {
     flex: none;
-    width: 18px;
-    height: 18px;
+    width: 14px;
+    height: 14px;
     background: #bfe8ff;
     clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
 }
 #tvp-list li.leader .star { background: #ffd23f; }
-#tvp-list .tag { flex: none; font-style: normal; font-size: 12px; padding: 1px 6px; border-radius: 8px; }
+#tvp-list .tag { flex: none; font-style: normal; font-size: 10px; padding: 0 5px; border-radius: 8px; }
 #tvp-list .tag.in { color: #d6ecff; background: rgba(170, 210, 255, 0.22); border: 1px solid rgba(170, 210, 255, 0.6); }
 #tvp-list .tag.ok { color: #b8ffcb; background: #1e7a34; }
 .tvp-kick {
     flex: none;
     font-family: inherit;
-    font-size: 12px;
-    padding: 2px 8px;
+    font-size: 10px;
+    padding: 1px 6px;
     color: #ffc2b4;
     background: rgba(80, 20, 20, 0.6);
     border: 1px solid rgba(255, 130, 110, 0.7);
@@ -2425,8 +2429,8 @@ body.touch[data-state="tavern"] #action-buttons { display: none; }
     cursor: pointer;
 }
 .tvp-kick:hover { background: rgba(130, 30, 30, 0.8); }
-.tvp-buttons { display: flex; gap: 6px; margin-top: 8px; }
-.tvp-buttons .tv-btn { flex: 1; font-size: 14px; padding: 6px 6px; }
+.tvp-buttons { display: flex; gap: 4px; margin-top: 5px; }
+.tvp-buttons .tv-btn { flex: 1; font-size: 11px; letter-spacing: 0; padding: 4px 3px; border-width: 1px; border-radius: 6px; }
 #tvp-leave.confirm { color: #ffc2b4; border-color: rgba(255, 130, 110, 0.9); }
 
 /* マスター・掲示板・扉の近く：調べるボタン（PC は E キーの印つき） */
