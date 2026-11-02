@@ -335,6 +335,20 @@ class Game {
         }
     }
     
+    // 観戦中（watch.js。協力プレイ・PvP を見ているだけ）
+    get watching() {
+        return !!((this.coop && this.coop.spectator) || (this.pvp && this.pvp.spectator));
+    }
+    
+    // 観戦：自分の主人公は当たらない・倒れない（見えない所に置いておくだけ）
+    hidePlayerForWatch() {
+        const p = this.player;
+        if (!p) return;
+        p.takeDamage = () => 0;
+        p.knockback = () => {};
+        p.isInvincible = () => true;
+    }
+    
     isArena() {
         return this.gameState === 'playing' && typeof ArenaMap === 'function' && this.map instanceof ArenaMap;
     }
@@ -515,6 +529,8 @@ class Game {
         const battle = this.activeBattle;
         if (this.isArena() && battle && !this.screens.busy) {
             const justClosedPalette = performance.now() - (this.input.paletteClosedAt || 0) < 200;
+            // 観戦：Esc で観戦をやめて酒場へ
+            if (this.watching && this.input.isKeyPressed('Escape') && !battle.isOver) { this.leaveBattle('tavern'); return; }
             if ((this.input.isKeyPressed('Escape') && !justClosedPalette) || this.input.isKeyPressed('KeyP')) {
                 if (!this.input.paletteOpen) this.togglePause();
             } else if (this.paused && this.pauseNav) {
@@ -572,7 +588,9 @@ class Game {
         // 入力は「何も押していない」ことにする。咆哮で飛ばされる動き・魔法の弾・ボスはそのまま動き、敵の攻撃には当たらない
         // 協力プレイで戦闘不能：操作できない（ほかの人の戦いを見守る）
         const coop = this.coop && battle === this.bossBattle ? this.coop : null;
-        const cine = !!(arena && battle && battle.isCinematic) || !!(coop && (coop.localDead || this.player.isDead()));
+        // 観戦（watch.js）：自分の主人公は動かさない・出さない（演出中と同じあつかい）
+        const watching = this.watching;
+        const cine = watching || !!(arena && battle && battle.isCinematic) || !!(coop && (coop.localDead || this.player.isDead()));
         if (cine) {
             this.attackBuffer = 0;
             this.player.dodgeBuffer = 0;
@@ -739,7 +757,7 @@ class Game {
         
         // ゲームオーバー（闘技場は敗北の画面を出す）
         // 協力プレイは、自分が戦闘不能になるだけ（全員が戦闘不能になったら、ホストが負けにする）
-        if (this.player.isDead()) {
+        if (this.player.isDead() && !watching) {
             if (coop) coop.onLocalDead();
             else if (arena && battle) battle.onDefeat();
             else this.gameOver();
@@ -810,7 +828,8 @@ class Game {
             // 協力プレイ：ほかの人の主人公。自分が戦闘不能の時は、うすく出す
             const coop = this.coop && this.activeBattle === this.bossBattle ? this.coop : null;
             if (coop) items.push(...coop.getDepthDrawables());
-            items.push({ sortY: this.player.position.y + this.player.drawSize * 0.4, draw: (ctx, c) => {
+            // 観戦の時は、自分の主人公は出さない
+            if (!this.watching) items.push({ sortY: this.player.position.y + this.player.drawSize * 0.4, draw: (ctx, c) => {
                 if (!(coop && this.player.isDead())) { this.player.draw(ctx, c); return; }
                 ctx.save(); ctx.globalAlpha = 0.45; this.player.draw(ctx, c); ctx.restore();
             } });

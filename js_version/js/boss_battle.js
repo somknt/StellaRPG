@@ -505,6 +505,11 @@ class BossBattle {
             }
             rows.length = 0;
             rows.push(...keep);
+            // 観戦：報酬・記録はない
+            if (this.coop.spectator) {
+                u.resultTitle.textContent = '観戦終了';
+                u.resultSub.textContent = win ? 'パーティーの勝利！' : 'パーティーの敗北……';
+            }
             if (this.coopLost) { u.resultTitle.textContent = '通信が切れました'; u.resultSub.textContent = 'ホストとつながらなくなりました'; }
             u.retry.textContent = '酒場に戻る';
             const mon = document.getElementById('br-monster');

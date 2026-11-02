@@ -1119,7 +1119,7 @@ begin
     insert into hk_private.hk_battles(party_id, boss_id, host_id, members, hp_mult)
     values (p.id, case when p.kind = 'pvp' then 'pvp:' || coalesce(p.field, 'arena') else p.boss_id end, v_me,
             (select array_agg(m.account_id order by m.joined_at) from hk_private.hk_party_members m where m.party_id = p.id),
-            case when p.kind = 'pvp' then 1 when n = 2 then 1.5 when n = 3 then 2.0 when n = 4 then 2.5 else 1 end)
+            case when p.kind = 'pvp' then 1 when n = 2 then 2 when n = 3 then 3 when n = 4 then 4 else 1 end)
     returning id into v_b;
     update hk_private.hk_parties set status = 'battle', battle_id = v_b, updated_at = now() where id = p.id;
     update hk_private.hk_party_members set seen_at = now() where party_id = p.id;

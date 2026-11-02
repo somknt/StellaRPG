@@ -618,7 +618,7 @@ class Enemy {
             const now = performance.now();
             this.comboHits = now - this.lastComboAt <= Enemy.STAGGER.window * 1000 ? this.comboHits + 1 : 1;
             this.lastComboAt = now;
-            // staggerHits：この敵だけの回数（協力プレイは人数で多くする。mp_battle.js の CoopBattle.STAGGER_HITS）
+            // staggerHits：この敵だけの回数（協力プレイは Infinity＝ノックバックしない。mp_battle.js の CoopBattle.attach）
             if (this.comboHits >= (this.staggerHits || Enemy.STAGGER.hits)) {
                 this.comboHits = 0;
                 this.applyKnockback(direction, Math.max(Enemy.STAGGER.dist, knock || 0), true);
@@ -1091,7 +1091,8 @@ Enemy.STAR_SHOT_ORB_X = 0.86;
 
 // 敵のノックバック（ひるみ）：主人公の攻撃が続けて hits 回当たった時だけ、dist(px) 大きく飛ばされる（ボスは攻撃も止まる）
 // window：次の攻撃がこの秒数以内に当たると「続けて」。あくと数え直し。残り火・竜巻の継続ダメージは数えない
-Enemy.STAGGER = { hits: 5, window: 1.2, dist: 80 };
+// ひとりで遊ぶ時は 10回。協力プレイ（2人以上）はノックバックしない（mp_battle.js の CoopBattle.attach）
+Enemy.STAGGER = { hits: 10, window: 1.2, dist: 80 };
 
 // 体当たりのダメージ（全員の敵・ボス）
 // reach：敵の体の大きさのどこまでを「体」とするか / player：主人公の体の半径(px) / damage：敵の攻撃力に掛ける倍率

@@ -8,27 +8,33 @@
 //   主人公へのダメージ：その人の端末が、自分の画面のボスの攻撃で判定する（見えている攻撃に当たる）
 //   勝ち・負け：ホストが決めて、全員に送る。報酬はホストがサーバー（hk_mp_finish）に知らせて、サーバーが全員に1回だけ配る
 //
-// 通信：Realtime のチャンネル hoshinoko-party-<パーティーの id>（パーティーの人だけが知っている名前）
+// 通信：Realtime のチャンネル hoshinoko-party-<パーティーの id>
 //   'c'（ホスト以外 → みんな）：自分の主人公の様子・ボスに当てたダメージ・撃った魔法
 //   'h'（ホスト → みんな）：ボスの様子・ボスが出した物・ホストの主人公の様子・勝ち負け
 //   送る回数：2人 1秒に8回・3人 6回・4人 5回（Realtime の 1秒に100回までに収めるため）
+//   観戦（watch.js）：ホストは酒場のルームに戦いの id を知らせるので、同じルームの人がこのチャンネルを見られる
+//     パーティーの人以外から届いた 'c'・'h' は使わない
 //
-// 人数による強さ：ボスの HP（2人 1.5倍・3人 2.0倍・4人 2.5倍。サーバーが戦いを始めた時に決める）と、
-//   一部の範囲攻撃の広さ（2人 1.15倍・3人 1.25倍・4人 1.35倍。CoopBattle.RANGE_ATTACKS）
-//   ボスは、攻撃が終わるたびに、生きている人からねらう人を選び直す（同じ人を続けてねらいにくい・近い人を少しねらいやすい）
+// 人数による強さ（CoopBattle.HP_MUL・RANGE_MUL・SPEED_MUL）：ボスの HP（2人 2倍・3人 3倍・4人 4倍）・範囲攻撃の広さ・速さ
+//   協力プレイではボスはノックバックしない（怨嗟の鎧の分身がいる間だけ例外。CoopBattle.CLONE_HITS）
+//   ねらう人：攻撃が終わるたびに、生きている人からでたらめに選ぶ。範囲攻撃（CoopBattle.AREA_ATTACKS）の時は、
+//   主人公がいちばん多く集まっている所の人をねらう
 class CoopBattle {
-    constructor(game, tavern, party, pid) {
+    constructor(game, tavern, party, pid, opts = {}) {
         this.game = game;
         this.tavern = tavern;
         this.party = party;
         this.battle = party.battle;
         this.pid = pid;
-        this.host = !!party.battle.host_is_me;
+        // spectator：観戦（watch.js）。パーティーの人ではなく、見るだけ（何も送らない・自分の主人公は出さない）
+        this.spectator = !!opts.spectator;
+        this.host = !this.spectator && !!party.battle.host_is_me;
+        this.watchIdx = 0;
         const order = this.battle.members;
         this.members = order.map(id => party.members.find(m => m.pid === id) || { pid: id, name: '？', gender: 'male' });
         this.n = Math.max(2, order.length);
         this.hz = CoopBattle.TICK_HZ[this.n] || 5;
-        this.mult = Number(this.battle.hp_mult) || 1;
+        this.mult = CoopBattle.HP_MUL[this.n] || Number(this.battle.hp_mult) || 1;
         this.rangeMul = CoopBattle.RANGE_MUL[this.n] || 1;
         this.speedMul = CoopBattle.SPEED_MUL[this.n] || 1;
         this.speedNow = this.speedMul;   // 今の速さ（ノックバック中は 1。ホストが決めて送る）
@@ -61,18 +67,77 @@ class CoopBattle {
     // ---------- 始める・やめる ----------
     begin() {
         const me = this.members.find(m => m.pid === this.pid) || {};
-        this.channel = Net.join(`hoshinoko-party-${this.party.id}`, this.pid, { s: this.pid, n: me.name || '' }, {
-            c: (m) => this.onClient(m),
-            h: (m) => this.onHost(m)
-        });
+        if (this.spectator) {
+            // 観戦：presence には「観戦の人」として入る（席の数を数えるため）。何も送らない
+            this.watchKey = `w-${this.pid || Math.random().toString(36).slice(2, 10)}`;
+            this.channel = Net.join(`hoshinoko-party-${this.party.id}`, this.watchKey, { w: 1, at: Date.now() }, {
+                c: (m) => this.onClient(m),
+                h: (m) => this.onHost(m),
+                presence: (list) => this.checkSeat(list)
+            });
+        } else {
+            this.channel = Net.join(`hoshinoko-party-${this.party.id}`, this.pid, { s: this.pid, n: me.name || '' }, {
+                c: (m) => this.onClient(m),
+                h: (m) => this.onHost(m)
+            });
+        }
         this.lastHostAt = performance.now();
         this.installSE();
         this.game.startBossBattle(this.battle.boss, Account.gender, this);
         // HUD のプレイヤー名
         this.game.playerName = Account.playerName;
+        // ホスト：酒場の人に「この戦いをしている」と知らせる（観戦できるように）
+        if (this.host && window.WatchBeacon && this.tavern) {
+            this.beacon = new WatchBeacon(this.tavern, () => this.beaconInfo());
+        }
+    }
+    
+    beaconInfo() {
+        return {
+            p: this.party.id, b: this.battle.id, k: 'coop', boss: this.battle.boss, h: this.pid,
+            m: this.members.map(m => [m.pid, m.name || '', m.gender === 'female' ? 'female' : 'male']),
+            at: Math.round(this.bb ? this.bb.time : 0)
+        };
+    }
+    
+    stopBeacon() {
+        if (this.beacon) this.beacon.stop();
+        this.beacon = null;
+    }
+    
+    // 観戦の席（1つの戦いに CoopBattle.MAX_WATCH 人まで）
+    checkSeat(list) {
+        if (this.seatChecked || this.ended) return;
+        if (!list.some(x => x.key === this.watchKey)) return;
+        this.seatChecked = true;
+        if (!WatchBar.seatOk(list, this.watchKey)) {
+            this.tavern.toast(`観戦の席がいっぱいです（1つの戦いに${CoopBattle.MAX_WATCH}人まで）`, 4);
+            this.ended = true;
+            WatchBar.leaveSoon(this.game);
+        }
+    }
+    
+    // 観戦：見る人を変える（WatchBar の ◀ ▶・←→）
+    switchWatch(d) {
+        const list = [...this.remotes.values()];
+        if (!list.length) return;
+        this.watchIdx = (this.watchIdx + d + list.length) % list.length;
+        this.followWatched(true);
+        playSE('ui_cursor');
+    }
+    
+    followWatched(snap = false) {
+        const list = [...this.remotes.values()];
+        const r = list[this.watchIdx % Math.max(1, list.length)];
+        if (!r) return;
+        const cam = this.game.camera;
+        if (cam.target !== r.p) { cam.follow(r.p); if (snap) cam.snapToTarget(); }
+        WatchBar.setName(`${r.name || '？'} を見ています${r.dead ? '（戦闘不能）' : ''}`);
     }
     
     stop() {
+        this.stopBeacon();
+        if (this.spectator && window.WatchBar) WatchBar.hide();
         if (this.channel) this.channel.leave();
         this.channel = null;
         if (this._origSE) { window.playSE = this._origSE; this._origSE = null; }
@@ -127,10 +192,21 @@ class CoopBattle {
         const e = this.boss;
         e.maxHP = Math.round(e.maxHP * this.mult);
         e.currentHP = e.maxHP;
-        // ノックバックするまでの回数（人数ごと）
-        e.staggerHits = CoopBattle.STAGGER_HITS[this.n] || 0;
+        // ノックバックしない（怨嗟の鎧の分身がいる間だけ、CoopBattle.CLONE_HITS 回で本体がひるむ）
+        const ai0 = this.ai, cloneHits = CoopBattle.CLONE_HITS[this.n] || CoopBattle.CLONE_HITS[4];
+        Object.defineProperty(e, 'staggerHits', {
+            configurable: true,
+            get: () => (ai0.liveClones && ai0.liveClones().length ? cloneHits : Infinity),
+            set: () => {}
+        });
         if (this.host) this.attachHost();
         else this.attachMirror();
+        // 観戦：自分の主人公は出さない・当たらない（game.js の watching）。ボスの名前の「観戦中」は update で出す
+        if (this.spectator) {
+            game.hidePlayerForWatch();
+            WatchBar.show(this);
+            this.followWatched(true);
+        }
         // 暗闇の明かり（怨嗟の鎧）：自分の主人公のまわりだけ（ねらわれている人のまわりではなく）
         if (this.ai.lights) {
             const lights = this.ai.lights.bind(this.ai);
@@ -174,9 +250,13 @@ class CoopBattle {
         ai.roarBlast = (dist) => { this.withTarget(game.player, () => blast(dist)); this.record({ k: 'blast', dist: dist === undefined ? null : dist }); };
         const push = ai.roarPush.bind(ai);
         ai.roarPush = (dt, range, power) => this.withTarget(game.player, () => push(dt, range, power));
-        // 攻撃が終わるたびに、ねらう人を選び直す
+        // 攻撃が終わるたびに、ねらう人を選び直す（でたらめに）
         const end = ai.endAction.bind(ai);
         ai.endAction = () => { end(); this.pickTarget(); };
+        // 範囲攻撃を始める時は、主人公がいちばん多く集まっている所をねらう（攻撃の中身が動き出す前に、ねらう人を変える）
+        const area = new Set(CoopBattle.AREA_ATTACKS[this.bb.def.id] || []);
+        const startAction = ai.startAction.bind(ai);
+        ai.startAction = (name, gen) => { if (area.has(name)) this.pickCluster(); return startAction(name, gen); };
         // 魔道ゴーレムの危険床：ねらっている人だけでなく、ほかの人の足元にも出す（すき間は残す）
         if (ai.hazardSpots) {
             const spots = ai.hazardSpots.bind(ai);
@@ -284,18 +364,35 @@ class CoopBattle {
         return list;
     }
     
-    // ねらう人を選ぶ：同じ人を続けてねらいにくく（重み 0.35）、近い人を少しねらいやすく
+    // ねらう人を選ぶ（攻撃が終わるたび）：生きている人から、でたらめに
     pickTarget() {
         const e = this.boss, list = this.targets();
         if (!list.length) return;
-        if (list.length === 1) { e.target = list[0]; return; }
-        const w = list.map(t => {
-            const d = t.position.distance(e.position);
-            return (t === e.target ? 0.35 : 1) * (1 + 260 / (d + 260));
-        });
-        let roll = Math.random() * w.reduce((s, x) => s + x, 0);
-        for (let i = 0; i < list.length; i++) { roll -= w[i]; if (roll <= 0) { e.target = list[i]; return; } }
-        e.target = list[list.length - 1];
+        e.target = list[Math.floor(Math.random() * list.length)];
+    }
+    
+    // 範囲攻撃の時：主人公がいちばん多く集まっている所の人（まわりの人がいちばん多い人）をねらう
+    // みんな離れている時（まわりに人がいない）は、今ねらっている人のまま
+    pickCluster() {
+        const e = this.boss, list = this.targets();
+        if (list.length < 2) return;
+        const R = CoopBattle.CLUSTER_R;
+        let best = [], bestN = 0;
+        for (const t of list) {
+            let n = 0;
+            for (const u of list) if (u !== t && t.position.distance(u.position) <= R) n++;
+            if (n > bestN) { bestN = n; best = [t]; }
+            else if (n === bestN && n > 0) best.push(t);
+        }
+        if (!bestN) return;
+        // 同じ数の人がいくつかいる時は、集まりのまん中に近い人
+        const pick = (g) => {
+            let sx = 0, sy = 0, k = 0;
+            for (const u of list) if (u.position.distance(g.position) <= R) { sx += u.position.x; sy += u.position.y; k++; }
+            return Math.hypot(g.position.x - sx / k, g.position.y - sy / k);
+        };
+        best.sort((a, b) => pick(a) - pick(b));
+        e.target = best[0];
     }
     
     snapshot() {
@@ -345,6 +442,16 @@ class CoopBattle {
     update(dt) {
         const now = performance.now();
         this.updateRemotes(dt);
+        if (this.spectator) {
+            // 観戦：途中から見るので、開始の演出は飛ばす。カメラは見ている人を追う
+            if (this.bb && this.bb.state === 'intro' && this.bb.t < 4.0) this.bb.t = 4.0;
+            const nm = this.bb && this.bb.ui && this.bb.ui.name, label = `${this.bb ? this.bb.def.name : ''}（協力 ${this.n}人・観戦中）`;
+            if (nm && nm.textContent !== label) nm.textContent = label;
+            WatchBar.handleKeys(this, this.game.input);
+            this.followWatched();
+            if (!this.ended && this.bb && !this.bb.isOver && now - this.lastHostAt > CoopBattle.HOST_LOST_MS) this.abort();
+            return;
+        }
         if (this.host) {
             // ねらっている人が倒れた・いなくなった：すぐ選び直す
             const tg = this.boss.target;
@@ -362,7 +469,7 @@ class CoopBattle {
     }
     
     sendTick() {
-        if (!this.channel) return;
+        if (!this.channel || this.spectator) return;   // 観戦の人は何も送らない
         if (this.host) {
             this.collectUpdates();
             const msg = { t: Math.round(this.clock * 1000) / 1000, b: this.snapshot(), me: this.myState(), c: this.casts, ev: this.out };
@@ -380,7 +487,8 @@ class CoopBattle {
     // ---------- 受け取った ----------
     // ほかの人（ホスト以外）の様子。ホストは、その人がボスに当てたダメージをボスに与える
     onClient(m) {
-        if (!m || m.s === this.pid) return;
+        // パーティーの人（戦いのメンバー）からの物だけ使う
+        if (!m || m.s === this.pid || !this.remotes.has(m.s)) return;
         this.applyPlayerState(m);
         if (m.c && m.c.length) this.showRemoteCasts(m.c);
         if (this.host && m.h && m.h.length && this.boss && !this.ended) {
@@ -390,6 +498,8 @@ class CoopBattle {
     
     onHost(m) {
         if (!m || this.host) return;
+        // ホストからの物だけ使う（サーバーの答えにホストがある時）
+        if (this.battle.host && (!m.me || m.me.s !== this.battle.host)) return;
         const now = this.clock;
         this.lastHostAt = performance.now();
         this.hostOff = Math.min(this.hostOff, now - m.t);
@@ -642,6 +752,7 @@ class CoopBattle {
         }
         this.record({ k: 'end', win: false });
         this.sendTick();
+        this.stopBeacon();
         this.ended = true;
         this.bb.onDefeat(true);
         this.finishServer(false);
@@ -649,12 +760,15 @@ class CoopBattle {
     
     // 勝った（BossBattle.update がボスの HP 0 を見つけた）。表示する報酬（サーバーが確定する）を返す
     onVictory(time) {
+        // 観戦：報酬・記録はない
+        if (this.spectator) { this.ended = true; return null; }
         if (this.host && !this.ended) {
             this.ended = true;
             const d = this.boss.knockDir || new Vector2(0, -1);
             this.record({ k: 'die', dx: d.x, dy: d.y });
             this.record({ k: 'end', win: true, time });
             this.sendTick();
+            this.stopBeacon();
             this.finishServer(true);
         }
         this.ended = true;
@@ -680,7 +794,7 @@ class CoopBattle {
         bb.coopLost = true;
         bb.onDefeat(true);
         bb.showBanner('通信が切れました', 'ホストとつながらなくなりました', 'defeat');
-        this.finishServer(false);
+        if (!this.spectator) this.finishServer(false);
     }
     
     async finishServer(win) {
@@ -803,9 +917,24 @@ CoopBattle.RANGE_MUL = { 2: 1.25, 3: 1.4, 4: 1.55 };
 // ボスの速さの倍率（人数ごと）：動き・攻撃の出る早さ・予告・弾の速さがみんな速くなる。
 // ノックバックで飛ばされている間は、ふつうの速さ（動けない時間は短くならない）
 CoopBattle.SPEED_MUL = { 2: 1.1, 3: 1.18, 4: 1.25 };
-// 何回続けて当たると、ボスがノックバックするか（人数ごと。ひとりの時は Enemy.STAGGER.hits の 5回）
-// みんなの攻撃を合わせて数える
-CoopBattle.STAGGER_HITS = { 2: 10, 3: 15, 4: 20 };
+// ボスの HP の倍率（人数ごと）。サーバーの hp_mult より、こちらを使う（前の版の SQL のままでも同じ強さになるように）
+CoopBattle.HP_MUL = { 2: 2, 3: 3, 4: 4 };
+// 協力プレイ（2人以上）では、ボスはノックバックしない
+// ただし怨嗟の鎧の分身（本体をノックバックした時だけ消える）がいる間だけは、みんなの攻撃を合わせてこの回数続けて当たると
+// 本体がひるんで分身が消える（そうしないと第2形態を進められないため）。ひとりの時（10回）より多い
+CoopBattle.CLONE_HITS = { 2: 15, 3: 20, 4: 25 };
+// 範囲攻撃（ボスごとの攻撃の名前）。これを出す時は、主人公がいちばん多く集まっている所の人をねらう
+// それ以外の攻撃は、生きている人からでたらめに選んでねらう
+CoopBattle.AREA_ATTACKS = {
+    giant_forest_boar: ['stomp', 'bigStomp'],
+    black_corrupted_wolf: ['leap', 'shadowLeap', 'corruptionShot', 'corruptionWave'],
+    magic_golem: ['armSwing', 'slam', 'shockwave', 'bigShockwave', 'magicShot', 'hazardFloor', 'hazardBarrage', 'magicCannon'],
+    grudge_armor: ['windSlash', 'sixWind']
+};
+CoopBattle.CLUSTER_R = 240;      // この距離より近い主人公を「集まっている」と数える（px）
+// 観戦
+CoopBattle.MAX_WATCH = 2;        // 1つの戦いを観戦できる人数（Realtime の上限があるので少なめ）
+CoopBattle.BEACON_SEC = 3;       // ホストが酒場へ「戦っている」と知らせる間隔（秒）
 CoopBattle.RANGE_ATTACKS = {
     giant_forest_boar: [['stomp', ['radius']], ['bigStomp', ['radius']]],                       // 踏みつけの衝撃波
     black_corrupted_wolf: [['corruptionWave', ['maxRadius']]],                                  // 侵蝕波動

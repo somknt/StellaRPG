@@ -132,6 +132,15 @@
                 </div>
             </div>
             
+            <!-- 観戦中（watch.js）：見ている人の名前・見る人を変える・観戦をやめる -->
+            <div id="watch-bar" hidden>
+                <span class="wb-tag">観戦中</span>
+                <button class="ui-btn wb-btn" id="wb-prev" type="button" aria-label="前の人を見る">◀</button>
+                <b id="wb-name"></b>
+                <button class="ui-btn wb-btn" id="wb-next" type="button" aria-label="次の人を見る">▶</button>
+                <button class="ui-btn wb-btn wb-leave" id="wb-leave" type="button">観戦をやめる<small class="pc-only">Esc</small></button>
+            </div>
+            
             <!-- カウントダウン（3・2・1・GO!） -->
             <div id="battle-countdown"></div>
             
@@ -541,7 +550,7 @@
             <!-- 右上：酒場を出る -->
             <button class="ui-btn tv-btn" id="tv-exit" type="button">酒場を出る</button>
             
-            <!-- 左の真ん中：自分のパーティー（入っている時だけ） -->
+            <!-- 右の真ん中：自分のパーティー（入っている時だけ） -->
             <div class="tv-panel" id="tv-party" hidden>
                 <div id="tvp-title"></div>
                 <div id="tvp-sub"></div>
@@ -558,7 +567,8 @@
             <!-- 右下：チャット・走る（押すたびに 走る ⇔ 歩く） -->
             <div id="tv-tools">
                 <button class="ui-btn tv-tool" id="tv-chat-btn" type="button" aria-label="チャット"><i>💬</i><b>チャット</b><small class="pc-only">T</small></button>
-                <button class="ui-btn tv-tool" id="tv-run" type="button" aria-pressed="true" aria-label="走る・歩くの切りかえ"><i>👟</i><b>走る</b><small class="pc-only">Shift</small></button>
+                <!-- 走る：文字ではなく、主人公の走るシルエット（assets/ui/buttons/sil_run_*.png）の丸いボタン。光っている時は走る -->
+                <button class="ui-btn" id="tv-run" type="button" aria-pressed="true" aria-label="走る・歩くの切りかえ（走る）" title="走る・歩くの切りかえ（PC は Shift でも）"><span class="tv-sil"></span></button>
             </div>
             
             <!-- チャット（同じルームの人に見える。最大 60 文字） -->
@@ -695,6 +705,7 @@
     <script src="js/tavern.js"></script>
     <script src="js/mp_battle.js"></script>
     <script src="js/pvp_battle.js"></script>
+    <script src="js/watch.js"></script>
     <script src="js/title_atlas.js"></script>
     <script src="js/screens.js"></script>
     <script src="js/ui.js"></script>

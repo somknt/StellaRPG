@@ -61,6 +61,21 @@ class PvpBattle {
             v: (m) => this.onRemote(m)
         });
         game.startPvpBattle(this);
+        // 対戦開始を押した人：酒場の人に「対戦している」と知らせる（観戦できるように。watch.js）
+        if (this.host && window.WatchBeacon && this.tavern) {
+            const start = this.goAt - PvpBattle.COUNTDOWN * 1000;
+            const g = (m) => (m.gender === 'female' ? 'female' : 'male');
+            this.beacon = new WatchBeacon(this.tavern, () => ({
+                p: this.party.id, b: this.battle.id, k: 'pvp', f: this.field, h: this.pid,
+                m: this.battle.members.map(id => { const m = id === this.pid ? this.me : this.other; return [id, m.name || '', g(m)]; }),
+                at: Math.round((performance.now() - start) / 1000)
+            }));
+        }
+    }
+    
+    stopBeacon() {
+        if (this.beacon) this.beacon.stop();
+        this.beacon = null;
     }
     
     // game.startPvpBattle から：フィールドと主人公を置いた後
@@ -93,6 +108,7 @@ class PvpBattle {
     }
     
     stop() {
+        if (this.stopBeacon) this.stopBeacon();
         if (this.channel) this.channel.leave();
         this.channel = null;
         if (this.ui.hud) this.ui.hud.classList.remove('show');
@@ -158,6 +174,7 @@ class PvpBattle {
         this.why = why || '';
         this.resultTimer = 2.4;
         this.sendTick();
+        this.stopBeacon();
         const T = { victory: ['WIN!', '勝利！'], defeat: ['LOSE…', '敗北……'], draw: ['DRAW', '引き分け'] }[result];
         this.showBanner(T[0], why || T[1], result === 'victory' ? 'victory' : 'defeat');
         playSE(result === 'victory' ? 'boss_down' : 'ui_cancel');

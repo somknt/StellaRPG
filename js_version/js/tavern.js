@@ -74,9 +74,10 @@ class TavernScene {
         try { localStorage.setItem('hoshinoko.tavern.run', this.running ? '1' : '0'); } catch (e) { /* 保存できない端末 */ }
         const b = this.ui.run;
         if (b) {
+            // 丸いボタン（走るシルエット）：光っている時は走る、暗い時は歩く
             b.classList.toggle('on', this.running);
             b.setAttribute('aria-pressed', this.running ? 'true' : 'false');
-            b.querySelector('b').textContent = this.running ? '走る' : '歩く';
+            b.setAttribute('aria-label', `走る・歩くの切りかえ（今は${this.running ? '走る' : '歩く'}）`);
         }
     }
     
@@ -182,6 +183,7 @@ class TavernScene {
         this.map = new TavernMap(createTavernMapData());
         const sp = this.map.randomSpawn();
         this.player = new Player(sp.x, sp.y, Account.gender);
+        document.body.dataset.hero = Account.gender;   // 走るボタンのシルエットを主人公に合わせる
         this.player.map = this.map;
         this.player.direction = 'up';
         this.player.setMoveMode('walk');
@@ -244,6 +246,7 @@ class TavernScene {
         document.body.dataset.mode = '';
         if (this.game.coop) { this.game.coop.stop(); this.game.coop = null; }
         if (this.game.pvp) { this.game.pvp.stop(); this.game.pvp = null; }
+        this.leaveWatchCh();   // 戦いの「終わった」の知らせを送った後で
         this.game.screens.mp = null;
         this.game.screens.equipReturn = null;
         this.game.screens.setScreen(to);
@@ -266,6 +269,7 @@ class TavernScene {
         });
         this.sendT = 0;
         this.lastSent = null;
+        this.ensureWatchCh();
     }
     
     leaveLobby() {
@@ -273,6 +277,103 @@ class TavernScene {
         this.lobby = null;
         this.remotes.clear();
         this.presentKeys = null;
+    }
+    
+    // 観戦のチャンネル hoshinoko-watch-<ルーム>：今このルームで戦っているパーティーの知らせ（watch.js の WatchBeacon）
+    // 酒場にいる間は、戦い・観戦の間もつないだまま（戦っているホストも、このチャンネルで知らせる。
+    // 同じ名前のチャンネルを2つ作ると supabase-js が同じ物を返すので、1つだけにしておく）
+    ensureWatchCh() {
+        if (this.watchCh && this.watchRoom === this.room) return this.watchCh;
+        this.leaveWatchCh();
+        this.watchRoom = this.room;
+        this.liveBattles = new Map();
+        this.watchCh = Net.join(`hoshinoko-watch-${this.room}`, `l-${this.session}`, null, {
+            b: (m) => this.onBeacon(m),
+            x: (m) => { if (m && typeof m.p === 'string' && this.liveBattles) this.liveBattles.delete(m.p); }
+        });
+        return this.watchCh;
+    }
+    
+    leaveWatchCh() {
+        if (this.watchCh) this.watchCh.leave();
+        this.watchCh = null;
+        this.watchRoom = null;
+        if (this.liveBattles) this.liveBattles.clear();
+    }
+    
+    // ---------- 観戦 ----------
+    onBeacon(m) {
+        const info = window.WatchInfo ? WatchInfo.parse(m) : null;
+        if (!info) return;
+        // 自分のパーティーの戦いは出さない
+        if (this.party && this.party.id === info.p) return;
+        if (this.liveBattles.size >= 20 && !this.liveBattles.has(info.p)) return;
+        this.liveBattles.set(info.p, { info, at: performance.now() });
+    }
+    
+    // 観戦できる戦い（kind：'coop' / 'pvp'）。しばらく知らせが来ない物は消す
+    watchList(kind) {
+        const now = performance.now();
+        const out = [];
+        if (!this.liveBattles) return out;
+        for (const [id, x] of this.liveBattles) {
+            if (now - x.at > WatchInfo.LIFE_MS) { this.liveBattles.delete(id); continue; }
+            if (x.info.k === kind) out.push(x.info);
+        }
+        return out;
+    }
+    
+    // 扉を調べた：今の戦いの一覧（選ぶと観戦）
+    openWatchList(kind) {
+        const list = this.watchList(kind);
+        const u = this.ui;
+        this.openView('dialog');
+        u.dText.textContent = list.length
+            ? `今、${kind === 'pvp' ? '対戦' : '戦い'}をしているパーティーがあります。\n観戦しますか？（見るだけです。報酬はありません）`
+            : '今は、だれも戦っていないようだ。';
+        u.dChoices.innerHTML = '';
+        const add = (label, fn, cls = '') => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'ui-btn tvd-choice ' + cls;
+            b.dataset.nav = '';
+            b.textContent = label;
+            b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (window.pressEffect) pressEffect(b); fn(); });
+            u.dChoices.appendChild(b);
+        };
+        for (const info of list.slice(0, 4)) add(`観戦する：${info.title}`, () => this.startWatch(info));
+        add('やめる', () => this.openView('walk'), 'back');
+        this.nav = new UINav(u.dialog, 'vertical');
+    }
+    
+    startWatch(info) {
+        const game = this.game;
+        if (this.party) { this.openView('walk'); this.toast('パーティーに入っている間は観戦できません'); return; }
+        if (game.coop || game.pvp || this._pvpStarting || game.screens.busy) return;   // 画面の切りかえの途中は待つ
+        // まだ戦っているか（知らせが古くなっていないか）
+        if (!this.watchList(info.k).some(x => x.p === info.p)) { this.openView('walk'); this.toast('その戦いは終わったようです'); return; }
+        const screens = game.screens;
+        game.loadout = Account.normalizeLoadout(Account.loadout);
+        game.playerName = Account.playerName;
+        this._watchKind = info.k;
+        this.openView('walk');
+        this.hideScene();
+        this.leaveLobby();
+        playSE('ui_select');
+        screens.equipReturn = null;
+        if (info.k === 'pvp') {
+            const w = new PvpWatch(game, this, info);
+            this._pvpStarting = true;
+            screens.transition(() => { this._pvpStarting = false; screens.hideAll(); w.begin(); });
+        } else {
+            // 協力プレイ：ホスト以外の人（ミラー）と同じしくみで、見るだけ
+            const party = {
+                id: info.p, kind: 'coop', members: info.members,
+                battle: { id: info.b, boss: info.boss, host: info.h, host_is_me: false, members: info.members.map(m => m.pid), hp_mult: 0 }
+            };
+            game.coop = new CoopBattle(game, this, party, this.pid || `w${this.session}`, { spectator: true });
+            screens.transition(() => { screens.hideAll(); game.coop.begin(); });
+        }
     }
     
     switchRoom(room) {
@@ -693,7 +794,10 @@ class TavernScene {
         const game = this.game;
         if (game.coop) { game.coop.stop(); game.coop = null; }
         if (game.pvp) { game.pvp.stop(); game.pvp = null; }
-        this.player.position = this.map.findFreeSpot(this.doorFor(this.party || { kind: 'coop' }).interact.clone(), this.player.getFootBox(), 160);
+        // 観戦の後は、観戦した扉の前に戻る
+        const kind = this.party ? this.party.kind : (this._watchKind || 'coop');
+        this._watchKind = null;
+        this.player.position = this.map.findFreeSpot(this.doorFor({ kind }).interact.clone(), this.player.getFootBox(), 160);
         this.player.direction = 'down';
         this.camera.follow(this.player);
         this.camera.snapToTarget();
@@ -781,7 +885,9 @@ class TavernScene {
         if (f.kind === 'master') return '話す';
         if (f.kind === 'board') return '掲示板を見る';
         if (f.ref.kind === 'locked') return '調べる';
-        return this.doorOpenFor(f.ref) ? '扉に入る' : '調べる';
+        if (this.doorOpenFor(f.ref)) return '扉に入る';
+        if (!this.party && this.watchList(f.ref.kind).length) return '観戦する';
+        return '調べる';
     }
     
     interact() {
@@ -794,6 +900,11 @@ class TavernScene {
         if (d.kind === 'locked') { this.toast('かたく閉ざされている……。（今後、新しいモードが追加される予定です）'); return; }
         if (this.doorOpenFor(d)) { this.enterDoor(true); return; }
         const p = this.party;
+        // ほかのパーティーがこの扉の先で戦っている：観戦できる（パーティーに入っていない時だけ）
+        if (this.watchList(d.kind).length) {
+            if (!p) { this.openWatchList(d.kind); return; }
+            if (p.kind !== d.kind || p.status !== 'open') { this.toast('パーティーに入っている間は観戦できません'); return; }
+        }
         if (!p) this.toast(d.kind === 'coop' ? 'クエストを受けると、この扉が開きます（マスターか掲示板へ）' : 'PvP の募集をすると、この扉が開きます（マスターか掲示板へ）');
         else if (p.kind !== d.kind) this.toast('この扉は、あなたのパーティーの扉ではありません');
         else this.toast('今は入れません');
@@ -1045,8 +1156,32 @@ class TavernScene {
                 const all = p.all_entered && p.count >= 2;
                 const py = Math.max(TavernScene.PLATE_MIN_Y, d.doorTop + 34 - cam.y);
                 this.drawPlate(ctx, x, py, `${p.entered}/${p.cap}`, all ? '全員入場済み' : '', d.color);
+            } else if (d.kind !== 'locked' && !p) {
+                // ほかのパーティーが戦っている扉：「観戦できます」（パーティーに入っていない時だけ）
+                const n = this.watchList(d.kind).length;
+                if (n) this.drawWatchTag(ctx, x, Math.max(TavernScene.PLATE_MIN_Y, d.doorTop + 30 - cam.y), n, d.color);
             }
         }
+    }
+    
+    drawWatchTag(ctx, x, y, n, color) {
+        ctx.save();
+        ctx.font = 'bold 15px "DotGothic16", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const text = n > 1 ? `👁 観戦できます（${n}）` : '👁 観戦できます';
+        const w = ctx.measureText(text).width + 18, h = 24;
+        const a = 0.75 + 0.25 * Math.sin(this.time * 3);
+        ctx.globalAlpha = a;
+        ctx.fillStyle = 'rgba(10, 8, 30, 0.88)';
+        ctx.strokeStyle = color || '#ffd76a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x - w / 2, y - h / 2, w, h, 6); else ctx.rect(x - w / 2, y - h / 2, w, h);
+        ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#fff6d8';
+        ctx.fillText(text, x, y + 1);
+        ctx.restore();
     }
     
     drawPlate(ctx, x, y, main, sub, color) {
