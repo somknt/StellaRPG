@@ -3,7 +3,7 @@
 // - マップの絵は、フィールドに入った時に1回だけ全体を描いて小さくしておく（毎フレームは、その絵の上に印を描くだけ）
 // - 主人公：丸っこい星の印。1P = 赤・2P = 青・3P = 緑・4P = 黄（ソロは 1P の赤）。自分の星は少し大きく、白い輪が光る
 //   協力プレイ・PvP はバトルの参加の順（1P がリーダー）。酒場は同じパーティーの人だけ色つき（ほかの人は白い小さな星）
-// - 敵：その敵の絵の形（シルエット）。ボスは大きく出す。絵がない敵は色の点
+// - 敵：赤い輪の丸い印の中に、その敵の絵の形（明るいシルエット）。ボスは大きな金と赤の輪で、まわりに輪が広がる。絵がない敵は色の丸
 // - 主人公（酒場は近くの扉も）が地図と重なると、地図をうすくして後ろが見えるようにする
 class Minimap {
     constructor(game) {
@@ -115,17 +115,16 @@ class Minimap {
         g.restore();
         // 酒場：自分のパーティーの扉が開いている時は光らせる
         if (s.tavern) this.drawDoors(g, s, X, Y);
-        // 敵（主人公より奥に）
-        if (!s.tavern) {
-            for (const e of this.game.enemySpawner.enemies) {
-                if (e instanceof PvpOpponentRef() || !e.isAlive() || e.dying) continue;
-                this.drawEnemy(g, e, X(e.position.x), Y(e.position.y));
-            }
-        }
-        // 主人公（自分はいちばん手前）
+        // ほかの人 → 敵 → 自分 の順（敵の印がほかの人の星にかくれないように。自分はいちばん手前）
         const list = this.players(s);
-        list.sort((a, b) => (a.me ? 1 : 0) - (b.me ? 1 : 0));
-        for (const p of list) this.drawStar(g, X(p.x), Y(p.y), p);
+        for (const p of list) if (!p.me) this.drawStar(g, X(p.x), Y(p.y), p);
+        if (!s.tavern) {
+            const foes = this.game.enemySpawner.enemies.filter(e => !(e instanceof PvpOpponentRef()) && e.isAlive() && !e.dying);
+            // ボスを最後に（いちばん上に）
+            foes.sort((a, b) => (Minimap.isBig(a) ? 1 : 0) - (Minimap.isBig(b) ? 1 : 0));
+            for (const e of foes) this.drawEnemy(g, e, X(e.position.x), Y(e.position.y));
+        }
+        for (const p of list) if (p.me) this.drawStar(g, X(p.x), Y(p.y), p);
     }
 
     drawDoors(g, s, X, Y) {
@@ -236,51 +235,73 @@ class Minimap {
         g.restore();
     }
 
-    // 敵：絵のシルエット
+    static isBig(e) { return !!(e.isBoss || e.ai); }
+    // 敵：丸い印の中に、その敵の絵のシルエット（明るい色）。ボスは大きく、まわりに赤い輪が広がる
     drawEnemy(g, e, x, y) {
-        const R = Minimap.RES;
-        const size = (e.isBoss || e.ai ? Minimap.ICON.boss : Minimap.ICON.normal) * R;
-        const icon = this.iconFor(e, size);
-        if (icon) {
-            g.drawImage(icon, Math.round(x - icon.width / 2), Math.round(y - icon.height * 0.6));
-            return;
+        const R = Minimap.RES, big = Minimap.isBig(e);
+        const size = (big ? Minimap.ICON.boss : Minimap.ICON.normal) * R;
+        const icon = this.iconFor(e, size, big);
+        x = Math.round(x); y = Math.round(y);
+        if (big) {
+            const k = (this.t * 0.8) % 1;
+            g.save();
+            g.globalAlpha = 0.8 * (1 - k);
+            g.strokeStyle = Minimap.BOSS_RING;
+            g.lineWidth = 2 * R;
+            g.beginPath();
+            g.arc(x, y, size / 2 + (2 + k * 7) * R, 0, Math.PI * 2);
+            g.stroke();
+            g.restore();
         }
-        // 絵がない敵：色の点
-        g.save();
-        g.fillStyle = Minimap.ENEMY_EDGE;
-        g.beginPath(); g.arc(x, y, 3.4 * R, 0, Math.PI * 2); g.fill();
-        g.fillStyle = (e.getEnemyColor && e.getEnemyColor()) || Minimap.ENEMY_FILL;
-        g.beginPath(); g.arc(x, y, 2.4 * R, 0, Math.PI * 2); g.fill();
-        g.restore();
+        g.drawImage(icon, x - icon.width / 2, y - icon.height / 2);
     }
 
-    // その敵の絵（正面・立っている形。向きや動きで形が変わってちらつかないように、決まった1枚を使う）
-    static enemyArt(e) {
-        const A = window.assetManager;
-        if (!A) return null;
-        const name = e.data && e.data.name;
-        const look = Enemy.BEAST_LOOKS && Enemy.BEAST_LOOKS[name];
-        const keys = [];
-        if (look && look.key) keys.push(`${look.key}_down_1`, `${look.key}_idle_down_1`, `${look.key}_walk_down_1`, `${look.key}_down_2`);
-        if (name === '角ウサギ') keys.push('horn_rabbit_down_1');
-        if (e.isSlime) keys.push('starlight_slime_down_1');
-        if (name === '草原狼') keys.push('wolf_1');
-        for (const k of keys) { const im = A.get(k); if (im) return im; }
-        try { return e.getEnemyImage ? e.getEnemyImage() : null; } catch (err) { return null; }
-    }
-
-    iconFor(e, size) {
+    // 印の絵（敵の絵ごと・大きさごとに1回だけ作る）
+    iconFor(e, size, big = false) {
         const img = Minimap.enemyArt(e);
-        if (!img || !(img.width || img.naturalWidth)) return null;
-        let bySize = this.icons.get(img);
-        if (!bySize) { bySize = {}; this.icons.set(img, bySize); }
-        if (bySize[size] !== undefined) return bySize[size];
-        bySize[size] = Minimap.makeSilhouette(img, size);
-        return bySize[size];
+        const key = img && (img.width || img.naturalWidth) ? img : (e.getEnemyColor && e.getEnemyColor()) || '#ff6a6a';
+        let bySize = this.icons.get(key);
+        if (!bySize) { bySize = {}; this.icons.set(key, bySize); }
+        const k = `${size}|${big ? 1 : 0}`;
+        if (!bySize[k]) bySize[k] = Minimap.makeBadge(typeof key === 'string' ? null : key, size, big, typeof key === 'string' ? key : null);
+        return bySize[k];
     }
 
-    // 絵のまわりの透明を切って、size の大きさのシルエット（明るいふちどり＋暗い中身）にする
-    static makeSilhouette(img, size) {
+    // 丸い印：黒いふち → 赤い輪（ボスは金と赤）→ 暗い中 → 敵のシルエット（明るい色。絵がない敵は色の丸）
+    static makeBadge(img, size, big, dotColor) {
+        const R = Minimap.RES;
+        const ring = (big ? 2.4 : 1.8) * R, edge = 1.2 * R;
+        const W = Math.ceil(size + (ring + edge) * 2 + 2);
+        const c = document.createElement('canvas');
+        c.width = c.height = W;
+        const g = c.getContext('2d');
+        const m = W / 2, r = size / 2;
+        g.beginPath(); g.arc(m, m, r + ring + edge, 0, Math.PI * 2);
+        g.fillStyle = 'rgba(8, 4, 10, 0.95)'; g.fill();
+        g.beginPath(); g.arc(m, m, r + ring, 0, Math.PI * 2);
+        if (big) {
+            const gr = g.createLinearGradient(0, m - r, 0, m + r);
+            gr.addColorStop(0, '#ffd76a'); gr.addColorStop(1, '#ff3a3a');
+            g.fillStyle = gr;
+        } else g.fillStyle = Minimap.ENEMY_RING;
+        g.fill();
+        g.beginPath(); g.arc(m, m, r, 0, Math.PI * 2);
+        g.fillStyle = big ? '#3a0a12' : '#2a0810'; g.fill();
+        const sil = img ? Minimap.silhouette(img, size * 0.84) : null;
+        if (sil) {
+            g.save();
+            g.beginPath(); g.arc(m, m, r, 0, Math.PI * 2); g.clip();
+            g.drawImage(sil, Math.round(m - sil.width / 2), Math.round(m - sil.height / 2 + size * 0.02));
+            g.restore();
+        } else {
+            g.beginPath(); g.arc(m, m, r * 0.5, 0, Math.PI * 2);
+            g.fillStyle = dotColor || '#ff6a6a'; g.fill();
+        }
+        return c;
+    }
+
+    // 絵のまわりの透明を切って、box の大きさに入るシルエット（明るい色・少し暗いふち）にする
+    static silhouette(img, box) {
         try {
             const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
             const c = document.createElement('canvas');
@@ -294,38 +315,39 @@ class Minimap {
             }
             if (x1 < 0) return null;
             const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
-            const k = size / Math.max(bw, bh);
+            const k = box / Math.max(bw, bh);
             const tw = Math.max(2, Math.round(bw * k)), th = Math.max(2, Math.round(bh * k));
-            const pad = Math.ceil(size * 0.12) + 2;
-            // 形だけ（1色）
-            const mask = document.createElement('canvas');
-            mask.width = tw; mask.height = th;
-            const mg = mask.getContext('2d');
-            mg.imageSmoothingQuality = 'high';
-            mg.drawImage(img, x0, y0, bw, bh, 0, 0, tw, th);
-            const tint = (color) => {
-                const t = document.createElement('canvas');
-                t.width = tw; t.height = th;
-                const tg = t.getContext('2d');
-                tg.drawImage(mask, 0, 0);
-                tg.globalCompositeOperation = 'source-in';
-                tg.fillStyle = color;
-                tg.fillRect(0, 0, tw, th);
-                return t;
-            };
-            const edge = tint(Minimap.ENEMY_EDGE), body = tint(Minimap.ENEMY_FILL), dark = tint('rgba(10, 4, 8, 0.95)');
             const out = document.createElement('canvas');
-            out.width = tw + pad * 2; out.height = th + pad * 2;
+            out.width = tw; out.height = th;
             const og = out.getContext('2d');
-            const o = Math.max(1.5, size * 0.07);
-            // いちばん外の黒 → 明るいふち → 中身
-            for (let a = 0; a < 16; a++) og.drawImage(dark, pad + Math.cos(a * Math.PI / 8) * o * 2, pad + Math.sin(a * Math.PI / 8) * o * 2);
-            for (let a = 0; a < 12; a++) og.drawImage(edge, pad + Math.cos(a * Math.PI / 6) * o, pad + Math.sin(a * Math.PI / 6) * o);
-            og.drawImage(body, pad, pad);
+            og.imageSmoothingQuality = 'high';
+            og.drawImage(img, x0, y0, bw, bh, 0, 0, tw, th);
+            og.globalCompositeOperation = 'source-in';
+            og.fillStyle = Minimap.ENEMY_FILL;
+            og.fillRect(0, 0, tw, th);
             return out;
         } catch (e) {
             return null;
         }
+    }
+    // その敵の絵（立っている形の決まった1枚。向きや動きで形が変わってちらつかないように）
+    static enemyArt(e) {
+        const A = window.assetManager;
+        if (!A) return null;
+        const name = e.data && e.data.name;
+        const look = Enemy.BEAST_LOOKS && Enemy.BEAST_LOOKS[name];
+        const keys = [];
+        // 獣（猪・狼・ウサギ）は横向きの方が形が分かりやすい。人の形（ゴーレム・鎧）とスライムは正面
+        const front = !!(look && (look.golem || look.armor));
+        if (look && look.key) {
+            if (!front) keys.push(`${look.key}_right_1`);
+            keys.push(`${look.key}_down_1`, `${look.key}_idle_down_1`, `${look.key}_walk_down_1`, `${look.key}_down_2`);
+        }
+        if (name === '角ウサギ') keys.push('horn_rabbit_right_1', 'horn_rabbit_down_1');
+        if (e.isSlime) keys.push('starlight_slime_down_1');
+        if (name === '草原狼') keys.push('wolf_1');
+        for (const k of keys) { const im = A.get(k); if (im) return im; }
+        try { return e.getEnemyImage ? e.getEnemyImage() : null; } catch (err) { return null; }
     }
 
     // 主人公（酒場は近くの扉も）が地図と重なっている時は、うすくする
@@ -354,8 +376,9 @@ Minimap.RES = 2;                 // 地図の canvas は CSS の大きさの 2�
 Minimap.PAD = 4;                 // 地図のまわりのすき間（CSS の px）
 Minimap.COLORS = ['#ff4d5e', '#3d9bff', '#3fd866', '#ffd23f'];   // 1P 赤・2P 青・3P 緑・4P 黄
 Minimap.OTHER = '#e8e2ff';       // 酒場の、ほかのパーティーの人
-Minimap.ICON = { normal: 16, boss: 28 };                         // 敵のシルエットの大きさ（CSS の px）
-Minimap.ENEMY_FILL = '#3a0c18';  // 敵のシルエットの中身（暗い赤）
-Minimap.ENEMY_EDGE = '#ff9a9a';  // 敵のシルエットのふち（明るい赤）
+Minimap.ICON = { normal: 20, boss: 30 };                         // 敵の丸い印の大きさ（CSS の px。中に敵のシルエット）
+Minimap.ENEMY_FILL = '#ffe8e8';  // 敵のシルエット（明るい色）
+Minimap.ENEMY_RING = '#ff4a4a';  // ふつうの敵の印の輪（赤）
+Minimap.BOSS_RING = '#ff6a3a';   // ボスのまわりに広がる輪
 
 window.Minimap = Minimap;
