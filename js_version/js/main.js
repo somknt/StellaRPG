@@ -64,7 +64,8 @@ function wait(ms) {
 
 // ページ離脱時の警告（オプション）
 window.addEventListener('beforeunload', (e) => {
-    if (game && game.running) {
+    // 新しい版に読み直す時（updater.js）は聞かない
+    if (game && game.running && !(window.Updater && Updater.reloading)) {
         e.preventDefault();
         e.returnValue = '';
     }
