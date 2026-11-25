@@ -28,6 +28,8 @@
     <div id="game-container">
         <canvas id="gameCanvas" width="1280" height="720"></canvas>
         
+        <!-- 右上の全体マップ（minimap.js。酒場・バトルモードのフィールド。一時停止ボタン・酒場を出るボタンはこの左） -->
+        <div id="minimap" aria-hidden="true"><canvas width="400" height="280"></canvas></div>
         <!-- UI Overlay -->
         <div id="ui-overlay">
             <!-- 左上のステータス（スマホでは読みやすいよう少し大きくする） -->
@@ -730,6 +732,7 @@
     <script src="js/watch.js"></script>
     <script src="js/title_atlas.js"></script>
     <script src="js/screens.js"></script>
+    <script src="js/minimap.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/game.js"></script>
     <script src="js/touch_controls.js"></script>

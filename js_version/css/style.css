@@ -64,13 +64,14 @@ body:not([data-state="playing"]) #debug-info {
 /* ---------- 左上のステータス ---------- */
 #hud-left {
     position: absolute;
-    top: 20px;
-    left: 20px;
+    top: 14px;
+    left: 16px;
     display: flex;
     flex-direction: column;
     align-items: flex-start;
     gap: 4px;
-    transform: scale(var(--hud-scale, 1)); /* スマホでは文字が小さくなりすぎないよう拡大 */
+    /* スマホでは文字が小さくなりすぎないよう拡大（--hud-scale）。上のまん中の表示と重ならないように、全体を 0.8 倍に */
+    transform: scale(calc(var(--hud-scale, 1) * 0.8));
     transform-origin: top left;
 }
 
@@ -796,9 +797,9 @@ body[data-mode="arena"][data-state="playing"] #battle-banner {
 /* 上の真ん中：Wave・残り・撃破 */
 #battle-hud {
     position: absolute;
-    top: 14px;
+    top: 10px;
     left: 50%;
-    transform: translateX(-50%) scale(var(--hud-scale, 1));
+    transform: translateX(-50%) scale(min(var(--hud-scale, 1), 1.15));
     transform-origin: top center;
     min-width: 220px;
     padding: 6px 18px 8px;
@@ -840,10 +841,10 @@ body[data-mode="arena"][data-state="playing"] #battle-banner {
 /* ボスの HP（画面上・Wave の下） */
 #boss-bar {
     position: absolute;
-    top: 92px;
+    top: 78px;
     left: 50%;
-    width: 520px;
-    transform: translateX(-50%) scale(var(--hud-scale, 1));
+    width: 360px;
+    transform: translateX(-50%) scale(min(var(--hud-scale, 1), 1.15));
     transform-origin: top center;
     text-align: center;
     text-shadow: 0 1px 2px #000;
@@ -883,11 +884,11 @@ body[data-waves="off"] #boss-bar {
     transition: width 0.25s ease;
 }
 
-/* 一時停止ボタン（右上。スマホの全画面ボタンと重ならないよう少し内側） */
+/* 一時停止ボタン（右上の全体マップの左） */
 #pause-btn {
     position: absolute;
-    top: 16px;
-    right: 76px;
+    top: 12px;
+    right: calc(12px + 212px * var(--hud-scale, 1));
     width: 46px;
     height: 46px;
     border-radius: 10px;
@@ -919,9 +920,10 @@ body[data-mode="arena"][data-state="playing"] #pause-btn {
     background: rgba(60, 36, 16, 0.9);
 }
 
-/* 闘技場ではデバッグ表示を一時停止ボタンの下へ */
+/* デバッグ表示は右上の全体マップの下へ */
 body[data-mode="arena"] #debug-info {
-    top: 76px;
+    top: 168px;
+    right: 12px;
 }
 
 /* 「WAVE 1」などの大きな文字 */
@@ -1935,28 +1937,27 @@ body.touch .title-start .touch-only { display: inline; }
 body[data-battle="boss"][data-state="playing"] #boss-hud.show { display: block; }
 body[data-battle="boss"][data-state="playing"] #battle-countdown { display: block; }
 
+/* 上のまん中（左上のステータス・右上の全体マップと重ならない幅） */
 #boss-hud {
     position: absolute;
-    top: 12px;
-    left: calc(50% + 70px);   /* 左上のステータスと重ならないよう少し右 */
-    width: 540px;
-    padding: 4px 10px 8px;
+    top: 10px;
+    left: 50%;
+    width: 380px;
+    padding: 3px 9px 6px;
     background: linear-gradient(180deg, rgba(8, 6, 18, 0.7), rgba(8, 6, 18, 0.35));
     border-radius: 6px;
-    transform: translateX(-50%) scale(var(--hud-scale, 1));
+    transform: translateX(-50%) scale(min(var(--hud-scale, 1), 1.15));
     transform-origin: top center;
     font-family: 'DotGothic16', sans-serif;
     text-shadow: 0 1px 2px #000, 0 0 4px #000;
 }
-/* スマホは左上のステータスが大きいので、もう少し右に寄せる */
-body.touch #boss-hud { left: calc(50% + 140px); width: 500px; }
 .bh2-top {
     display: flex;
     align-items: center;
     gap: 12px;
     margin-bottom: 4px;
 }
-#bh2-name { font-size: 22px; letter-spacing: 3px; color: #ffcf9a; }
+#bh2-name { font-size: 17px; letter-spacing: 2px; color: #ffcf9a; }
 #bh2-phase { display: inline-flex; gap: 5px; }
 #bh2-phase i {
     width: 11px; height: 11px;
@@ -1973,7 +1974,7 @@ body.touch #boss-hud { left: calc(50% + 140px); width: 500px; }
 
 .bh2-track {
     position: relative;
-    height: 22px;
+    height: 15px;
     background: rgba(0, 0, 0, 0.75);
     border: 2px solid #c9a24a;
     box-shadow: 0 0 0 2px #2a1a08, 0 3px 10px rgba(0, 0, 0, 0.6);
@@ -1997,7 +1998,7 @@ body[data-boss="magic_golem"] #bh2-name { color: #c8f4ff; }
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
+    font-size: 11px;
     color: #fff;
     font-variant-numeric: tabular-nums;
 }
@@ -2368,11 +2369,11 @@ body.touch[data-state="tavern"] #action-buttons { display: none; }
     white-space: nowrap;
 }
 
-/* 右上：酒場を出る（スマホの全画面ボタンと重ならないよう少し内側） */
+/* 右上：酒場を出る（右上の全体マップの左） */
 #tv-exit {
     position: absolute;
-    right: 76px;
-    top: 14px;
+    right: calc(12px + 212px * var(--hud-scale, 1));
+    top: 12px;
     transform: scale(var(--hud-scale, 1));
     transform-origin: top right;
 }
@@ -2879,13 +2880,13 @@ body[data-battle="pvp"][data-state="playing"] #battle-countdown { display: block
 /* 上のまん中（ボスの HP と同じ所）：相手の HP を大きく。その上に 点・残り時間・ラウンド */
 #pvp-hud {
     position: absolute;
-    top: 10px;
-    left: calc(50% + 70px);     /* 左上のふつうの HP の表示と重ならないように、少し右へ */
-    width: 540px;
-    padding: 4px 10px 6px;
+    top: 8px;
+    left: 50%;
+    width: 380px;
+    padding: 3px 9px 5px;
     background: linear-gradient(180deg, rgba(8, 6, 18, 0.72), rgba(8, 6, 18, 0.35));
     border-radius: 6px;
-    transform: translateX(-50%) scale(var(--hud-scale, 1));
+    transform: translateX(-50%) scale(min(var(--hud-scale, 1), 1.15));
     transform-origin: top center;
     flex-direction: column;
     gap: 3px;
@@ -2893,17 +2894,16 @@ body[data-battle="pvp"][data-state="playing"] #battle-countdown { display: block
     color: #fff3dc;
     text-shadow: 0 1px 2px #000, 0 0 4px #000;
 }
-body.touch #pvp-hud { left: calc(50% + 140px); width: 500px; }
 .pvh-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .pvh-pts { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .pvh-pts.op { justify-content: flex-end; }
-.pvh-pts i { font-style: normal; font-size: 15px; letter-spacing: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pvh-pts i { font-style: normal; font-size: 13px; letter-spacing: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pvh-pts.me i { color: #ffe9a0; }
 .pvh-pts.op i { color: #ffb3c0; }
 /* 点の印：取った点は光る（自分は金・相手は桃色） */
 .pvh-pts > span { display: inline-flex; gap: 5px; flex: none; }
 .pvh-pts > span i {
-    width: 12px; height: 12px;
+    width: 9px; height: 9px;
     transform: rotate(45deg);
     border: 2px solid #c9a24a;
     background: rgba(0, 0, 0, 0.6);
@@ -2912,7 +2912,7 @@ body.touch #pvp-hud { left: calc(50% + 140px); width: 500px; }
 .pvh-pts.op > span i.on { background: #ff7d96; border-color: #ffd0da; box-shadow: 0 0 7px rgba(255, 110, 140, 0.95); }
 .pvh-mid { display: flex; flex-direction: column; align-items: center; flex: none; }
 #pvh-timer {
-    font-size: 26px;
+    font-size: 20px;
     font-weight: normal;
     letter-spacing: 2px;
     line-height: 1.1;
@@ -2924,13 +2924,13 @@ body.touch #pvp-hud { left: calc(50% + 140px); width: 500px; }
 #pvh-timer.low { color: #ff8a8a; animation: hp-low-pulse 1s ease-in-out infinite; }
 #pvh-round { font-size: 11px; letter-spacing: 2px; color: #d8cfae; margin-top: 1px; }
 .pvh-bar { display: flex; flex-direction: column; gap: 2px; }
-.pvh-name { font-size: 20px; letter-spacing: 2px; }
-.pvh-bar.me .pvh-name { color: #ffe9a0; font-size: 16px; }
+.pvh-name { font-size: 15px; letter-spacing: 1px; }
+.pvh-bar.me .pvh-name { color: #ffe9a0; font-size: 14px; }
 .pvh-bar.op .pvh-name { color: #ffb3c0; }
 .pvh-track {
     position: relative;
     width: 100%;
-    height: 20px;
+    height: 15px;
     background: rgba(0, 0, 0, 0.75);
     border: 2px solid #c9a24a;
     box-shadow: 0 0 0 2px #2a1a08, 0 3px 10px rgba(0, 0, 0, 0.6);
@@ -2940,13 +2940,13 @@ body.touch #pvp-hud { left: calc(50% + 140px); width: 500px; }
 .pvh-trail { background: #fff0c0; }
 .pvh-fill { background: linear-gradient(180deg, #ff9fb0, #d23a58 60%, #8a1a32); transition: width 0.12s; }
 .pvh-bar.me .pvh-fill { background: linear-gradient(180deg, #ffe9a0, #d9a93e 60%, #8a5a12); }
-.pvh-hp { position: absolute; inset: 0; font-size: 13px; line-height: 16px; text-align: center; color: #fff; text-shadow: 0 1px 2px #000; }
+.pvh-hp { position: absolute; inset: 0; font-size: 11px; line-height: 11px; text-align: center; color: #fff; text-shadow: 0 1px 2px #000; }
 #pvh-field { font-size: 12px; color: #d8cfae; text-align: center; }
 /* 自分で戦う時は、自分の HP は左上のいつもの表示だけ（上のまん中は相手だけ） */
 #pvp-hud[data-mode="play"] .pvh-bar.me { display: none; }
-#pvp-hud[data-mode="watch"] .pvh-bar .pvh-name { font-size: 16px; }
-#pvp-hud[data-mode="watch"] .pvh-track { height: 16px; }
-#pvp-hud[data-mode="watch"] .pvh-hp { font-size: 12px; line-height: 12px; }
+#pvp-hud[data-mode="watch"] .pvh-bar .pvh-name { font-size: 13px; }
+#pvp-hud[data-mode="watch"] .pvh-track { height: 13px; }
+#pvp-hud[data-mode="watch"] .pvh-hp { font-size: 10px; line-height: 9px; }
 #pvr-sub { font-size: 22px; color: #fff4d0; margin-bottom: 8px; font-family: 'DotGothic16', sans-serif; }
 #pvp-result:not(.win) #pvr-title { color: #c3cbe0; text-shadow: 0 2px 0 #1a2030, 0 4px 8px #000; }
 #pvr-stats { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 10px; font-size: 16px; }
@@ -3018,3 +3018,28 @@ body.touch .wb-btn { font-size: 19px; padding: 8px 14px; }
 #pvs-hint { min-height: 22px; font-size: 16px; color: #e8e2ff; }
 #pvs-ok[hidden] { display: none; }
 body.touch .pvs-opt { min-width: 120px; padding: 12px 14px; font-size: 21px; }
+/* ==========================================================
+   右上の全体マップ（minimap.js）：酒場・バトルモードのフィールド
+   ========================================================== */
+#minimap {
+    display: none;
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 20;
+    width: 200px;
+    height: 140px;
+    border: 2px solid #c9a24a;
+    border-radius: 8px;
+    background: rgba(8, 6, 20, 0.85);
+    box-shadow: 0 0 0 2px rgba(42, 26, 8, 0.9), 0 4px 12px rgba(0, 0, 0, 0.6);
+    overflow: hidden;
+    pointer-events: none;
+    transform: scale(var(--hud-scale, 1));
+    transform-origin: top right;
+    transition: opacity 0.2s;
+}
+#minimap.show { display: block; }
+#minimap canvas { display: block; width: 200px; height: 140px; }
+/* 主人公（酒場は近くの扉も）が重なった：うすくして、後ろが見えるように */
+#minimap.thru { opacity: 0.28; }

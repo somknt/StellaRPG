@@ -428,7 +428,8 @@ class TavernScene {
     markCode() {
         const p = this.party, m = this.me;
         if (!p || !m) return 0;
-        return { p: p.id, r: m.leader ? 'L' : 'M', e: m.entered ? 1 : 0, y: m.ready ? 1 : 0, q: p.kind === 'pvp' ? 'v' : 'c',
+        // i：パーティーの中の順番（0 = 1P。右上の全体マップの星の色）
+        return { p: p.id, r: m.leader ? 'L' : 'M', e: m.entered ? 1 : 0, y: m.ready ? 1 : 0, q: p.kind === 'pvp' ? 'v' : 'c', i: Math.max(0, p.members.indexOf(m)),
             o: m.leader && p.status === 'open' && !p.closed && p.count < p.cap ? 1 : 0 };
     }
     

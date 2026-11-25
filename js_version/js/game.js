@@ -882,6 +882,8 @@ class Game {
         
         // 描画
         this.draw();
+        // 右上の全体マップ（minimap.js）
+        if (window.Minimap) (this.minimap || (this.minimap = new Minimap(this))).update(Math.min(this.deltaTime, 0.1));
         
         // 「押された瞬間」の入力をクリア（必ずフレームの最後に行う）
         this.input.endFrame();
