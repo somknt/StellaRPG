@@ -590,33 +590,36 @@ class Game {
         const coop = this.coop && battle === this.bossBattle ? this.coop : null;
         // 観戦（watch.js）：自分の主人公は動かさない・出さない（演出中と同じあつかい）
         const watching = this.watching;
-        const cine = watching || !!(arena && battle && battle.isCinematic) || !!(coop && (coop.localDead || this.player.isDead()));
+        // 協力プレイでダウン中（coop_down.js）：とてもゆっくり動けるだけ（攻撃・魔法・回避はできない。敵の攻撃には当たる）
+        const coopDown = !!(coop && coop.isDown);
+        const cine = watching || !!(arena && battle && battle.isCinematic) || !!(coop && (coop.localDead || (this.player.isDead() && !coopDown)));
+        const noAct = cine || coopDown;
         if (cine) {
             this.attackBuffer = 0;
             this.player.dodgeBuffer = 0;
         }
         
         // 近接攻撃の向き：ターゲット（PC のクリック・スマホのタップ）はいつも、それ以外は攻撃している間だけ、敵の方を向く
-        if (!cine) this.updateLockTarget(deltaTime);
+        if (!noAct) this.updateLockTarget(deltaTime);
         // 連打：攻撃の間隔より速く押した分は少しの間（Game.ATTACK_BUFFER 秒）覚えておき、間隔が空いたらすぐ斬る
         if (this.attackBuffer > 0) this.attackBuffer = Math.max(0, this.attackBuffer - deltaTime);
-        const attackPressed = !cine && this.input.isAttackPressed();
+        const attackPressed = !noAct && this.input.isAttackPressed();
         if (attackPressed) this.attackBuffer = Game.ATTACK_BUFFER;
         // 続けて攻撃に当たって近接攻撃がキャンセルされた：それより前に押していた分は捨てる
         if (this.player.attackCancelled) {
             this.player.attackCancelled = false;
             if (!attackPressed) this.attackBuffer = 0;
         }
-        const attackInput = !cine && (attackPressed || this.attackBuffer > 0 || this.input.isAttackHeld() || this.input.isAttackSliding());
+        const attackInput = !noAct && (attackPressed || this.attackBuffer > 0 || this.input.isAttackHeld() || this.input.isAttackSliding());
         const meleeMode = attackInput || this.player.attackAnimTimer > 0 || this.player.attackTimer > 0;
         this.player.faceTarget = this.getLockTarget() || (meleeMode ? this.getMeleeTarget(this.getAimDirection()) : null);
         
         // プレイヤー更新（動く前の位置を覚えておく：敵の体から押し出す向きに使う）
         const prevPlayerPos = this.player.position.clone();
-        this.player.update(deltaTime, cine ? Game.NO_INPUT : this.input);
+        this.player.update(deltaTime, cine ? Game.NO_INPUT : coopDown ? coop.downInput(this.input) : this.input);
         
         // 魔法：ボタンで詠唱開始 → 頭上のゲージが満タンになったら発動
-        if (!cine && this.input.isMagicPressed()) {
+        if (!noAct && this.input.isMagicPressed()) {
             this.player.startChant();
         }
         // ねらう向き（スマホ：ボタンを押したままスライド / PC：マウスカーソル）。なければ近くの敵を自動でねらう
@@ -639,7 +642,7 @@ class Game {
         }
         
         // 演出中に詠唱が終わった魔法は、演出が終わってから撃つ
-        const cast = cine ? null : this.player.consumeReadyCast(this.targetableEnemies(), this.castAim ? this.castAim.dir : aim, !!this.castAim);
+        const cast = noAct ? null : this.player.consumeReadyCast(this.targetableEnemies(), this.castAim ? this.castAim.dir : aim, !!this.castAim);
         if (cast && cast.magic.category === '治癒') {
             this.castHeal(cast);
             this.input.clearTouchAim('magic');
@@ -756,7 +759,7 @@ class Game {
         if (arena && battle) battle.update(deltaTime);
         
         // ゲームオーバー（闘技場は敗北の画面を出す）
-        // 協力プレイは、自分が戦闘不能になるだけ（全員が戦闘不能になったら、ホストが負けにする）
+        // 協力プレイは、自分がダウンするだけ（全員がダウンか戦闘不能になったら、ホストが負けにする。coop_down.js）
         if (this.player.isDead() && !watching) {
             if (coop) coop.onLocalDead();
             else if (arena && battle) battle.onDefeat();
@@ -825,13 +828,14 @@ class Game {
             for (const e of this.enemySpawner.enemies) {
                 items.push({ sortY: e.position.y + e.size * 0.55, draw: (ctx, c) => e.draw(ctx, c) });
             }
-            // 協力プレイ：ほかの人の主人公。自分が戦闘不能の時は、うすく出す
+            // 協力プレイ：ほかの人の主人公（ダウン・戦闘不能の人は倒れた姿）
             const coop = this.coop && this.activeBattle === this.bossBattle ? this.coop : null;
             if (coop) items.push(...coop.getDepthDrawables());
             // 観戦の時は、自分の主人公は出さない
             if (!this.watching) items.push({ sortY: this.player.position.y + this.player.drawSize * 0.4, draw: (ctx, c) => {
-                if (!(coop && this.player.isDead())) { this.player.draw(ctx, c); return; }
-                ctx.save(); ctx.globalAlpha = 0.45; this.player.draw(ctx, c); ctx.restore();
+                // 協力プレイでダウン・戦闘不能：倒れた姿（coop_down.js）
+                if (coop && coop.life !== 'alive') { coop.drawLying(ctx, c, this.player, coop.life === 'dead', coop.revive); return; }
+                this.player.draw(ctx, c);
             } });
             items.sort((a, b) => a.sortY - b.sortY);
             for (const it of items) it.draw(this.ctx, cam);

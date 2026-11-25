@@ -53,7 +53,14 @@ class CoopBattle {
         this.lastHostAt = 0;
         this.atkSeq = 0;
         this.atkAng = 0;
-        this.localDead = false;
+        // 自分の主人公：'alive'（戦っている）/ 'down'（ダウン：ゆっくり動ける・蘇生できる）/ 'dead'（戦闘不能：仲間を見る）
+        this.life = 'alive';
+        this.downHP = 0;         // ダウン中の体力（0 になると戦闘不能）
+        this.downMax = 0;
+        this.revive = 0;         // 蘇生のゲージ（0〜1）
+        this.helpT = null;       // 近くでダウンしている仲間（蘇生を手伝える人の pid）
+        this.helpers = 0;        // 自分を手伝っている仲間の数
+        this.dfx = [];           // ダウン・蘇生・手助けの演出
         this.ended = false;
         this.result = null;
         this.capturing = false;
@@ -62,6 +69,8 @@ class CoopBattle {
     }
     
     get myIndex() { return Math.max(0, this.battle.members.indexOf(this.pid)); }
+    get localDead() { return this.life === 'dead'; }
+    get isDown() { return this.life === 'down'; }
     get clock() { return performance.now() / 1000; }
     
     // ---------- 始める・やめる ----------
@@ -118,8 +127,15 @@ class CoopBattle {
     }
     
     // 観戦：見る人を変える（WatchBar の ◀ ▶・←→）
+    // 見られる人：観戦は全員 / 自分が戦闘不能の時は、戦闘不能でない仲間（いなければ全員）
+    watchList() {
+        const all = [...this.remotes.values()];
+        if (this.spectator) return all;
+        const alive = all.filter(r => !r.dead && !r.p.gone);
+        return alive.length ? alive : all;
+    }
     switchWatch(d) {
-        const list = [...this.remotes.values()];
+        const list = this.watchList();
         if (!list.length) return;
         this.watchIdx = (this.watchIdx + d + list.length) % list.length;
         this.followWatched(true);
@@ -127,17 +143,18 @@ class CoopBattle {
     }
     
     followWatched(snap = false) {
-        const list = [...this.remotes.values()];
+        const list = this.watchList();
         const r = list[this.watchIdx % Math.max(1, list.length)];
         if (!r) return;
         const cam = this.game.camera;
         if (cam.target !== r.p) { cam.follow(r.p); if (snap) cam.snapToTarget(); }
-        WatchBar.setName(`${r.name || '？'} を見ています${r.dead ? '（戦闘不能）' : ''}`);
+        WatchBar.setName(`${r.name || '？'} を見ています${r.dead ? '（戦闘不能）' : r.down ? '（ダウン）' : ''}`);
     }
     
     stop() {
         this.stopBeacon();
-        if (this.spectator && window.WatchBar) WatchBar.hide();
+        if ((this.spectator || this.life === 'dead') && window.WatchBar) WatchBar.hide();
+        this.stopDown();
         if (this.channel) this.channel.leave();
         this.channel = null;
         if (this._origSE) { window.playSE = this._origSE; this._origSE = null; }
@@ -201,6 +218,7 @@ class CoopBattle {
         });
         if (this.host) this.attachHost();
         else this.attachMirror();
+        if (!this.spectator) this.attachDown();
         // 観戦：自分の主人公は出さない・当たらない（game.js の watching）。ボスの名前の「観戦中」は update で出す
         if (this.spectator) {
             game.hidePlayerForWatch();
@@ -358,9 +376,9 @@ class CoopBattle {
     // ねらえる人（生きていて、つながっている人）
     targets() {
         const list = [];
-        if (!this.localDead && !this.game.player.isDead()) list.push(this.game.player);
+        if (this.life === 'alive' && !this.game.player.isDead()) list.push(this.game.player);
         const now = performance.now();
-        for (const r of this.remotes.values()) if (!r.dead && now - r.lastSeen < CoopBattle.GONE_MS) list.push(r.p);
+        for (const r of this.remotes.values()) if (!r.dead && !r.down && now - r.lastSeen < CoopBattle.GONE_MS) list.push(r.p);
         return list;
     }
     
@@ -425,7 +443,10 @@ class CoopBattle {
             s: this.pid, t: Math.round(performance.now()), x: Math.round(p.position.x), y: Math.round(p.position.y), d: p.direction[0],
             mv: p.isMoving ? 1 : 0, ds: p.isDashing ? 1 : 0, as: this.atkSeq, aa: Math.round(this.atkAng * 100) / 100,
             dg: p.isDodging ? 1 : 0, ch: p.isChanting && p.chantMagic ? p.chantMagic.id : '',
-            hp: Math.ceil(p.currentHP), mhp: p.maxHP, dead: this.localDead || p.isDead() ? 1 : 0
+            hp: Math.ceil(p.currentHP), mhp: p.maxHP, dead: this.life === 'dead' ? 1 : 0,
+            // ダウン（dn）・ダウン中の体力の割合（dh）・蘇生のゲージ（rv）：0〜1000 / 手伝っている仲間（hv）
+            dn: this.life === 'down' ? 1 : 0, dh: this.downMax ? Math.round(this.downHP / this.downMax * 1000) : 0,
+            rv: Math.round(this.revive * 1000), hv: this.helping ? this.helpT : ''
         };
     }
     
@@ -442,6 +463,8 @@ class CoopBattle {
     update(dt) {
         const now = performance.now();
         this.updateRemotes(dt);
+        this.updateDownFx(dt);
+        if (!this.spectator) this.updateDown(dt);
         if (this.spectator) {
             // 観戦：途中から見るので、開始の演出は飛ばす。カメラは見ている人を追う
             if (this.bb && this.bb.state === 'intro' && this.bb.t < 4.0) this.bb.t = 4.0;
@@ -532,7 +555,16 @@ class CoopBattle {
         r.buf.push(m);
         if (r.buf.length > 20) r.buf.shift();
         r.hp = m.hp; r.mhp = m.mhp;
+        // ダウン・戦闘不能・蘇生（変わった時に演出を出す）
+        const wasDown = !!r.down, wasDead = !!r.dead;
         r.dead = !!m.dead;
+        r.down = !!m.dn && !r.dead;
+        r.dh = Math.max(0, Math.min(1, (Number(m.dh) || 0) / 1000));
+        r.rv = Math.max(0, Math.min(1, (Number(m.rv) || 0) / 1000));
+        if (typeof m.hv === 'string' && m.hv) { r.hv = m.hv; r.hvAt = now; } else r.hv = null;
+        if (!wasDown && r.down) this.fxBurst(r.p, 'down');
+        if (wasDown && !r.down && !r.dead) { this.fxBurst(r.p, 'revive'); playSE('heal'); }
+        if (!wasDead && r.dead) this.fxBurst(r.p, 'dead');
     }
     
     showRemoteCasts(list) {
@@ -730,26 +762,13 @@ class CoopBattle {
     }
     
     // ---------- 戦闘不能・勝ち・負け ----------
-    // 自分の主人公の HP が 0（game.js が呼ぶ）。ほかの人が戦っている間は見守る
-    onLocalDead() {
-        if (this.localDead) return;
-        this.localDead = true;
-        if (this.bb && !this.bb.isOver) this.bb.showBanner('戦闘不能', '仲間の戦いを見守ろう', 'defeat');
-        const alive = [...this.remotes.values()].find(r => !r.dead && !r.p.gone);
-        if (alive) this.game.camera.follow(alive.p);
-    }
-    
-    // ホスト：全員が戦闘不能（つながっている人だけ数える）なら負け
+    // ホスト：全員がダウンか戦闘不能（つながっている人だけ数える）なら、クエスト失敗
     checkAllDown() {
         if (this.ended || !this.bb || this.bb.state !== 'fight') return;
-        if (!(this.localDead || this.game.player.isDead())) return;
+        if (this.life === 'alive' && !this.game.player.isDead()) return;
         const now = performance.now();
         const others = [...this.remotes.values()].filter(r => now - r.lastSeen < CoopBattle.GONE_MS);
-        if (others.some(r => !r.dead)) {
-            const alive = others.find(r => !r.dead);
-            if (alive && this.game.camera.target === this.game.player) this.game.camera.follow(alive.p);
-            return;
-        }
+        if (others.some(r => !r.dead && !r.down)) return;
         this.record({ k: 'end', win: false });
         this.sendTick();
         this.stopBeacon();
@@ -757,7 +776,6 @@ class CoopBattle {
         this.bb.onDefeat(true);
         this.finishServer(false);
     }
-    
     // 勝った（BossBattle.update がボスの HP 0 を見つけた）。表示する報酬（サーバーが確定する）を返す
     onVictory(time) {
         // 観戦：報酬・記録はない
@@ -834,8 +852,9 @@ class CoopBattle {
         for (const r of this.remotes.values()) {
             const p = r.p;
             out.push({ sortY: p.position.y + p.drawSize * 0.4, draw: (ctx, cam) => {
+                if (r.down || r.dead) { this.drawLying(ctx, cam, p, r.dead, r.rv); return; }
                 ctx.save();
-                if (r.dead || p.gone) ctx.globalAlpha = 0.45;
+                if (p.gone) ctx.globalAlpha = 0.45;
                 p.draw(ctx, cam);
                 ctx.restore();
             } });
@@ -843,11 +862,13 @@ class CoopBattle {
         return out;
     }
     
-    // ほかの人の名前と HP（頭の上）
+    // ほかの人の名前と HP（頭の上）。ダウン中の人は、名前が赤く、HP の代わりに真っ赤なダウン中の体力と、脈打つハート（蘇生のゲージ）
     drawAbove(ctx, cam) {
         for (const r of this.remotes.values()) {
             const p = r.p;
-            const x = Math.round(p.position.x - cam.x), y = Math.round(p.position.y - cam.y - p.drawSize / 2 - 6);
+            const x = Math.round(p.position.x - cam.x);
+            // 倒れているので、名前は少し下
+            const y = Math.round(p.position.y - cam.y - p.drawSize / 2 - 6 + (r.down || r.dead ? p.drawSize * 0.3 : 0));
             ctx.save();
             ctx.font = 'bold 15px "DotGothic16", sans-serif';
             ctx.textAlign = 'center';
@@ -855,15 +876,25 @@ class CoopBattle {
             ctx.strokeStyle = 'rgba(10, 6, 20, 0.9)';
             const label = r.dead ? `${r.name}（戦闘不能）` : p.gone ? `${r.name}（通信待ち）` : r.name;
             ctx.strokeText(label, x, y - 10);
-            ctx.fillStyle = r.dead ? '#ff9e8e' : '#d8f0ff';
+            ctx.fillStyle = r.dead ? '#ff9e8e' : r.down ? '#ff6a6a' : '#d8f0ff';
             ctx.fillText(label, x, y - 10);
-            const w = 54, k = p.maxHP > 0 ? Math.max(0, p.currentHP / p.maxHP) : 0;
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-            ctx.fillRect(x - w / 2 - 1, y - 6, w + 2, 7);
-            ctx.fillStyle = k > 0.3 ? '#5be37a' : '#ff6a5a';
-            ctx.fillRect(x - w / 2, y - 5, w * k, 5);
+            if (!r.dead) {
+                const w = 54, k = r.down ? (r.dh || 0) : p.maxHP > 0 ? Math.max(0, p.currentHP / p.maxHP) : 0;
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(x - w / 2 - 1, y - 6, w + 2, 7);
+                ctx.fillStyle = r.down ? (Math.sin(performance.now() / 120) > 0 ? '#ff1a2e' : '#c00018') : k > 0.3 ? '#5be37a' : '#ff6a5a';
+                ctx.fillRect(x - w / 2, y - 5, w * k, 5);
+            }
             ctx.restore();
+            if (r.down) CoopBattle.drawReviveMark(ctx, x, y - 34, r.rv || 0, r.dh || 0);
         }
+        // 自分がダウン中：自分の頭の上にも
+        const me = this.game.player;
+        if (!this.spectator && this.life === 'down' && me) {
+            const x = Math.round(me.position.x - cam.x), y = Math.round(me.position.y - cam.y - me.drawSize / 2 - 6 + me.drawSize * 0.3);
+            CoopBattle.drawReviveMark(ctx, x, y - 34, this.revive, this.downMax ? this.downHP / this.downMax : 0);
+        }
+        this.drawDownFx(ctx, cam);
     }
     
     // ---------- 小さな道具 ----------

@@ -3043,3 +3043,103 @@ body.touch .pvs-opt { min-width: 120px; padding: 12px 14px; font-size: 21px; }
 #minimap canvas { display: block; width: 200px; height: 140px; }
 /* 主人公（酒場は近くの扉も）が重なった：うすくして、後ろが見えるように */
 #minimap.thru { opacity: 0.28; }
+/* ==========================================================
+   協力プレイのダウンと蘇生（coop_down.js）
+   ========================================================== */
+/* 画面のふち：赤く脈打つ（ダウン中の体力が少ないほど濃い） */
+#coop-down-fx {
+    display: none;
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    --danger: 0;
+    background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 42%, rgba(150, 0, 18, calc(0.4 + var(--danger) * 0.4)) 100%);
+    animation: cd-beat 1.1s ease-in-out infinite;
+}
+body[data-state="playing"][data-coopdown="1"] #coop-down-fx { display: block; }
+@keyframes cd-beat { 0%, 100% { opacity: 0.55; } 14% { opacity: 1; } 28% { opacity: 0.6; } 42% { opacity: 0.95; } }
+/* 下のまん中：真っ赤なダウン中の体力 */
+#coop-down {
+    position: absolute;
+    left: 50%;
+    bottom: 18px;
+    width: 340px;
+    transform: translateX(-50%) scale(min(var(--hud-scale, 1), 1.15));
+    transform-origin: bottom center;
+    pointer-events: none;
+}
+#coop-down[hidden], #coop-revive[hidden] { display: none; }
+body:not([data-state="playing"]) #coop-down, body:not([data-state="playing"]) #coop-revive { display: none; }
+.cd-track {
+    position: relative;
+    height: 14px;
+    background: rgba(24, 0, 6, 0.9);
+    border: 2px solid #ff3a4a;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 0 0 2px rgba(40, 0, 6, 0.9), 0 0 12px rgba(255, 30, 50, 0.7);
+    animation: cd-glow 0.9s ease-in-out infinite;
+}
+#cd-fill { height: 100%; width: 100%; background: linear-gradient(180deg, #ff7a7a, #e8001c 55%, #7a0010); transition: width 0.15s; }
+#coop-down.low .cd-track { animation-duration: 0.45s; }
+#coop-down.hit .cd-track { animation: cd-shake 0.35s; border-color: #ffffff; }
+@keyframes cd-glow { 50% { box-shadow: 0 0 0 2px rgba(40, 0, 6, 0.9), 0 0 26px rgba(255, 30, 50, 1); } }
+@keyframes cd-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 50% { transform: translateX(4px); } 75% { transform: translateX(-2px); } }
+/* 蘇生のボタン（長押し）：ダウン中は赤、仲間を手伝う時は緑。まわりの金の輪が蘇生のゲージ */
+#coop-revive {
+    position: absolute;
+    left: 50%;
+    bottom: 42px;
+    width: 86px;
+    height: 86px;
+    margin-left: -43px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 40%, rgba(96, 10, 26, 0.95), rgba(26, 4, 10, 0.95));
+    box-shadow: 0 0 0 3px rgba(20, 4, 8, 0.9), 0 4px 12px rgba(0, 0, 0, 0.6);
+    pointer-events: auto;
+    cursor: pointer;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    transform: scale(min(var(--hud-scale, 1), 1.3));
+    transform-origin: bottom center;
+}
+body.touch #coop-revive { width: 104px; height: 104px; margin-left: -52px; bottom: 40px; }
+#coop-revive svg { display: block; width: 100%; height: 100%; pointer-events: none; }
+.cr-bg { fill: none; stroke: rgba(255, 255, 255, 0.14); stroke-width: 7; }
+.cr-fg {
+    fill: none;
+    stroke: #ffe08a;
+    stroke-width: 7;
+    stroke-linecap: round;
+    stroke-dasharray: 276.5;
+    stroke-dashoffset: 276.5;
+    filter: drop-shadow(0 0 4px rgba(255, 220, 120, 0.9));
+}
+.cr-heart { fill: #ff2a40; stroke: #3a0610; stroke-width: 3; transform-origin: 50px 52px; animation: cr-beat 0.9s ease-in-out infinite; }
+.cr-plus { display: none; fill: #9dffb8; stroke: #0a3a18; stroke-width: 2; }
+#coop-revive.help { background: radial-gradient(circle at 50% 40%, rgba(16, 76, 42, 0.95), rgba(4, 22, 12, 0.95)); }
+#coop-revive.help .cr-plus { display: block; }
+#coop-revive.on { box-shadow: 0 0 0 3px #ffe08a, 0 0 24px rgba(255, 220, 120, 0.95); }
+#coop-revive.on .cr-heart { animation-duration: 0.35s; }
+/* 仲間が手伝ってくれている：緑に光る */
+#coop-revive.helped { box-shadow: 0 0 0 3px #9dffb8, 0 0 24px rgba(120, 255, 170, 0.9); }
+#coop-revive small {
+    position: absolute;
+    right: -2px;
+    top: -2px;
+    padding: 0 5px;
+    font-size: 12px;
+    color: #2a1606;
+    background: rgba(255, 255, 255, 0.8);
+    border: 2px solid #5a3408;
+    border-radius: 4px;
+}
+@keyframes cr-beat { 0%, 100% { transform: scale(1); } 18% { transform: scale(1.16); } 36% { transform: scale(1); } 54% { transform: scale(1.1); } }
+/* ダウン中は、攻撃などのボタンをうすく（押しても動かない） */
+body[data-coopdown="1"] #action-buttons { opacity: 0.3; }
+/* 戦闘不能：仲間の戦いを見る（観戦の帯を使う。戦いの途中なので「観戦をやめる」は出さない） */
+body.coop-dead #wb-leave { display: none; }
