@@ -3,7 +3,7 @@
 // - マップの絵は、フィールドに入った時に1回だけ全体を描いて小さくしておく（毎フレームは、その絵の上に印を描くだけ）
 // - 主人公：丸っこい星の印。1P = 赤・2P = 青・3P = 緑・4P = 黄（ソロは 1P の赤）。自分の星は少し大きく、白い輪が光る
 //   協力プレイ・PvP はバトルの参加の順（1P がリーダー）。酒場は同じパーティーの人だけ色つき（ほかの人は白い小さな星）
-// - 敵：赤い輪の丸い印の中に、その敵の絵の形（明るいシルエット）。ボスは大きな金と赤の輪で、まわりに輪が広がる。絵がない敵は色の丸
+// - 敵：その敵の絵の形（赤いシルエット・暗いふち）だけ。地図で見た時の本当の大きさ（小さい敵は少しだけ大きく）。絵がない敵は色の丸
 // - 主人公（酒場は近くの扉も）が地図と重なると、地図をうすくして後ろが見えるようにする
 class Minimap {
     constructor(game) {
@@ -236,72 +236,38 @@ class Minimap {
     }
 
     static isBig(e) { return !!(e.isBoss || e.ai); }
-    // 敵：丸い印の中に、その敵の絵のシルエット（明るい色）。ボスは大きく、まわりに赤い輪が広がる
+    // 敵：その敵の絵の形（シルエット）だけ。大きさは、地図で見た時の本当の大きさ（小さすぎる敵は Minimap.ICON_MIN まで大きく）
     drawEnemy(g, e, x, y) {
-        const R = Minimap.RES, big = Minimap.isBig(e);
-        const size = (big ? Minimap.ICON.boss : Minimap.ICON.normal) * R;
-        const icon = this.iconFor(e, size, big);
+        const icon = this.iconFor(e);
         x = Math.round(x); y = Math.round(y);
-        if (big) {
-            const k = (this.t * 0.8) % 1;
-            g.save();
-            g.globalAlpha = 0.8 * (1 - k);
-            g.strokeStyle = Minimap.BOSS_RING;
-            g.lineWidth = 2 * R;
-            g.beginPath();
-            g.arc(x, y, size / 2 + (2 + k * 7) * R, 0, Math.PI * 2);
-            g.stroke();
-            g.restore();
-        }
-        g.drawImage(icon, x - icon.width / 2, y - icon.height / 2);
-    }
-
-    // 印の絵（敵の絵ごと・大きさごとに1回だけ作る）
-    iconFor(e, size, big = false) {
-        const img = Minimap.enemyArt(e);
-        const key = img && (img.width || img.naturalWidth) ? img : (e.getEnemyColor && e.getEnemyColor()) || '#ff6a6a';
-        let bySize = this.icons.get(key);
-        if (!bySize) { bySize = {}; this.icons.set(key, bySize); }
-        const k = `${size}|${big ? 1 : 0}`;
-        if (!bySize[k]) bySize[k] = Minimap.makeBadge(typeof key === 'string' ? null : key, size, big, typeof key === 'string' ? key : null);
-        return bySize[k];
-    }
-
-    // 丸い印：黒いふち → 赤い輪（ボスは金と赤）→ 暗い中 → 敵のシルエット（明るい色。絵がない敵は色の丸）
-    static makeBadge(img, size, big, dotColor) {
+        if (icon) { g.drawImage(icon, x - icon.width / 2, y - icon.height / 2); return; }
+        // 絵がない敵：色の丸
         const R = Minimap.RES;
-        const ring = (big ? 2.4 : 1.8) * R, edge = 1.2 * R;
-        const W = Math.ceil(size + (ring + edge) * 2 + 2);
-        const c = document.createElement('canvas');
-        c.width = c.height = W;
-        const g = c.getContext('2d');
-        const m = W / 2, r = size / 2;
-        g.beginPath(); g.arc(m, m, r + ring + edge, 0, Math.PI * 2);
-        g.fillStyle = 'rgba(8, 4, 10, 0.95)'; g.fill();
-        g.beginPath(); g.arc(m, m, r + ring, 0, Math.PI * 2);
-        if (big) {
-            const gr = g.createLinearGradient(0, m - r, 0, m + r);
-            gr.addColorStop(0, '#ffd76a'); gr.addColorStop(1, '#ff3a3a');
-            g.fillStyle = gr;
-        } else g.fillStyle = Minimap.ENEMY_RING;
-        g.fill();
-        g.beginPath(); g.arc(m, m, r, 0, Math.PI * 2);
-        g.fillStyle = big ? '#3a0a12' : '#2a0810'; g.fill();
-        const sil = img ? Minimap.silhouette(img, size * 0.84) : null;
-        if (sil) {
-            g.save();
-            g.beginPath(); g.arc(m, m, r, 0, Math.PI * 2); g.clip();
-            g.drawImage(sil, Math.round(m - sil.width / 2), Math.round(m - sil.height / 2 + size * 0.02));
-            g.restore();
-        } else {
-            g.beginPath(); g.arc(m, m, r * 0.5, 0, Math.PI * 2);
-            g.fillStyle = dotColor || '#ff6a6a'; g.fill();
-        }
-        return c;
+        g.save();
+        g.fillStyle = Minimap.ENEMY_EDGE;
+        g.beginPath(); g.arc(x, y, 3.2 * R, 0, Math.PI * 2); g.fill();
+        g.fillStyle = (e.getEnemyColor && e.getEnemyColor()) || Minimap.ENEMY_FILL;
+        g.beginPath(); g.arc(x, y, 2.2 * R, 0, Math.PI * 2); g.fill();
+        g.restore();
     }
 
-    // 絵のまわりの透明を切って、box の大きさに入るシルエット（明るい色・少し暗いふち）にする
-    static silhouette(img, box) {
+    // シルエットの絵（敵の絵ごと・大きさごとに1回だけ作る）
+    iconFor(e) {
+        const img = Minimap.enemyArt(e);
+        const iw = img && (img.naturalWidth || img.width);
+        if (!iw) return null;
+        // ゲームの画面に描く大きさ（enemy.js の draw：size × _drawMul。ボスの絵は look.sprite.draw）× 地図の縮み方
+        const drawn = (e.size || 40) * (e._drawMul || 1.5);
+        const k = Math.round(drawn * this.fit.k / iw * 1000) / 1000;
+        let byK = this.icons.get(img);
+        if (!byK) { byK = {}; this.icons.set(img, byK); }
+        if (byK[k] === undefined) byK[k] = Minimap.silhouette(img, k, Minimap.ICON_MIN * Minimap.RES, Minimap.isBig(e));
+        return byK[k];
+    }
+
+    // 絵のまわりの透明を切って、k 倍の大きさのシルエットにする（長い方が min より小さい時は min に）
+    // 明るい赤の中身に、暗いふち（どの地図の上でも見えるように）。ボスは少し濃い赤
+    static silhouette(img, k, min, big) {
         try {
             const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
             const c = document.createElement('canvas');
@@ -315,16 +281,26 @@ class Minimap {
             }
             if (x1 < 0) return null;
             const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
-            const k = box / Math.max(bw, bh);
-            const tw = Math.max(2, Math.round(bw * k)), th = Math.max(2, Math.round(bh * k));
+            const kk = Math.max(k, min / Math.max(bw, bh));
+            const tw = Math.max(2, Math.round(bw * kk)), th = Math.max(2, Math.round(bh * kk));
+            const tint = (color) => {
+                const t = document.createElement('canvas');
+                t.width = tw; t.height = th;
+                const tg = t.getContext('2d');
+                tg.imageSmoothingQuality = 'high';
+                tg.drawImage(img, x0, y0, bw, bh, 0, 0, tw, th);
+                tg.globalCompositeOperation = 'source-in';
+                tg.fillStyle = color;
+                tg.fillRect(0, 0, tw, th);
+                return t;
+            };
+            const body = tint(big ? Minimap.BOSS_FILL : Minimap.ENEMY_FILL), edge = tint(Minimap.ENEMY_EDGE);
+            const o = 1.2 * Minimap.RES, pad = Math.ceil(o) + 1;
             const out = document.createElement('canvas');
-            out.width = tw; out.height = th;
+            out.width = tw + pad * 2; out.height = th + pad * 2;
             const og = out.getContext('2d');
-            og.imageSmoothingQuality = 'high';
-            og.drawImage(img, x0, y0, bw, bh, 0, 0, tw, th);
-            og.globalCompositeOperation = 'source-in';
-            og.fillStyle = Minimap.ENEMY_FILL;
-            og.fillRect(0, 0, tw, th);
+            for (let a = 0; a < 12; a++) og.drawImage(edge, pad + Math.cos(a * Math.PI / 6) * o, pad + Math.sin(a * Math.PI / 6) * o);
+            og.drawImage(body, pad, pad);
             return out;
         } catch (e) {
             return null;
@@ -376,9 +352,9 @@ Minimap.RES = 2;                 // 地図の canvas は CSS の大きさの 2�
 Minimap.PAD = 4;                 // 地図のまわりのすき間（CSS の px）
 Minimap.COLORS = ['#ff4d5e', '#3d9bff', '#3fd866', '#ffd23f'];   // 1P 赤・2P 青・3P 緑・4P 黄
 Minimap.OTHER = '#e8e2ff';       // 酒場の、ほかのパーティーの人
-Minimap.ICON = { normal: 20, boss: 30 };                         // 敵の丸い印の大きさ（CSS の px。中に敵のシルエット）
-Minimap.ENEMY_FILL = '#ffe8e8';  // 敵のシルエット（明るい色）
-Minimap.ENEMY_RING = '#ff4a4a';  // ふつうの敵の印の輪（赤）
-Minimap.BOSS_RING = '#ff6a3a';   // ボスのまわりに広がる輪
+Minimap.ICON_MIN = 9;            // 敵のシルエットのいちばん小さい大きさ（長い方。CSS の px。本当の大きさがこれより小さい敵だけ）
+Minimap.ENEMY_FILL = '#ff8a8a';  // 敵のシルエット（明るい赤）
+Minimap.BOSS_FILL = '#ff5a4a';   // ボスのシルエット（少し濃い赤）
+Minimap.ENEMY_EDGE = '#24060c'; // シルエットのふち（暗い色）
 
 window.Minimap = Minimap;
