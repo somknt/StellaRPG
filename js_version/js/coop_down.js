@@ -4,6 +4,8 @@
 //   ダウン中の体力（最大 HP の CoopBattle.DOWN.hpRate）があり、画面の下に真っ赤なゲージで出す。画面のふちも赤く脈打つ
 //   ダウン中にやられて、この体力が 0 になると「戦闘不能」：生きている仲間の戦いを見る（◀ ▶ で見る人を変える）
 //   2回目のダウンはこの体力が半分、3回目は4分の1から始まる（失った分はゲージの右に暗く出す）。4回目は、すぐ戦闘不能
+//   この体力は、何もされなくても少しずつ減る（満タンから CoopBattle.DOWN.drainSec 秒で 0 → 戦闘不能）
+// - 蘇生のゲージがたまっている間は、足元に治癒の魔法陣とヒールの十字の粒・星。起き上がる時はヒールの光（magic.js の HealEffect）
 // - 蘇生：画面の下の蘇生ボタン（PC は R キー）を長く押し続けるとゲージがたまり、たまると HP 30% で起き上がる
 //   ダウンしている仲間の近くに行くと、同じボタンが「手助け」になる。手助けしている間は、その仲間のゲージが速くたまる
 //   （自分で押していなくても、仲間の手助けだけでもたまる）
@@ -165,11 +167,17 @@
                 n++;
             }
             this.helpers = n;
-            const rate = (hold ? D.selfRate : 0) + n * D.helpRate;
+            const rate = (hold ? D.selfRate : 0) + CoopBattle.helpRate(n);
+            this.reviveRate = rate;
             this.revive = Math.min(1, this.revive + rate * dt);
             if (rate > 0) this.reviveGlow = (this.reviveGlow || 0) + dt;
             if (this.revive >= 1) this.reviveDone();
-        }
+            else {
+                // ダウン中の体力は、いつも少しずつ減る（満タンから D.drainSec 秒で 0 → 戦闘不能）
+                this.downHP = Math.max(0, this.downHP - this.downMax / D.drainSec * dt);
+                if (this.downHP <= 0) this.goDead();
+            }
+        } else this.reviveRate = 0;
         this.updateDownUI(hold, fighting);
     };
 
@@ -206,6 +214,9 @@
         u.btn.classList.toggle('help', help);
         u.btn.classList.toggle('on', !!hold);
         u.btn.classList.toggle('helped', down && this.helpers > 0);
+        // 手伝ってくれている人数（多いほど緑の光が強い・輪が速くたまる）
+        const hn = down ? String(Math.min(3, this.helpers || 0)) : '0';
+        if (u.btn.dataset.helpers !== hn) u.btn.dataset.helpers = hn;
         const r = help ? this.remotes.get(this.helpT) : null;
         const prog = down ? this.revive : r ? r.rv || 0 : 0;
         if (u.ring) u.ring.style.strokeDashoffset = (CoopBattle.RING_LEN * (1 - prog)).toFixed(1);
@@ -217,7 +228,24 @@
         if (!who) return;
         this.dfx.push({ kind, who, t: 0, life: kind === 'revive' ? 1.3 : kind === 'down' ? 0.9 : 1.4,
             seed: Math.random() * 10, x: who.position.x, y: who.position.y });
-        if (this.dfx.length > 60) this.dfx.splice(0, this.dfx.length - 60);
+        // 起き上がった時：ヒールのエフェクトシートの光（魔法陣 → 光の柱 → 十字の光・十字の粒・星のきらめき。magic.js の HealEffect）
+        if (kind === 'revive' && this.game.magicSystem) this.game.magicSystem.addHeal(who);
+        if (this.dfx.length > 120) this.dfx.splice(0, this.dfx.length - 120);
+    };
+
+    // 蘇生のゲージがたまっている人から、ヒールの十字の粒（heal_plus）と星のきらめき（heal_star）を出す
+    // rate：1秒にたまる量（手伝う人が多いほど速い → 粒も多い）
+    P.chargeFx = function (dt, who, rate) {
+        who._charge = Math.min(1, (who._charge || 0) + dt * 4);
+        who._chargeRate = rate;
+        who._chargeT = (who._chargeT || 0) + dt;
+        const every = 1 / (3 + rate * 40);
+        while (who._chargeT >= every) {
+            who._chargeT -= every;
+            const star = Math.random() < 0.22;
+            this.dfx.push({ kind: star ? 'hstar' : 'hplus', who, t: 0, life: star ? 0.5 : 0.9,
+                ox: (Math.random() - 0.5) * 56, oy: (Math.random() - 0.5) * 14, size: 0.7 + Math.random() * 0.5, seed: Math.random() * 6.28 });
+        }
     };
 
     // 手助けの光の粒（from から to へ流れる）
@@ -230,8 +258,19 @@
     };
 
     P.updateDownFx = function (dt) {
-        // ほかの人の手助け（届いた hv）：その人 → 手伝っている人
         const now = performance.now();
+        // 蘇生のゲージがたまっている人：ヒールの粒（自分は今の速さ、ほかの人は届いたゲージの増え方から）
+        const fade = (who) => { if (who._charge) who._charge = Math.max(0, who._charge - dt * 2); who._chargeT = 0; };
+        const me = this.spectator ? null : this.game.player;
+        if (me) {
+            if (this.life === 'down' && this.reviveRate > 0) this.chargeFx(dt, me, this.reviveRate);
+            else fade(me);
+        }
+        for (const r of this.remotes.values()) {
+            if (r.down && !r.dead && now - (r.rvUpAt || 0) < 450) this.chargeFx(dt, r.p, r.rvRate || CoopBattle.DOWN.selfRate);
+            else fade(r.p);
+        }
+        // ほかの人の手助け（届いた hv）：その人 → 手伝っている人
         for (const r of this.remotes.values()) {
             if (!r.hv || now - (r.hvAt || 0) > CoopBattle.DOWN.helpFreshMs || r.down || r.dead) continue;
             const t = r.hv === this.pid && !this.spectator ? this.game.player : (this.remotes.get(r.hv) || {}).p;
@@ -261,6 +300,32 @@
                 continue;
             }
             const x = (f.who ? f.who.position.x : f.x) - cam.x, y = (f.who ? f.who.position.y : f.y) - cam.y;
+            if (f.kind === 'hplus') {
+                // ヒールの十字の粒：倒れた体のまわりから、ゆれながら立ちのぼって消える
+                ctx.globalCompositeOperation = 'source-over';
+                const a = Math.min(1, f.t / 0.12) * Math.min(1, (f.life - f.t) / 0.35);
+                const px = x + f.ox + Math.sin(f.t * 7 + f.seed) * 3, py = y + 16 + f.oy - f.t * 62;
+                ctx.globalAlpha = 1;
+                if (hasMagicFx('heal_plus')) drawMagicFx(ctx, 'heal_plus', 0, px, py, magicFxScale('heal_plus', 15 * f.size, 'w'), 0, a);
+                else {
+                    ctx.globalAlpha = a;
+                    ctx.fillStyle = '#9dffbe';
+                    const s = Math.round(3 * f.size);
+                    ctx.fillRect(Math.round(px - s * 1.5), Math.round(py - s / 2), s * 3, s);
+                    ctx.fillRect(Math.round(px - s / 2), Math.round(py - s * 1.5), s, s * 3);
+                }
+                continue;
+            }
+            if (f.kind === 'hstar') {
+                // ヒールの星のきらめき（2コマを一度だけ）
+                if (!hasMagicFx('heal_star')) continue;
+                const st = magicFxOnce('heal_star', f.t, 0.08, 0.25);
+                if (!st) continue;
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.globalAlpha = 1;
+                drawMagicFx(ctx, 'heal_star', st.frame, x + f.ox, y - 6 + f.oy - f.t * 20, magicFxScale('heal_star', 26 * f.size, 'w'), 0, st.alpha);
+                continue;
+            }
             ctx.globalCompositeOperation = 'lighter';
             if (f.kind === 'down') {
                 // 赤い輪が広がって、赤いかけらが飛び散る
@@ -274,16 +339,7 @@
                     ctx.fillRect(x + Math.cos(ang) * d - 2, y + Math.sin(ang) * d * 0.6 - 10 - k * 20, 4, 4);
                 }
             } else if (f.kind === 'revive') {
-                // 金の光の柱と、広がる輪・上る光の粒
-                const a = k < 0.2 ? k / 0.2 : 1 - (k - 0.2) / 0.8;
-                const g = ctx.createLinearGradient(0, y - 150, 0, y + 30);
-                g.addColorStop(0, 'rgba(255, 240, 170, 0)');
-                g.addColorStop(0.6, 'rgba(255, 230, 140, 0.55)');
-                g.addColorStop(1, 'rgba(255, 250, 220, 0.85)');
-                ctx.globalAlpha = a;
-                ctx.fillStyle = g;
-                const w = 46 * (1 - k * 0.4);
-                ctx.fillRect(x - w / 2, y - 150, w, 180);
+                // 光の柱は、ヒールのエフェクトシートの光（fxBurst の addHeal）。ここでは足元に広がる輪と、上る光の粒だけ
                 ctx.globalAlpha = 1 - k;
                 ctx.strokeStyle = '#ffe08a';
                 ctx.lineWidth = 4;
@@ -336,6 +392,19 @@
             ctx.strokeStyle = `rgba(255, 60, 70, ${0.55 + 0.4 * beat})`;
             ctx.lineWidth = 2;
             ctx.beginPath(); ctx.ellipse(x, gy, 36 + beat * 4, 14 + beat * 2, 0, 0, Math.PI * 2); ctx.stroke();
+            // 蘇生のゲージがたまっている間：足元に治癒の魔法陣（ヒールと同じ）。速くたまるほど速く回り、たまるほど濃い
+            const ch = p._charge || 0;
+            if (ch > 0 && typeof drawMagicCircle === 'function') {
+                const spin = (p._spin = (p._spin || 0) + 0.016 * (1.2 + (p._chargeRate || 0) * 14));
+                const glow = ctx.createRadialGradient(x, gy, 0, x, gy, 60);
+                glow.addColorStop(0, `rgba(120, 255, 170, ${0.32 * ch})`);
+                glow.addColorStop(1, 'rgba(70, 217, 126, 0)');
+                ctx.fillStyle = glow;
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.beginPath(); ctx.ellipse(x, gy, 60, 26, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.globalCompositeOperation = 'source-over';
+                drawMagicCircle(ctx, x, gy, 40 + revive * 10, '癒', spin, ch * (0.45 + 0.45 * revive), 0.45);
+            }
             // 蘇生のゲージ：足元の金の輪が、たまった分だけつながる
             if (revive > 0) {
                 ctx.strokeStyle = '#ffe08a';
@@ -502,6 +571,12 @@
         window.addEventListener('blur', () => off());
     };
 
+    // 手伝ってくれる仲間が n 人の時に、1秒にたまる量（仲間だけで：1人 10秒・2人 4秒・3人 約2.2秒）
+    CoopBattle.helpRate = function (n) {
+        const D = CoopBattle.DOWN;
+        return n > 0 ? n * D.helpRate * (1 + D.helpBonus * (n - 1)) : 0;
+    };
+
     CoopBattle.btnHeld = false;
     CoopBattle.RING_LEN = 276.5;   // 蘇生のボタンの輪の長さ（2π × 44）
     CoopBattle.DOWN = {
@@ -511,7 +586,9 @@
         moveMul: 0.16,       // ダウン中の動く速さ（ふつうのこの割合）
         startRates: [1, 0.5, 0.25], // ダウンした回数ごとの、ダウン中の体力の始め（downMax に対する割合）。これより多いと戦闘不能
         selfRate: 1 / 18,    // 自分で押している時、1秒にたまる量（ひとりだと 18秒）
-        helpRate: 1 / 10,    // 手伝ってくれる仲間 1人で、1秒にたまる量（足し算。自分＋1人で 約 6.4秒・仲間だけだと 10秒）
+        helpRate: 1 / 10,    // 手伝ってくれる仲間 1人で、1秒にたまる量（仲間だけだと 10秒。自分＋1人で 約 6.4秒）
+        helpBonus: 0.25,     // 手伝う人が多いほど、1人あたりも速くなる（2人：1人あたり 1.25倍・3人：1.5倍）
+        drainSec: 50,        // ダウン中の体力は、何もされなくても満タンからこの秒数で 0 になる（いつも少しずつ減る）
         helpR: 95,           // この距離までの、ダウンしている仲間を手伝える（px）
         helpSlack: 40,       // 届くのが遅れる分、ダウンした人の端末では少し遠くまで数える
         helpFreshMs: 600     // 「手伝っている」が届いてから、この時間までは手伝っていることにする

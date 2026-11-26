@@ -562,7 +562,15 @@ class CoopBattle {
         r.dead = !!m.dead;
         r.down = !!m.dn && !r.dead;
         r.dh = Math.max(0, Math.min(1, (Number(m.dh) || 0) / 1000));
+        const prevRv = r.rv || 0;
         r.rv = Math.max(0, Math.min(1, (Number(m.rv) || 0) / 1000));
+        // 蘇生のゲージがたまっている速さ（ヒールの光の粒の多さに使う。coop_down.js の updateDownFx）
+        if (r.down && r.rv > prevRv + 1e-4) {
+            const dt = (now - (r.rvT || 0)) / 1000;
+            if (dt > 0.02 && dt < 2) r.rvRate = (r.rv - prevRv) / dt;
+            r.rvUpAt = now;
+        }
+        r.rvT = now;
         if (typeof m.hv === 'string' && m.hv) { r.hv = m.hv; r.hvAt = now; } else r.hv = null;
         if (!wasDown && r.down) this.fxBurst(r.p, 'down');
         if (wasDown && !r.down && !r.dead) { this.fxBurst(r.p, 'revive'); playSE('heal'); }
