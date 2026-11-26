@@ -57,6 +57,8 @@ class CoopBattle {
         this.life = 'alive';
         this.downHP = 0;         // ダウン中の体力（0 になると戦闘不能）
         this.downMax = 0;
+        this.downCount = 0;      // この戦いでダウンした回数（2回目・3回目はダウン中の体力が減った所から。4回目は戦闘不能）
+        this.downStart = 1;      // 今のダウンの始めの体力（downMax に対する割合）
         this.revive = 0;         // 蘇生のゲージ（0〜1）
         this.helpT = null;       // 近くでダウンしている仲間（蘇生を手伝える人の pid）
         this.helpers = 0;        // 自分を手伝っている仲間の数

@@ -3,6 +3,7 @@
 // - HP が 0 になると「ダウン」：その場に倒れる。とてもゆっくりなら動ける（攻撃・魔法・回避はできない）
 //   ダウン中の体力（最大 HP の CoopBattle.DOWN.hpRate）があり、画面の下に真っ赤なゲージで出す。画面のふちも赤く脈打つ
 //   ダウン中にやられて、この体力が 0 になると「戦闘不能」：生きている仲間の戦いを見る（◀ ▶ で見る人を変える）
+//   2回目のダウンはこの体力が半分、3回目は4分の1から始まる（失った分はゲージの右に暗く出す）。4回目は、すぐ戦闘不能
 // - 蘇生：画面の下の蘇生ボタン（PC は R キー）を長く押し続けるとゲージがたまり、たまると HP 30% で起き上がる
 //   ダウンしている仲間の近くに行くと、同じボタンが「手助け」になる。手助けしている間は、その仲間のゲージが速くたまる
 //   （自分で押していなくても、仲間の手助けだけでもたまる）
@@ -49,18 +50,23 @@
         this.goDown();
     };
 
+    // ダウンするたびに、ダウン中の体力の始めが減る（1回目 全部・2回目 半分・3回目 4分の1）。4回目はそのまま戦闘不能
     P.goDown = function () {
         const p = this.game.player, D = CoopBattle.DOWN;
-        this.life = 'down';
-        this.downMax = Math.max(1, Math.round(p.maxHP * D.hpRate));
-        this.downHP = this.downMax;
-        this.revive = 0;
         if (p.isChanting) p.cancelChant();
         p.cancelAttack();
         p.attackCancelled = false;
         p.isDodging = false;
         p.readyCast = null;
         p.currentHP = 0;
+        this.downCount = (this.downCount || 0) + 1;
+        this.downMax = Math.max(1, Math.round(p.maxHP * D.hpRate));
+        const start = D.startRates[this.downCount - 1];
+        if (start === undefined) { this.downStart = 0; this.goDead(); return; }
+        this.life = 'down';
+        this.downStart = start;
+        this.downHP = Math.max(1, Math.round(this.downMax * start));
+        this.revive = 0;
         this.fxBurst(p, 'down');
         playSE('damage');
         this.sendTick();
@@ -178,6 +184,12 @@
             if (down) {
                 const k = this.downMax ? this.downHP / this.downMax : 0;
                 u.fill.style.width = (k * 100).toFixed(1) + '%';
+                // 2回目・3回目のダウン：始めから失っている分（右側）は、暗いしま模様でふさぐ
+                if (u.lock) {
+                    const lost = 1 - (this.downStart ?? 1);
+                    u.lock.hidden = lost <= 0;
+                    u.lock.style.width = (lost * 100).toFixed(1) + '%';
+                }
                 u.gauge.classList.toggle('hit', this.downHit > 0);
                 u.gauge.classList.toggle('low', k <= 0.35);
                 if (u.fx) u.fx.style.setProperty('--danger', (1 - k).toFixed(2));
@@ -188,6 +200,9 @@
         const show = down || help;
         if (u.btn.hidden === show) u.btn.hidden = !show;
         if (!show) return;
+        // スマホ：回避ボタンのすぐ左に置く（出た時と、0.5秒ごと：画面の向き・大きさが変わった時のため）
+        const now = performance.now();
+        if (!(now - (CoopBattle._placedAt || 0) < 500)) { CoopBattle._placedAt = now; CoopBattle.placeReviveButton(u.btn); }
         u.btn.classList.toggle('help', help);
         u.btn.classList.toggle('on', !!hold);
         u.btn.classList.toggle('helped', down && this.helpers > 0);
@@ -342,54 +357,133 @@
         ctx.restore();
     };
 
-    // 頭の上の印：赤いハートが脈打つ（ダウン中の体力が少ないほど速く）。まわりの金の輪が蘇生のゲージ
+    // ---------- ドットのハート（頭の上の印・蘇生のボタンで同じ形を使う） ----------
+    // '#'：ハート。まわりの1マスに黒っぽいふちを付け、左上を明るく・右下を暗くする
+    CoopBattle.HEART = [
+        '.##...##.',
+        '####.####',
+        '#########',
+        '#########',
+        '.#######.',
+        '..#####..',
+        '...###...',
+        '....#....'
+    ];
+    // c：'o' ふち / 'f' 赤 / 's' 影 / 'h' 光
+    CoopBattle.HEART_COLORS = { o: '#3a0610', f: '#ff2a40', s: '#b0101f', h: '#ffd0d6' };
+    CoopBattle.heartPixels = function () {
+        if (CoopBattle._heart) return CoopBattle._heart;
+        const H = CoopBattle.HEART, h = H.length, w = H[0].length;
+        const on = (x, y) => y >= 0 && y < h && x >= 0 && x < w && H[y][x] === '#';
+        const px = [];
+        for (let y = -1; y <= h; y++) for (let x = -1; x <= w; x++) {
+            if (on(x, y)) {
+                let c = 'f';
+                if ((y === 1 && (x === 1 || x === 2)) || (y === 2 && x === 1)) c = 'h';
+                else if (!on(x + 1, y) || !on(x, y + 1)) c = 's';
+                px.push({ x: x + 1, y: y + 1, c });
+            } else if (on(x - 1, y) || on(x + 1, y) || on(x, y - 1) || on(x, y + 1)) px.push({ x: x + 1, y: y + 1, c: 'o' });
+        }
+        CoopBattle._heart = { w: w + 2, h: h + 2, px };
+        return CoopBattle._heart;
+    };
+    // (cx, cy) をまん中に、1マス s ピクセルで描く。bright：脈打った瞬間（赤を明るく）
+    CoopBattle.drawPixelHeart = function (ctx, cx, cy, s, bright = 0) {
+        const H = CoopBattle.heartPixels(), C = CoopBattle.HEART_COLORS;
+        const x0 = Math.round(cx - H.w * s / 2), y0 = Math.round(cy - H.h * s / 2);
+        const f = bright > 0.5 ? '#ff6a78' : C.f, sh = bright > 0.5 ? '#e0283a' : C.s;
+        for (const p of H.px) {
+            ctx.fillStyle = p.c === 'f' ? f : p.c === 's' ? sh : C[p.c];
+            ctx.fillRect(x0 + p.x * s, y0 + p.y * s, s, s);
+        }
+    };
+
+    // 頭の上の印：ドットの赤いハートが脈打つ（ダウン中の体力が少ないほど速く）。まわりの金の輪が蘇生のゲージ
     CoopBattle.drawReviveMark = function (ctx, x, y, revive, hpk) {
         const t = performance.now() / 1000;
         const speed = 5 + (1 - Math.max(0, Math.min(1, hpk))) * 7;
         const beat = Math.pow(Math.max(0, Math.sin(t * speed)), 4);
-        const s = 9 * (1 + beat * 0.25);
+        const R = 18;
         ctx.save();
         ctx.translate(x, y);
         // 輪（たまっていない所はうすく）
         ctx.lineWidth = 3;
         ctx.strokeStyle = 'rgba(10, 6, 20, 0.75)';
-        ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.stroke();
         if (revive > 0) {
             ctx.strokeStyle = '#ffe08a';
             ctx.shadowColor = 'rgba(255, 220, 120, 0.9)';
             ctx.shadowBlur = 6;
-            ctx.beginPath(); ctx.arc(0, 0, 15, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * revive); ctx.stroke();
+            ctx.beginPath(); ctx.arc(0, 0, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * revive); ctx.stroke();
             ctx.shadowBlur = 0;
         }
-        // ハート
+        // 赤い光（脈打つ）
         ctx.globalCompositeOperation = 'lighter';
-        const gl = ctx.createRadialGradient(0, 0, 0, 0, 0, 16);
-        gl.addColorStop(0, `rgba(255, 40, 60, ${0.35 + 0.4 * beat})`);
+        const gl = ctx.createRadialGradient(0, 0, 0, 0, 0, R + 2);
+        gl.addColorStop(0, `rgba(255, 40, 60, ${0.3 + 0.45 * beat})`);
         gl.addColorStop(1, 'rgba(255, 0, 30, 0)');
         ctx.fillStyle = gl;
-        ctx.beginPath(); ctx.arc(0, 0, 16, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(0, 0, R + 2, 0, Math.PI * 2); ctx.fill();
         ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = '#ff2a40';
-        ctx.strokeStyle = '#3a0610';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(0, s * 0.85);
-        ctx.bezierCurveTo(-s * 1.4, -s * 0.1, -s * 0.75, -s * 1.05, 0, -s * 0.4);
-        ctx.bezierCurveTo(s * 0.75, -s * 1.05, s * 1.4, -s * 0.1, 0, s * 0.85);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-        ctx.fillRect(-s * 0.55, -s * 0.45, s * 0.3, s * 0.25);
+        // ドットのハート（脈打つ時は明るく。大きさは変えない：ドットがにじまないように）
+        CoopBattle.drawPixelHeart(ctx, 0, 0, 2, beat);
         ctx.restore();
+    };
+
+    // 蘇生のボタンのハートを、ドットで作る（index.html の <g class="cr-heart">）
+    CoopBattle.buildButtonHeart = function (g) {
+        if (!g || g._built) return;
+        g._built = true;
+        const H = CoopBattle.heartPixels(), C = CoopBattle.HEART_COLORS, s = 4;
+        const x0 = 50 - H.w * s / 2, y0 = 52 - H.h * s / 2;
+        const ns = 'http://www.w3.org/2000/svg';
+        for (const p of H.px) {
+            const r = document.createElementNS(ns, 'rect');
+            r.setAttribute('x', x0 + p.x * s);
+            r.setAttribute('y', y0 + p.y * s);
+            // となりのマスとのすき間が見えないよう、少しだけ大きく
+            r.setAttribute('width', s + 0.3);
+            r.setAttribute('height', s + 0.3);
+            r.setAttribute('class', 'ch-' + p.c);
+            r.setAttribute('fill', C[p.c]);
+            g.appendChild(r);
+        }
     };
 
     // ---------- 画面の部品（index.html） ----------
     CoopBattle.downUI = function () {
         if (CoopBattle._ui) return CoopBattle._ui;
         const $ = (id) => document.getElementById(id);
-        CoopBattle._ui = { gauge: $('coop-down'), fill: $('cd-fill'), fx: $('coop-down-fx'), btn: $('coop-revive'), ring: $('cr-ring') };
+        CoopBattle._ui = { gauge: $('coop-down'), fill: $('cd-fill'), lock: $('cd-lock'), fx: $('coop-down-fx'), btn: $('coop-revive'), ring: $('cr-ring') };
         return CoopBattle._ui;
+    };
+
+    // スマホ：蘇生のボタンを、右手の親指で届く所（回避ボタンのすぐ左・同じ高さ）に置く
+    // ボタンは #game-container（1280×720 を画面に合わせて縮めたもの）の中、回避ボタンは画面そのものの中にあるので、
+    // 画面の位置からゲーム画面の中の位置に直す。PC は CSS の位置のまま（ダウン中の体力のゲージの右）
+    CoopBattle.placeReviveButton = function (btn) {
+        if (!btn) return;
+        const st = btn.style;
+        if (!document.body.classList.contains('touch')) {
+            if (btn._placed) { st.left = st.bottom = st.width = st.height = ''; btn._placed = false; }
+            return;
+        }
+        const cont = document.getElementById('game-container'), dodge = document.getElementById('btn-dodge');
+        if (!cont || !dodge) return;
+        const cr = cont.getBoundingClientRect(), dr = dodge.getBoundingClientRect();
+        if (!cr.width || !dr.width) return;
+        const k = cr.width / 1280;              // ゲーム画面の 1px が、画面の何 px か
+        const size = dr.width * 1.15;           // 回避ボタンより少し大きく
+        const gap = dr.width * 0.22;
+        const right = dr.left - gap, bottom = dr.bottom;
+        let L = (right - size - cr.left) / k, B = (cr.bottom - bottom) / k;
+        const S = size / k;
+        L = Math.max(0, Math.min(1280 - S, L));
+        B = Math.max(0, Math.min(720 - S, B));
+        st.left = L.toFixed(1) + 'px';
+        st.bottom = B.toFixed(1) + 'px';
+        st.width = st.height = S.toFixed(1) + 'px';
+        btn._placed = true;
     };
 
     // 蘇生のボタン：押している間だけ（指・マウスを離す・外へずらすと止まる）
@@ -397,6 +491,7 @@
         const b = CoopBattle.downUI().btn;
         if (!b || b._bound) return;
         b._bound = true;
+        CoopBattle.buildButtonHeart(b.querySelector('.cr-heart'));
         const on = (e) => { e.preventDefault(); e.stopPropagation(); CoopBattle.btnHeld = true; try { b.setPointerCapture(e.pointerId); } catch (err) { /* できない時 */ } };
         const off = (e) => { if (e) e.stopPropagation(); CoopBattle.btnHeld = false; };
         b.addEventListener('pointerdown', on);
@@ -414,8 +509,9 @@
         reviveHP: 0.3,       // 起き上がった時の HP：最大 HP のこの割合
         invincible: 2.0,     // 起き上がった後の無敵（秒）
         moveMul: 0.16,       // ダウン中の動く速さ（ふつうのこの割合）
-        selfRate: 1 / 9,     // 自分で押している時、1秒にたまる量（ひとりだと 9秒）
-        helpRate: 1 / 5,     // 手伝ってくれる仲間 1人で、1秒にたまる量（足し算。自分＋1人で 約 3.2秒）
+        startRates: [1, 0.5, 0.25], // ダウンした回数ごとの、ダウン中の体力の始め（downMax に対する割合）。これより多いと戦闘不能
+        selfRate: 1 / 18,    // 自分で押している時、1秒にたまる量（ひとりだと 18秒）
+        helpRate: 1 / 10,    // 手伝ってくれる仲間 1人で、1秒にたまる量（足し算。自分＋1人で 約 6.4秒・仲間だけだと 10秒）
         helpR: 95,           // この距離までの、ダウンしている仲間を手伝える（px）
         helpSlack: 40,       // 届くのが遅れる分、ダウンした人の端末では少し遠くまで数える
         helpFreshMs: 600     // 「手伝っている」が届いてから、この時間までは手伝っていることにする

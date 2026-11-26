@@ -3081,6 +3081,17 @@ body:not([data-state="playing"]) #coop-down, body:not([data-state="playing"]) #c
     animation: cd-glow 0.9s ease-in-out infinite;
 }
 #cd-fill { height: 100%; width: 100%; background: linear-gradient(180deg, #ff7a7a, #e8001c 55%, #7a0010); transition: width 0.15s; }
+/* 2回目・3回目のダウンで、始めから失っている分（右側）：暗いしま模様 */
+#cd-lock {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 0;
+    background: repeating-linear-gradient(135deg, rgba(60, 0, 10, 0.95) 0 5px, rgba(20, 0, 4, 0.95) 5px 10px);
+    border-left: 2px solid rgba(255, 60, 70, 0.55);
+}
+#cd-lock[hidden] { display: none; }
 #coop-down.low .cd-track { animation-duration: 0.45s; }
 #coop-down.hit .cd-track { animation: cd-shake 0.35s; border-color: #ffffff; }
 @keyframes cd-glow { 50% { box-shadow: 0 0 0 2px rgba(40, 0, 6, 0.9), 0 0 26px rgba(255, 30, 50, 1); } }
@@ -3088,11 +3099,11 @@ body:not([data-state="playing"]) #coop-down, body:not([data-state="playing"]) #c
 /* 蘇生のボタン（長押し）：ダウン中は赤、仲間を手伝う時は緑。まわりの金の輪が蘇生のゲージ */
 #coop-revive {
     position: absolute;
-    left: 50%;
-    bottom: 42px;
+    /* PC：ダウン中の体力のゲージの右。スマホ：回避ボタンのすぐ左（coop_down.js の placeReviveButton が置く） */
+    left: calc(50% + 188px);
+    bottom: 6px;
     width: 86px;
     height: 86px;
-    margin-left: -43px;
     padding: 0;
     border: none;
     border-radius: 50%;
@@ -3105,9 +3116,9 @@ body:not([data-state="playing"]) #coop-down, body:not([data-state="playing"]) #c
     user-select: none;
     -webkit-touch-callout: none;
     transform: scale(min(var(--hud-scale, 1), 1.3));
-    transform-origin: bottom center;
+    transform-origin: bottom left;
 }
-body.touch #coop-revive { width: 104px; height: 104px; margin-left: -52px; bottom: 40px; }
+body.touch #coop-revive { transform: none; }
 #coop-revive svg { display: block; width: 100%; height: 100%; pointer-events: none; }
 .cr-bg { fill: none; stroke: rgba(255, 255, 255, 0.14); stroke-width: 7; }
 .cr-fg {
@@ -3119,8 +3130,8 @@ body.touch #coop-revive { width: 104px; height: 104px; margin-left: -52px; botto
     stroke-dashoffset: 276.5;
     filter: drop-shadow(0 0 4px rgba(255, 220, 120, 0.9));
 }
-.cr-heart { fill: #ff2a40; stroke: #3a0610; stroke-width: 3; transform-origin: 50px 52px; animation: cr-beat 0.9s ease-in-out infinite; }
-.cr-plus { display: none; fill: #9dffb8; stroke: #0a3a18; stroke-width: 2; }
+.cr-heart { transform-origin: 50px 52px; animation: cr-beat 0.9s ease-in-out infinite; }
+.cr-plus { display: none; fill: #9dffb8; stroke: #0a3a18; stroke-width: 2; shape-rendering: crispEdges; }
 #coop-revive.help { background: radial-gradient(circle at 50% 40%, rgba(16, 76, 42, 0.95), rgba(4, 22, 12, 0.95)); }
 #coop-revive.help .cr-plus { display: block; }
 #coop-revive.on { box-shadow: 0 0 0 3px #ffe08a, 0 0 24px rgba(255, 220, 120, 0.95); }
