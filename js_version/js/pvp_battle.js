@@ -336,6 +336,18 @@ class PvpBattle {
         Net.rpc('hk_mp_finish', { p_battle: this.battle.id, p_win: win }).catch((e) => console.warn('PvP の結果をサーバーに送れませんでした:', e.code || e));
     }
     
+    // 戦いの途中で離脱する（メニューの「離脱して酒場に戻る」。game.js の leaveOnline）：自分の負け
+    // 相手には「離脱した」（e.k = 'q'）を送って、すぐ勝ちにする（送らないと、8秒たつまで待たせてしまう）
+    forfeit() {
+        if (this.isOver || !this.channel) return;
+        this.endMsg = { r: this.other.pid, k: 'q', w: '' };
+        this.state = 'defeat';
+        this.stopBeacon();
+        this.sendTick();
+        setTimeout(() => this.sendTick(), 150);
+        Net.rpc('hk_mp_finish', { p_battle: this.battle.id, p_win: false }).catch((e) => console.warn('PvP の結果をサーバーに送れませんでした:', e.code || e));
+    }
+    
     sendTick() {
         if (!this.channel) return;
         const game = this.game, p = game.player;
@@ -393,7 +405,7 @@ class PvpBattle {
             const r = m.e.r === 'd' ? 'draw' : m.e.r === this.pid ? 'victory' : 'defeat';
             // 点の文字（「相手の点 - 自分の点」で届く）は、自分から見た順に直す
             const w = String(m.e.w || '').split(' - ');
-            this.finish(r, m.e.k === 't' ? '時間切れ' : w.length === 2 ? `${w[1]} - ${w[0]}` : '');
+            this.finish(r, m.e.k === 't' ? '時間切れ' : m.e.k === 'q' ? '相手が離脱しました' : w.length === 2 ? `${w[1]} - ${w[0]}` : '');
             return;
         }
         // 相手が倒れた（このラウンドで）

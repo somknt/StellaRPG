@@ -230,7 +230,7 @@ class PvpWatch {
     // ---------- 毎フレーム ----------
     update(dt) {
         const now = performance.now();
-        WatchBar.handleKeys(this, this.game.input);
+        if (!this.game.inputBlocked) WatchBar.handleKeys(this, this.game.input);
         this.followWatched();
         if (this.state === 'intro') {
             const left = (this.goAt - now) / 1000;

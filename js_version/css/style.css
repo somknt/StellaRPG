@@ -2278,7 +2278,7 @@ body[data-boss="grudge_armor"] #boss-hud[data-phase="3"] #bh2-fill { background:
 body[data-boss="grudge_armor"] #bh2-name { color: #e2ccff; }
 
 /* 協力プレイ：オンラインなので一時停止できない（ボタンも出さない） */
-body[data-coop="1"] #pause-btn { display: none !important; }
+/* 協力プレイ・PvP も一時停止ボタンを出す（押すと、一時停止の代わりにマルチプレイのメニュー。game.js の toggleOnlineMenu） */
 #boss-result .ui-btn[hidden] { display: none; }
 
 /* ==========================================================
@@ -2372,7 +2372,8 @@ body.touch[data-state="tavern"] #action-buttons { display: none; }
 /* 右上：酒場を出る（右上の全体マップの左） */
 #tv-exit {
     position: absolute;
-    right: calc(12px + 212px * var(--hud-scale, 1));
+    /* 全体マップの左に設定のボタン（歯車）、そのさらに左 */
+    right: calc(12px + 264px * var(--hud-scale, 1));
     top: 12px;
     transform: scale(var(--hud-scale, 1));
     transform-origin: top right;
@@ -3158,3 +3159,51 @@ body.touch #coop-revive { transform: none; }
 body[data-coopdown="1"] #action-buttons { opacity: 0.3; }
 /* 戦闘不能：仲間の戦いを見る（観戦の帯を使う。戦いの途中なので「観戦をやめる」は出さない） */
 body.coop-dead #wb-leave { display: none; }
+
+/* ==========================================================
+   設定のボタン（歯車）と、重ねて出す設定の画面（screens.js の openSettingsOverlay）
+   バトル：一時停止ボタンの左 / 酒場：全体マップの左（「酒場を出る」はさらに左）
+   ========================================================== */
+#settings-btn {
+    display: none;
+    position: absolute;
+    top: 12px;
+    right: calc(12px + 264px * var(--hud-scale, 1));
+    z-index: 27;
+    width: 46px;
+    height: 46px;
+    padding: 0;
+    border-radius: 10px;
+    border: 2px solid #c9a24a;
+    background: rgba(20, 12, 6, 0.75);
+    align-items: center;
+    justify-content: center;
+    pointer-events: auto;
+    cursor: pointer;
+    transform: scale(var(--hud-scale, 1));
+    transform-origin: top right;
+}
+#settings-btn:hover { background: rgba(60, 36, 16, 0.9); }
+#settings-btn svg { width: 28px; height: 28px; display: block; }
+#settings-btn .gear-teeth, #settings-btn .gear-body { fill: #ffd76a; }
+#settings-btn .gear-hole { fill: #2a180a; }
+#settings-btn:hover svg { transform: rotate(30deg); transition: transform 0.2s; }
+body[data-mode="arena"][data-state="playing"] #settings-btn { display: flex; }
+/* 観戦の時は一時停止ボタンがないので、その場所へ */
+body[data-watch="1"] #settings-btn { right: calc(12px + 212px * var(--hud-scale, 1)); }
+body[data-state="tavern"][data-mode="tavern"] #settings-btn { display: flex; right: calc(12px + 212px * var(--hud-scale, 1)); }
+/* 設定の画面を出している間は、ボタンをかくす（画面の後ろになるけれど、念のため） */
+body.settings-open #settings-btn { display: none !important; }
+/* 重ねて出す設定の画面：後ろの戦い・酒場を暗くして見せる */
+#screens.overlay { background: rgba(4, 3, 12, 0.62); }
+/* 設定の画面・マルチプレイのメニューの間は、スマホのスティックとボタンを出さない */
+body.settings-open #touch-controls, body.online-menu #touch-controls { display: none !important; }
+
+/* マルチプレイのメニュー（一時停止はできない） */
+#online-pause .op-group { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+#online-pause .op-group[hidden] { display: none; }
+#online-pause .op-note { margin: 0 0 4px; font-size: 15px; line-height: 1.5; color: #e8d8b0; }
+#online-pause .ui-btn.danger { color: #fff0ec; background: linear-gradient(180deg, rgba(170, 50, 36, 0.95), rgba(96, 22, 14, 0.95)); border-color: #ff9a7a; }
+#online-pause .ui-btn.danger.focused, #online-pause .ui-btn.danger:hover { background: linear-gradient(180deg, #d4553c, #8a2414); }
+/* 設定の画面：タイトルと「戻る・閉じる」のボタンが画面（720px）からはみ出さないように、少しだけ縮める */
+#scr-settings { gap: 6px; transform: scale(0.94); }

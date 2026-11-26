@@ -141,7 +141,7 @@
         const hold = fighting && this.reviveHeld();
         if (this.downHit > 0) this.downHit = Math.max(0, this.downHit - dt);
         // 戦闘不能：生きている仲間を見る（◀ ▶・←→）
-        if (this.life === 'dead' && window.WatchBar) { WatchBar.handleKeys(this, this.game.input); this.followWatched(); }
+        if (this.life === 'dead' && window.WatchBar) { if (!this.game.inputBlocked) WatchBar.handleKeys(this, this.game.input); this.followWatched(); }
         // 手伝える仲間：自分が戦っていて、近くでダウンしている人（いちばん近い人）
         this.helpT = null;
         if (fighting && this.life === 'alive' && !p.isDead()) {

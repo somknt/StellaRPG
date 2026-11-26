@@ -601,6 +601,7 @@ class ScreenManager {
     }
     
     setScreen(name) {
+        if (this.overlay) this.closeSettingsOverlay(true);
         const def = ScreenManager.SCREENS[name];
         for (const el of this.root.querySelectorAll('.screen')) el.classList.toggle('active', el.id === def.id);
         if (this.toastEl) this.toastEl.classList.remove('show');
@@ -638,8 +639,52 @@ class ScreenManager {
         return this.current === 'mp_prep' || this.current === 'pvp_rule' || (this.current === 'monster_select' && !!this.mp) || (this.current === 'equip' && !!this.equipReturn);
     }
     
+    // ---------- 戦い・酒場の上に重ねて出す設定の画面（歯車のボタン。index.html の #settings-btn） ----------
+    // 画面（gameState）は変えない：戦い・酒場はそのまま後ろで続き（ソロのバトルだけは止める。game.js の update）、BGM も変えない
+    // 変えた設定は、すぐに反映される（SettingsManager.set → apply）
+    openSettingsOverlay() {
+        if (this.overlay || this.busy || this.current) return false;
+        const el = this.$('scr-settings');
+        if (!el) return false;
+        this.overlay = 'settings';
+        for (const s of this.root.querySelectorAll('.screen')) s.classList.toggle('active', s === el);
+        if (this.toastEl) this.toastEl.classList.remove('show');
+        this.root.classList.add('open', 'overlay');
+        document.body.classList.add('settings-open');
+        const back = this.$('settings-back');
+        if (back) { if (back._label === undefined) back._label = back.textContent; back.textContent = '閉じる'; }
+        this.refreshSettings();
+        UINav.quietUntil = performance.now() + 300;
+        this.overlayNav = new UINav(el, 'vertical');
+        this.game.input.resetAll();
+        return true;
+    }
+    
+    closeSettingsOverlay(quiet = false) {
+        if (!this.overlay) return;
+        this.overlay = null;
+        this.overlayNav = null;
+        this.root.classList.remove('open', 'overlay');
+        const el = this.$('scr-settings');
+        if (el) el.classList.remove('active');
+        document.body.classList.remove('settings-open');
+        const back = this.$('settings-back');
+        if (back && back._label !== undefined) back.textContent = back._label;
+        if (this.toastEl) this.toastEl.classList.remove('show');
+        this.game.input.resetAll();
+        if (!quiet) playSE('ui_cancel');
+    }
+    
+    // game.js の update が毎フレーム呼ぶ（重ねて出している間）：Esc で閉じる・上下左右で選ぶ
+    updateOverlay(dt, input) {
+        if (!this.overlay) return;
+        if (input.isKeyPressed('Escape') || input.isKeyPressed('Backspace')) { this.closeSettingsOverlay(); return; }
+        if (this.overlayNav) this.overlayNav.handle(input);
+    }
+    
     // バトルが始まったら画面を閉じる
     hideAll() {
+        if (this.overlay) this.closeSettingsOverlay(true);
         this.root.classList.remove('open');
         for (const el of this.root.querySelectorAll('.screen')) el.classList.remove('active');
         this.current = null;
@@ -786,7 +831,7 @@ class ScreenManager {
         on('pvs-back', () => this.game.tavern && this.game.tavern.backFromPrep());
         on('monster-ranking', () => this.go('ranking'));
         on('ranking-back', () => this.go('monster_select'));
-        on('settings-back', () => this.go('main_menu'));
+        on('settings-back', () => (this.overlay ? this.closeSettingsOverlay(true) : this.go('main_menu')));
         // アカウント
         on('acc-tab-create', () => this.setAccountTab('create', true));
         on('acc-tab-login', () => this.setAccountTab('login', true));

@@ -103,6 +103,81 @@ class Game {
         on('pause-menu', () => this.leaveBattle('main_menu'));
         // PvP の結果：酒場に戻る（同じパーティーのまま）
         on('pvr-back', () => { if (this.pvp && !this.screens.busy) this.leaveBattle('tavern'); });
+        // マルチプレイのメニュー（一時停止はできない）：戦いにもどる・離脱して酒場に戻る（もう一度確かめる）
+        on('op-resume', () => this.toggleOnlineMenu(false));
+        on('op-leave', () => this.setOnlineConfirm(true));
+        on('op-no', () => this.setOnlineConfirm(false));
+        on('op-yes', () => this.leaveOnline());
+        // 設定（歯車）：戦い・酒場の上に設定の画面を重ねて出す
+        on('settings-btn', () => this.openSettings());
+    }
+    
+    // 歯車のボタン：設定の画面を重ねて出す（バトル・酒場の時だけ。ソロのバトルは閉じるまで止まる）
+    openSettings() {
+        const inBattle = this.gameState === 'playing' && this.isArena();
+        const inTavern = this.gameState === 'tavern' && this.tavern && this.tavern.inScene;
+        if (!inBattle && !inTavern) return;
+        if (this.tavern && this.tavern.chatOpen) this.tavern.openChat(false);
+        this.screens.openSettingsOverlay();
+    }
+    
+    // マルチプレイのメニューを開く・閉じる（force：true=開く / false=閉じる / 省略=切り替え）。戦いは止めない
+    toggleOnlineMenu(force) {
+        const b = this.activeBattle;
+        const open = force === undefined ? !this.onlineMenu : !!force;
+        if (open && (!b || b.isOver || this.watching || !(this.coop || this.pvp))) return;
+        if (open === !!this.onlineMenu) return;
+        this.onlineMenu = open;
+        document.body.classList.toggle('online-menu', open);
+        const el = document.getElementById('online-pause');
+        if (el) el.classList.toggle('show', open);
+        playSE('ui_pause');
+        this.setOnlineConfirm(false);
+        this.input.resetAll();
+    }
+    
+    // 「離脱して酒場に戻る」をもう一度確かめる画面にする（v：true）/ もどす（false）
+    setOnlineConfirm(v) {
+        const main = document.getElementById('op-main'), conf = document.getElementById('op-confirm');
+        if (main) main.hidden = !!v;
+        if (conf) conf.hidden = !v;
+        const t = document.getElementById('op-confirm-text');
+        if (t) t.textContent = this.pvp ? '離脱すると、この対戦は負けになります。' : '離脱すると、この戦いにはもどれません。';
+        this.pauseNav = this.onlineMenu ? new UINav(v ? conf : main, 'vertical') : null;
+    }
+    
+    // 戦いから離脱して、星の酒場へ（パーティーはそのまま）。ほかの人には「離脱した」と知らせる
+    leaveOnline() {
+        if (this.screens.busy || !(this.coop || this.pvp)) return;
+        if (this.coop && this.coop.leave) this.coop.leave();
+        if (this.pvp && this.pvp.forfeit) this.pvp.forfeit();
+        this.leaveBattle('tavern');
+    }
+    
+    closeOnlineMenu() {
+        this.onlineMenu = false;
+        document.body.classList.remove('online-menu');
+        const el = document.getElementById('online-pause');
+        if (el) el.classList.remove('show');
+        if (this.pauseNav && !this.paused) this.pauseNav = null;
+    }
+    
+    // 入力を止めたい時（設定の画面を重ねている間・酒場）に使う、何も押していない入力（InputManager と同じ関数を持つ）
+    blockedInput() {
+        if (!this._blockedIn) {
+            const zero = () => new Vector2(0, 0);
+            this._blockedIn = new Proxy(this.input, {
+                get: (t, k) => {
+                    const v = t[k];
+                    if (typeof v !== 'function') return v;
+                    if (k === 'getMovementVector') return zero;
+                    if (typeof k === 'string' && /^consume/.test(k)) return () => null;
+                    if (typeof k === 'string' && /^(is|was|has)/.test(k)) return () => false;
+                    return v.bind(t);
+                }
+            });
+        }
+        return this._blockedIn;
     }
     
     // 画面を揺らす（設定で OFF にできる）
@@ -254,6 +329,7 @@ class Game {
         if (this.pvp) { this.pvp.stop(); this.pvp = null; }
         this.activeBattle = null;
         this.paused = false;
+        this.closeOnlineMenu();
         if (window.soundManager) soundManager.setDuck(false);
         document.body.classList.remove('paused');
         this.shakeTime = 0;
@@ -355,7 +431,8 @@ class Game {
     
     // 一時停止（force：true=止める / false=再開 / 省略=切り替え）
     togglePause(force) {
-        if (this.coop || this.pvp) return; // 協力プレイ・PvP：オンラインなので止められない
+        // 協力プレイ・PvP：オンラインなので止められない。代わりにメニュー（戦いにもどる・離脱して酒場に戻る）を出す
+        if (this.coop || this.pvp) { this.toggleOnlineMenu(force); return; }
         const b = this.activeBattle;
         if (!this.isArena() || !b || b.isOver || b.isFrozen) return;
         const was = this.paused;
@@ -509,10 +586,16 @@ class Game {
             document.body.dataset.state = this.gameState;
         }
         
+        // 設定の画面を重ねて出している（歯車のボタン）：その画面の操作だけ。後ろの戦い・酒場には入力を渡さない
+        const overlay = !!this.screens.overlay;
+        if (overlay) this.screens.updateOverlay(deltaTime, this.input);
+        // マルチプレイのメニューを開いている間も、主人公は操作しない（戦いは続く）
+        this.inputBlocked = overlay || !!this.onlineMenu;
+        
         // 星の酒場：パーティーの様子を読み直す・自分の様子を送る（クエスト選択・準備画面・協力プレイの間も）
         if (this.tavern) this.tavern.backgroundUpdate(deltaTime);
         if (this.gameState === 'tavern' && this.tavern) {
-            this.tavern.update(deltaTime, this.input);
+            this.tavern.update(deltaTime, overlay ? this.blockedInput() : this.input);
             return;
         }
         
@@ -527,13 +610,17 @@ class Game {
         
         // 闘技場：Esc / P で一時停止。勝敗が出たら結果画面の操作
         const battle = this.activeBattle;
-        if (this.isArena() && battle && !this.screens.busy) {
+        // ソロのバトル：設定の画面を出している間は止める（マルチプレイは止めない。主人公の操作だけ止める）
+        if (overlay && !(this.coop || this.pvp)) return;
+        // マルチプレイのメニュー：勝敗が出たら閉じる（結果の画面を出す）
+        if (this.onlineMenu && (!battle || battle.isOver)) this.closeOnlineMenu();
+        if (this.isArena() && battle && !this.screens.busy && !overlay) {
             const justClosedPalette = performance.now() - (this.input.paletteClosedAt || 0) < 200;
             // 観戦：Esc で観戦をやめて酒場へ
             if (this.watching && this.input.isKeyPressed('Escape') && !battle.isOver) { this.leaveBattle('tavern'); return; }
             if ((this.input.isKeyPressed('Escape') && !justClosedPalette) || this.input.isKeyPressed('KeyP')) {
                 if (!this.input.paletteOpen) this.togglePause();
-            } else if (this.paused && this.pauseNav) {
+            } else if ((this.paused || this.onlineMenu) && this.pauseNav) {
                 this.pauseNav.handle(this.input);
             }
             if (battle.isOver && document.body.classList.contains('battle-result-open')) {
@@ -592,7 +679,8 @@ class Game {
         const watching = this.watching;
         // 協力プレイでダウン中（coop_down.js）：とてもゆっくり動けるだけ（攻撃・魔法・回避はできない。敵の攻撃には当たる）
         const coopDown = !!(coop && coop.isDown);
-        const cine = watching || !!(arena && battle && battle.isCinematic) || !!(coop && (coop.localDead || (this.player.isDead() && !coopDown)));
+        // マルチプレイのメニュー・設定の画面を出している間（this.inputBlocked）も、操作できない（何も押していない）
+        const cine = watching || this.inputBlocked || !!(arena && battle && battle.isCinematic) || !!(coop && (coop.localDead || (this.player.isDead() && !coopDown)));
         const noAct = cine || coopDown;
         if (cine) {
             this.attackBuffer = 0;

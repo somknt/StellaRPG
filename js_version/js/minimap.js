@@ -163,7 +163,7 @@ class Minimap {
             coop.battle.members.forEach((id, i) => {
                 if (id === coop.pid && !coop.spectator) { add(g.player, i, true, g.player.isDead()); return; }
                 const r = coop.remotes.get(id);
-                if (r) add(r.p, i, false, !!(r.dead || r.p.gone));
+                if (r && !r.left) add(r.p, i, false, !!(r.dead || r.p.gone));   // 離脱した人は出さない
             });
             return out;
         }

@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#1a1a2e">
     <!-- 版の番号（tools/bump_version.ps1 が書く。css・js の ?v= も同じ番号。js/updater.js が version.json と比べて、新しい版なら読み直す） -->
-    <meta name="app-version" content="202611261508">
+    <meta name="app-version" content="202611261557">
     <!-- ホーム画面に追加したとき、ブラウザのバーなしの全画面で起動する -->
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -23,7 +23,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap">
-    <link rel="stylesheet" href="css/style.css?v=202611261508">
+    <link rel="stylesheet" href="css/style.css?v=202611261557">
 </head>
 <body data-state="loading">
     <!-- ゲーム画面（1280x720 で作り、端末の画面サイズに合わせて JS で拡大縮小する） -->
@@ -32,6 +32,23 @@
         
         <!-- 右上の全体マップ（minimap.js。酒場・バトルモードのフィールド。一時停止ボタン・酒場を出るボタンはこの左） -->
         <div id="minimap" aria-hidden="true"><canvas width="400" height="280"></canvas></div>
+        <!-- 設定のボタン（歯車）：バトルは一時停止ボタンの左、酒場は全体マップの左。押すと設定の画面（戦い・酒場の上に重ねて出す。screens.js の openSettingsOverlay） -->
+        <button id="settings-btn" class="ui-btn" type="button" aria-label="設定">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+                <g class="gear-teeth">
+                    <rect x="10" y="1.6" width="4" height="5" rx="0.6"></rect>
+                    <rect x="10" y="1.6" width="4" height="5" rx="0.6" transform="rotate(45 12 12)"></rect>
+                    <rect x="10" y="1.6" width="4" height="5" rx="0.6" transform="rotate(90 12 12)"></rect>
+                    <rect x="10" y="1.6" width="4" height="5" rx="0.6" transform="rotate(135 12 12)"></rect>
+                    <rect x="10" y="1.6" width="4" height="5" rx="0.6" transform="rotate(180 12 12)"></rect>
+                    <rect x="10" y="1.6" width="4" height="5" rx="0.6" transform="rotate(225 12 12)"></rect>
+                    <rect x="10" y="1.6" width="4" height="5" rx="0.6" transform="rotate(270 12 12)"></rect>
+                    <rect x="10" y="1.6" width="4" height="5" rx="0.6" transform="rotate(315 12 12)"></rect>
+                </g>
+                <circle class="gear-body" cx="12" cy="12" r="6.8"></circle>
+                <circle class="gear-hole" cx="12" cy="12" r="2.7"></circle>
+            </svg>
+        </button>
         <!-- UI Overlay -->
         <div id="ui-overlay">
             <!-- 協力プレイでダウン中（coop_down.js）：画面のふちが赤く脈打つ -->
@@ -176,6 +193,24 @@
                     <button class="ui-btn" id="pause-select" type="button" data-nav>モンスター選択へ</button>
                     <button class="ui-btn" id="pause-menu" type="button" data-nav>メインメニューへ</button>
                     <p class="battle-hint">Esc / P でも再開できます</p>
+                </div>
+            </div>
+            
+            <!-- マルチプレイ（協力プレイ・PvP）のメニュー：一時停止はできない（戦いは続いている）。離脱して酒場に戻れる -->
+            <div id="online-pause" class="battle-screen">
+                <div class="battle-panel">
+                    <h2>メニュー</h2>
+                    <div class="op-group" id="op-main">
+                        <p class="op-note">マルチプレイ中は一時停止できません<br>（戦いは続いています）</p>
+                        <button class="ui-btn primary" id="op-resume" type="button" data-nav>戦いにもどる</button>
+                        <button class="ui-btn" id="op-leave" type="button" data-nav>離脱して酒場に戻る</button>
+                        <p class="battle-hint pc-only">Esc / P でも戦いにもどれます</p>
+                    </div>
+                    <div class="op-group" id="op-confirm" hidden>
+                        <p class="op-note" id="op-confirm-text">離脱すると、この戦いにはもどれません。</p>
+                        <button class="ui-btn danger" id="op-yes" type="button" data-nav>離脱する</button>
+                        <button class="ui-btn" id="op-no" type="button" data-nav>やめる</button>
+                    </div>
                 </div>
             </div>
             
@@ -715,46 +750,46 @@
     
     <!-- Scripts -->
     <!-- 新しい版が出たら読み直す（スマホで古いまま遊ばないように） -->
-    <script src="js/updater.js?v=202611261508"></script>
-    <script src="js/utils.js?v=202611261508"></script>
-    <script src="js/input.js?v=202611261508"></script>
-    <script src="js/sound.js?v=202611261508"></script>
-    <script src="js/assets.js?v=202611261508"></script>
-    <script src="js/character_select.js?v=202611261508"></script>
-    <script src="js/map_tileset.js?v=202611261508"></script>
-    <script src="js/player.js?v=202611261508"></script>
-    <script src="js/enemy.js?v=202611261508"></script>
-    <script src="js/magic.js?v=202611261508"></script>
-    <script src="js/damage_numbers.js?v=202611261508"></script>
-    <script src="js/map.js?v=202611261508"></script>
-    <script src="js/arena_map.js?v=202611261508"></script>
-    <script src="js/ruins_map.js?v=202611261508"></script>
-    <script src="js/battlefield_map.js?v=202611261508"></script>
-    <script src="js/tavern_map.js?v=202611261508"></script>
-    <script src="js/battle_mode.js?v=202611261508"></script>
-    <script src="js/online_config.js?v=202611261508"></script>
-    <script src="js/account.js?v=202611261508"></script>
+    <script src="js/updater.js?v=202611261557"></script>
+    <script src="js/utils.js?v=202611261557"></script>
+    <script src="js/input.js?v=202611261557"></script>
+    <script src="js/sound.js?v=202611261557"></script>
+    <script src="js/assets.js?v=202611261557"></script>
+    <script src="js/character_select.js?v=202611261557"></script>
+    <script src="js/map_tileset.js?v=202611261557"></script>
+    <script src="js/player.js?v=202611261557"></script>
+    <script src="js/enemy.js?v=202611261557"></script>
+    <script src="js/magic.js?v=202611261557"></script>
+    <script src="js/damage_numbers.js?v=202611261557"></script>
+    <script src="js/map.js?v=202611261557"></script>
+    <script src="js/arena_map.js?v=202611261557"></script>
+    <script src="js/ruins_map.js?v=202611261557"></script>
+    <script src="js/battlefield_map.js?v=202611261557"></script>
+    <script src="js/tavern_map.js?v=202611261557"></script>
+    <script src="js/battle_mode.js?v=202611261557"></script>
+    <script src="js/online_config.js?v=202611261557"></script>
+    <script src="js/account.js?v=202611261557"></script>
     <!-- マルチプレイの通信（supabase-js 2.118.0 を同じサーバーから読む・Realtime の WebSocket） -->
-    <script src="js/vendor/supabase.js?v=202611261508"></script>
-    <script src="js/net.js?v=202611261508"></script>
-    <script src="js/settings.js?v=202611261508"></script>
-    <script src="js/boss_data.js?v=202611261508"></script>
-    <script src="js/boss_ai.js?v=202611261508"></script>
-    <script src="js/golem_ai.js?v=202611261508"></script>
-    <script src="js/armor_ai.js?v=202611261508"></script>
-    <script src="js/battle_records.js?v=202611261508"></script>
-    <script src="js/boss_battle.js?v=202611261508"></script>
-    <script src="js/tavern.js?v=202611261508"></script>
-    <script src="js/mp_battle.js?v=202611261508"></script>
-    <script src="js/coop_down.js?v=202611261508"></script>
-    <script src="js/pvp_battle.js?v=202611261508"></script>
-    <script src="js/watch.js?v=202611261508"></script>
-    <script src="js/title_atlas.js?v=202611261508"></script>
-    <script src="js/screens.js?v=202611261508"></script>
-    <script src="js/minimap.js?v=202611261508"></script>
-    <script src="js/ui.js?v=202611261508"></script>
-    <script src="js/game.js?v=202611261508"></script>
-    <script src="js/touch_controls.js?v=202611261508"></script>
-    <script src="js/main.js?v=202611261508"></script>
+    <script src="js/vendor/supabase.js?v=202611261557"></script>
+    <script src="js/net.js?v=202611261557"></script>
+    <script src="js/settings.js?v=202611261557"></script>
+    <script src="js/boss_data.js?v=202611261557"></script>
+    <script src="js/boss_ai.js?v=202611261557"></script>
+    <script src="js/golem_ai.js?v=202611261557"></script>
+    <script src="js/armor_ai.js?v=202611261557"></script>
+    <script src="js/battle_records.js?v=202611261557"></script>
+    <script src="js/boss_battle.js?v=202611261557"></script>
+    <script src="js/tavern.js?v=202611261557"></script>
+    <script src="js/mp_battle.js?v=202611261557"></script>
+    <script src="js/coop_down.js?v=202611261557"></script>
+    <script src="js/pvp_battle.js?v=202611261557"></script>
+    <script src="js/watch.js?v=202611261557"></script>
+    <script src="js/title_atlas.js?v=202611261557"></script>
+    <script src="js/screens.js?v=202611261557"></script>
+    <script src="js/minimap.js?v=202611261557"></script>
+    <script src="js/ui.js?v=202611261557"></script>
+    <script src="js/game.js?v=202611261557"></script>
+    <script src="js/touch_controls.js?v=202611261557"></script>
+    <script src="js/main.js?v=202611261557"></script>
 </body>
 </html>

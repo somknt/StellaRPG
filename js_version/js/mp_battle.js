@@ -84,12 +84,14 @@ class CoopBattle {
             this.channel = Net.join(`hoshinoko-party-${this.party.id}`, this.watchKey, { w: 1, at: Date.now() }, {
                 c: (m) => this.onClient(m),
                 h: (m) => this.onHost(m),
+                x: (m) => this.onBye(m),
                 presence: (list) => this.checkSeat(list)
             });
         } else {
             this.channel = Net.join(`hoshinoko-party-${this.party.id}`, this.pid, { s: this.pid, n: me.name || '' }, {
                 c: (m) => this.onClient(m),
-                h: (m) => this.onHost(m)
+                h: (m) => this.onHost(m),
+                x: (m) => this.onBye(m)       // 戦いから離脱した人（leave）
             });
         }
         this.lastHostAt = performance.now();
@@ -472,7 +474,7 @@ class CoopBattle {
             if (this.bb && this.bb.state === 'intro' && this.bb.t < 4.0) this.bb.t = 4.0;
             const nm = this.bb && this.bb.ui && this.bb.ui.name, label = `${this.bb ? this.bb.def.name : ''}（協力 ${this.n}人・観戦中）`;
             if (nm && nm.textContent !== label) nm.textContent = label;
-            WatchBar.handleKeys(this, this.game.input);
+            if (!this.game.inputBlocked) WatchBar.handleKeys(this, this.game.input);
             this.followWatched();
             if (!this.ended && this.bb && !this.bb.isOver && now - this.lastHostAt > CoopBattle.HOST_LOST_MS) this.abort();
             return;
@@ -550,7 +552,7 @@ class CoopBattle {
     
     applyPlayerState(m) {
         const r = this.remotes.get(m.s);
-        if (!r) return;
+        if (!r || r.left) return;   // 離脱した人の、遅れて届いた様子は使わない
         const now = performance.now();
         r.lastSeen = now;
         r.off = Math.min(r.off, now - m.t);
@@ -814,15 +816,41 @@ class CoopBattle {
         if (this.bb && !this.bb.isOver) this.bb.onDefeat(true);
     }
     
-    // ホストがいなくなった（8秒なにも届かない）：戦いをやめる
-    abort() {
+    // ホストがいなくなった（8秒なにも届かない・ホストが離脱した）：戦いをやめる
+    abort(title = '通信が切れました', sub = 'ホストとつながらなくなりました') {
         this.ended = true;
         const bb = this.bb;
         if (!bb) return;
         bb.coopLost = true;
         bb.onDefeat(true);
-        bb.showBanner('通信が切れました', 'ホストとつながらなくなりました', 'defeat');
+        bb.showBanner(title, sub, 'defeat');
         if (!this.spectator) this.finishServer(false);
+    }
+    
+    // 自分が戦いの途中で離脱する（メニューの「離脱して酒場に戻る」。game.js の leaveOnline）
+    // ほかの人にすぐ知らせる（知らせないと、6秒〜8秒たつまで待たせてしまう）。チャンネルを閉じるのは、画面の切り替えの後（stop）
+    leave() {
+        if (this.spectator || !this.channel) return;
+        this.leftBattle = true;
+        const send = () => { if (this.channel) this.channel.send('x', { s: this.pid }); };
+        send();
+        setTimeout(send, 150);
+    }
+    
+    // ほかの人が離脱した：その人はもういないことにする（ねらわれない・全員ダウンの数にも入れない）
+    // ホストが離脱した時は、戦いを続けられないので終わり
+    onBye(m) {
+        if (!m || typeof m.s !== 'string' || m.s === this.pid || this.ended) return;
+        if (m.s === this.battle.host && !this.host) {
+            if (this.bb && !this.bb.isOver) this.abort('戦いが終わりました', 'ホストが離脱しました');
+            return;
+        }
+        const r = this.remotes.get(m.s);
+        if (!r || r.left) return;
+        r.left = true;
+        r.lastSeen = -Infinity;
+        r.p.gone = true;
+        if (this.host && this.boss && this.boss.target === r.p) this.pickTarget();
     }
     
     async finishServer(win) {
@@ -860,6 +888,7 @@ class CoopBattle {
     getDepthDrawables() {
         const out = [];
         for (const r of this.remotes.values()) {
+            if (r.left) continue;   // 離脱した人は出さない
             const p = r.p;
             out.push({ sortY: p.position.y + p.drawSize * 0.4, draw: (ctx, cam) => {
                 if (r.down || r.dead) { this.drawLying(ctx, cam, p, r.dead, r.rv); return; }
@@ -875,6 +904,7 @@ class CoopBattle {
     // ほかの人の名前と HP（頭の上）。ダウン中の人は、名前が赤く、HP の代わりに真っ赤なダウン中の体力と、脈打つハート（蘇生のゲージ）
     drawAbove(ctx, cam) {
         for (const r of this.remotes.values()) {
+            if (r.left) continue;
             const p = r.p;
             const x = Math.round(p.position.x - cam.x);
             // 倒れているので、名前は少し下
